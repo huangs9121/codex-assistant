@@ -15,9 +15,12 @@ enum QuotaParserTests {
             ("known plan names are normalized", testKnownPlanNames),
             ("unknown and missing plan names are nil", testUnknownAndMissingPlanNames),
             ("matching active subscription expiry is returned", testMatchingSubscriptionExpiry),
+            ("fractional subscription expiry is returned", testFractionalSubscriptionExpiry),
             ("subscription expiry requires matching known plans", testSubscriptionExpiryPlanValidation),
             ("subscription expiry must be in the future", testSubscriptionExpiryDateValidation),
             ("malformed subscription JWTs are rejected", testMalformedSubscriptionJWTs),
+            ("standard Base64 JWT payload characters are rejected", testStandardBase64JWTPayloadCharacters),
+            ("JWT payload padding and invalid lengths are rejected", testJWTPayloadPaddingAndLength),
             ("missing subscription auth claims are rejected", testMissingSubscriptionAuthClaims),
             ("prolite snapshot carries Pro plan", testProliteSnapshotPlan),
             ("unknown plan keeps snapshot valid", testUnknownPlanKeepsSnapshotValid),
@@ -149,6 +152,18 @@ enum QuotaParserTests {
         )
     }
 
+    private static func testFractionalSubscriptionExpiry() -> Bool {
+        let expiry = "2026-08-01T00:00:00.123Z"
+        return expect(
+            PlanInfo.subscriptionExpiry(
+                authData: subscriptionAuthData(plan: "prolite", expiry: expiry),
+                currentPlan: "Pro",
+                now: standardDate("2026-07-15T00:00:00Z")!
+            ),
+            equals: fractionalDate(expiry)
+        )
+    }
+
     private static func testSubscriptionExpiryPlanValidation() -> Bool {
         let now = standardDate("2026-07-15T00:00:00Z")!
         return expect(
@@ -206,6 +221,60 @@ enum QuotaParserTests {
             expect(
                 PlanInfo.subscriptionExpiry(
                     authData: authData(idToken: token),
+                    currentPlan: "Pro",
+                    now: now
+                ),
+                equals: nil
+            )
+        }
+    }
+
+    private static func testStandardBase64JWTPayloadCharacters() -> Bool {
+        let now = standardDate("2026-07-15T00:00:00Z")!
+        let cases: [(nonce: String, forbiddenCharacter: Character)] = [
+            ("ƛ씻", "+"),
+            ("欿粶", "/")
+        ]
+        return cases.allSatisfy { testCase in
+            let token = standardBase64JWT(payload: subscriptionPayload(
+                plan: "prolite",
+                expiry: "2026-08-01T00:00:00Z",
+                nonce: testCase.nonce
+            ))
+            let payloadSegment = token.components(separatedBy: ".")[1]
+            guard payloadSegment.contains(testCase.forbiddenCharacter) else {
+                return diagnostic("test JWT does not contain \(testCase.forbiddenCharacter)")
+            }
+            return expect(
+                PlanInfo.subscriptionExpiry(
+                    authData: authData(idToken: token),
+                    currentPlan: "Pro",
+                    now: now
+                ),
+                equals: nil
+            )
+        }
+    }
+
+    private static func testJWTPayloadPaddingAndLength() -> Bool {
+        let now = standardDate("2026-07-15T00:00:00Z")!
+        let validToken = fakeJWT(payload: subscriptionPayload(
+            plan: "prolite",
+            expiry: "2026-08-01T00:00:00Z"
+        ))
+        let validSegment = validToken.components(separatedBy: ".")[1]
+        let invalidSegments = [
+            validSegment + "=",
+            validSegment + "=====",
+            validSegment + "AA"
+        ]
+        guard invalidSegments[2].count % 4 == 1 else {
+            return diagnostic("test JWT payload does not have invalid Base64URL length")
+        }
+        return invalidSegments.allSatisfy { segment in
+            expect(
+                PlanInfo.subscriptionExpiry(
+                    authData: authData(idToken: "header.\(segment).signature"),
                     currentPlan: "Pro",
                     now: now
                 ),
@@ -1352,12 +1421,24 @@ enum QuotaParserTests {
     }
 
     private static func subscriptionAuthData(plan: String, expiry: String) -> Data {
-        authData(idToken: fakeJWT(payload: [
+        authData(idToken: fakeJWT(payload: subscriptionPayload(plan: plan, expiry: expiry)))
+    }
+
+    private static func subscriptionPayload(
+        plan: String,
+        expiry: String,
+        nonce: String? = nil
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
             "https://api.openai.com/auth": [
                 "chatgpt_plan_type": plan,
                 "chatgpt_subscription_active_until": expiry
             ]
-        ]))
+        ]
+        if let nonce {
+            payload["nonce"] = nonce
+        }
+        return payload
     }
 
     private static func authData(idToken: Any) -> Data {
@@ -1367,6 +1448,16 @@ enum QuotaParserTests {
     private static func fakeJWT(payload: [String: Any]) -> String {
         let payloadData = jsonData(payload)
         return "header.\(base64URL(payloadData)).signature"
+    }
+
+    private static func standardBase64JWT(payload: [String: Any]) -> String {
+        let payloadData = try! JSONSerialization.data(
+            withJSONObject: payload,
+            options: .sortedKeys
+        )
+        let segment = payloadData.base64EncodedString()
+            .replacingOccurrences(of: "=", with: "")
+        return "header.\(segment).signature"
     }
 
     private static func base64URL(_ data: Data) -> String {

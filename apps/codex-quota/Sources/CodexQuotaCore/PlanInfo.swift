@@ -27,7 +27,7 @@ public enum PlanInfo {
             let namespace = claims["https://api.openai.com/auth"] as? [String: Any],
             normalizedName(namespace["chatgpt_plan_type"] as? String) == currentPlan,
             let rawDate = namespace["chatgpt_subscription_active_until"] as? String,
-            let expiry = ISO8601DateFormatter().date(from: rawDate),
+            let expiry = subscriptionExpiryDate(from: rawDate),
             expiry > now
         else {
             return nil
@@ -41,7 +41,22 @@ public enum PlanInfo {
             return nil
         }
 
-        var encodedPayload = segments[1]
+        let payloadSegment = segments[1]
+        guard
+            payloadSegment.unicodeScalars.allSatisfy({ scalar in
+                let value = scalar.value
+                return (65...90).contains(value)
+                    || (97...122).contains(value)
+                    || (48...57).contains(value)
+                    || scalar == "-"
+                    || scalar == "_"
+            }),
+            payloadSegment.count % 4 != 1
+        else {
+            return nil
+        }
+
+        var encodedPayload = payloadSegment
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
         encodedPayload += String(
@@ -55,5 +70,17 @@ public enum PlanInfo {
             return nil
         }
         return payload
+    }
+
+    private static func subscriptionExpiryDate(from value: String) -> Date? {
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractionalFormatter.date(from: value) {
+            return date
+        }
+
+        let standardFormatter = ISO8601DateFormatter()
+        standardFormatter.formatOptions = [.withInternetDateTime]
+        return standardFormatter.date(from: value)
     }
 }
