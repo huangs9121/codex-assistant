@@ -12,6 +12,10 @@ enum QuotaParserTests {
         let tests: [TestCase] = [
             ("primary used 40 leaves 60", testPrimaryUsedPercent),
             ("highest used percent wins", testHighestUsedPercent),
+            ("known plan names are normalized", testKnownPlanNames),
+            ("unknown and missing plan names are nil", testUnknownAndMissingPlanNames),
+            ("prolite snapshot carries Pro plan", testProliteSnapshotPlan),
+            ("unknown plan keeps snapshot valid", testUnknownPlanKeepsSnapshotValid),
             ("primary window carries its reset", testPrimaryWindowReset),
             ("secondary window carries its reset", testSecondaryWindowReset),
             ("missing reset keeps snapshot valid", testMissingReset),
@@ -104,6 +108,42 @@ enum QuotaParserTests {
             from: tokenCountLine(primary: 20, secondary: 75)
         )
         return expect(snapshot?.remainingPercent, equals: 25)
+    }
+
+    private static func testKnownPlanNames() -> Bool {
+        let cases: [(String, String)] = [
+            ("prolite", "Pro"),
+            ("pro", "Pro"),
+            ("plus", "Plus"),
+            ("free", "Free"),
+            ("team", "Team"),
+            ("business", "Business"),
+            ("enterprise", "Enterprise"),
+            ("  PROLITE\n", "Pro")
+        ]
+        return cases.allSatisfy { rawValue, expected in
+            expect(PlanInfo.normalizedName(rawValue), equals: expected)
+        }
+    }
+
+    private static func testUnknownAndMissingPlanNames() -> Bool {
+        expect(PlanInfo.normalizedName("unknown"), equals: nil)
+            && expect(PlanInfo.normalizedName(nil), equals: nil)
+    }
+
+    private static func testProliteSnapshotPlan() -> Bool {
+        let snapshot = QuotaParser.snapshot(
+            from: tokenCountLine(primary: 40, planType: "prolite")
+        )
+        return expect(snapshot?.planName, equals: "Pro")
+    }
+
+    private static func testUnknownPlanKeepsSnapshotValid() -> Bool {
+        let snapshot = QuotaParser.snapshot(
+            from: tokenCountLine(primary: 40, planType: "unknown")
+        )
+        return expect(snapshot?.remainingPercent, equals: 60)
+            && expect(snapshot?.planName, equals: nil)
     }
 
     private static func testPrimaryWindowReset() -> Bool {
@@ -1165,6 +1205,7 @@ enum QuotaParserTests {
         primaryReset: Any? = nil,
         secondary: Double? = nil,
         secondaryReset: Any? = nil,
+        planType: String? = nil,
         timestamp: String = "2026-07-14T08:30:00.123Z"
     ) -> String {
         var primaryWindow: [String: Any] = ["used_percent": primary]
@@ -1178,6 +1219,9 @@ enum QuotaParserTests {
                 secondaryWindow["resets_at"] = secondaryReset
             }
             rateLimits["secondary"] = secondaryWindow
+        }
+        if let planType {
+            rateLimits["plan_type"] = planType
         }
 
         let root: [String: Any] = [

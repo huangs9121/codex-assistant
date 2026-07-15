@@ -37,10 +37,12 @@ public enum QuotaParser {
 
         let roundedRemaining = (100 - selectedWindow.usedPercent).rounded()
         let remainingPercent = Int(min(max(roundedRemaining, 0), 100))
+        let planName = PlanInfo.normalizedName(rateLimits["plan_type"] as? String)
         return QuotaSnapshot(
             remainingPercent: remainingPercent,
             observedAt: observedAt,
-            resetsAt: selectedWindow.resetsAt
+            resetsAt: selectedWindow.resetsAt,
+            planName: planName
         )
     }
 
