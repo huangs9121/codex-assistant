@@ -1,4 +1,5 @@
 import AppKit
+import CodexQuotaCore
 import ServiceManagement
 
 @MainActor
@@ -10,16 +11,27 @@ final class LaunchAtLoginController {
         case unavailable(String)
     }
 
+    private let fallback: LaunchAgentFile?
+
+    init() {
+        fallback = Bundle.main.executableURL.map {
+            LaunchAgentFile(
+                homeDirectory: FileManager.default.homeDirectoryForCurrentUser,
+                executableURL: $0
+            )
+        }
+    }
+
     var state: State {
         switch SMAppService.mainApp.status {
         case .enabled:
             return .enabled
         case .notRegistered:
-            return .disabled
+            return fallback?.isInstalled == true ? .enabled : .disabled
         case .requiresApproval:
             return .requiresApproval
         case .notFound:
-            return .unavailable("系统未找到此登录项")
+            return fallback?.isInstalled == true ? .enabled : .disabled
         @unknown default:
             return .unavailable("未知的登录项状态")
         }
@@ -27,9 +39,16 @@ final class LaunchAtLoginController {
 
     func setEnabled(_ enabled: Bool) throws {
         if enabled {
-            try SMAppService.mainApp.register()
+            if SMAppService.mainApp.status == .notFound, let fallback {
+                try fallback.install()
+            } else {
+                try SMAppService.mainApp.register()
+            }
         } else {
-            try SMAppService.mainApp.unregister()
+            try fallback?.uninstall()
+            if [.enabled, .requiresApproval].contains(SMAppService.mainApp.status) {
+                try SMAppService.mainApp.unregister()
+            }
         }
     }
 

@@ -84,6 +84,8 @@ enum QuotaParserTests {
             ("identity mode persists across instances", testIdentityModePersistence),
             ("reset countdown status preference defaults to false", testDefaultResetCountdownStatusPreference),
             ("reset countdown status preference persists true", testResetCountdownStatusPreferencePersistence),
+            ("launch agent file installs a valid login item", testLaunchAgentFileInstall),
+            ("launch agent file uninstalls cleanly", testLaunchAgentFileUninstall),
             ("semantic versions accept exact numeric triples", testSemanticVersionAcceptedValues),
             ("semantic versions reject malformed values", testSemanticVersionRejectedValues),
             ("semantic versions compare components numerically", testSemanticVersionComparison),
@@ -1288,6 +1290,62 @@ enum QuotaParserTests {
                 DisplayPreferences(defaults: defaults).showsResetCountdownInStatusBar,
                 equals: true
             )
+        }
+    }
+
+    private static func testLaunchAgentFileInstall() -> Bool {
+        withTemporaryDirectory { root in
+            let home = root.appendingPathComponent("home", isDirectory: true)
+            let executable = root.appendingPathComponent("Codex Quota.app/Contents/MacOS/CodexQuotaApp")
+            let launchAgent = LaunchAgentFile(
+                homeDirectory: home,
+                executableURL: executable
+            )
+            do {
+                try launchAgent.install()
+                let data = try Data(contentsOf: launchAgent.fileURL)
+                guard
+                    let properties = try PropertyListSerialization.propertyList(
+                        from: data,
+                        format: nil
+                    ) as? [String: Any],
+                    let permissions = try FileManager.default.attributesOfItem(
+                        atPath: launchAgent.fileURL.path
+                    )[.posixPermissions] as? NSNumber
+                else {
+                    return false
+                }
+                return launchAgent.isInstalled
+                    && expect(
+                        launchAgent.fileURL.path,
+                        equals: home.appendingPathComponent(
+                            "Library/LaunchAgents/local.openclaw.codexquota.plist"
+                        ).path
+                    )
+                    && expect(properties["Label"] as? String, equals: LaunchAgentFile.defaultLabel)
+                    && expect(properties["ProgramArguments"] as? [String], equals: [executable.path])
+                    && expect(properties["RunAtLoad"] as? Bool, equals: true)
+                    && expect(permissions.intValue, equals: 0o644)
+            } catch {
+                return diagnostic("launch agent install failed: \(error)")
+            }
+        }
+    }
+
+    private static func testLaunchAgentFileUninstall() -> Bool {
+        withTemporaryDirectory { root in
+            let launchAgent = LaunchAgentFile(
+                homeDirectory: root,
+                executableURL: root.appendingPathComponent("CodexQuotaApp")
+            )
+            do {
+                try launchAgent.install()
+                try launchAgent.uninstall()
+                try launchAgent.uninstall()
+                return expect(launchAgent.isInstalled, equals: false)
+            } catch {
+                return diagnostic("launch agent uninstall failed: \(error)")
+            }
         }
     }
 
