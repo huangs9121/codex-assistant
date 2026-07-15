@@ -973,7 +973,13 @@ enum QuotaParserTests {
             return try? JSONDecoder().decode(GitHubRelease.self, from: jsonData(object))
         }
 
-        guard let valid = release() else {
+        guard
+            let valid = release(),
+            let validWithoutPrefix = release(
+                tag: "1.2.0",
+                url: "https://github.com/huangs9121/codex-assistant/releases/tag/1.2.0"
+            )
+        else {
             return false
         }
         let rejected = [
@@ -985,9 +991,18 @@ enum QuotaParserTests {
             release(url: "https://:pass@github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
             release(url: "https://example.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
             release(url: "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0#notes"),
+            release(url: "https://github.com/wrong-owner/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://github.com/huangs9121/wrong-repo/releases/tag/v1.2.0"),
+            release(url: "https://github.com/huangs9121/codex-assistant/releases/v1.2.0"),
+            release(url: "https://github.com/huangs9121/codex-assistant/releases/tag/v1.3.0"),
+            release(url: "https://github.com:443/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://github.com:8443/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0?source=app"),
+            release(url: "https://github.com/huangs9121/codex-assistant/releases/tag/%761.2.0"),
             release(tag: "not-a-version")
         ]
         return expect(valid.eligibleVersion, equals: SemanticVersion("1.2.0"))
+            && expect(validWithoutPrefix.eligibleVersion, equals: SemanticVersion("1.2.0"))
             && rejected.allSatisfy { $0?.eligibleVersion == nil }
     }
 

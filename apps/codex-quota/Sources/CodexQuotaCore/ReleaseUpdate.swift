@@ -60,18 +60,29 @@ public struct GitHubRelease: Decodable, Sendable {
     }
 
     public var eligibleVersion: SemanticVersion? {
+        guard let version = SemanticVersion(tagName) else {
+            return nil
+        }
+        let expectedPath = "/huangs9121/codex-assistant/releases/tag/\(tagName)"
         guard
             !draft,
             !prerelease,
             htmlURL.scheme?.lowercased() == "https",
             htmlURL.host?.lowercased() == "github.com",
+            htmlURL.port == nil,
             htmlURL.user == nil,
             htmlURL.password == nil,
+            htmlURL.query == nil,
+            htmlURL.path == expectedPath,
+            URLComponents(
+                url: htmlURL,
+                resolvingAgainstBaseURL: false
+            )?.percentEncodedPath == expectedPath,
             htmlURL.fragment == nil
         else {
             return nil
         }
-        return SemanticVersion(tagName)
+        return version
     }
 
     public static func latestRequest(appVersion: SemanticVersion) -> URLRequest? {
