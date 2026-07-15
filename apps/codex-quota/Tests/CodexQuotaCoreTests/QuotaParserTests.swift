@@ -84,6 +84,10 @@ enum QuotaParserTests {
             ("identity mode persists across instances", testIdentityModePersistence),
             ("reset countdown status preference defaults to false", testDefaultResetCountdownStatusPreference),
             ("reset countdown status preference persists true", testResetCountdownStatusPreferencePersistence),
+            ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
+            ("status presentation supports every style identity and reset combination", testStatusPresentationMatrix),
+            ("status identity and reset widths compose exactly", testStatusPresentationWidthRelationships),
+            ("status presentation exposes identity and reset accessibility semantics", testStatusPresentationAccessibility),
             ("battery renderer produces template glyphs for every style and value", testBatteryRendererImageMatrix),
             ("full status images compose label battery and percent in order", testFullStatusComposition),
             ("full status images keep safe margins at one and two x", testFullStatusCanvasMargins),
@@ -1007,6 +1011,149 @@ enum QuotaParserTests {
         }
     }
 
+    private static func testOpenAILogoRendering() -> Bool {
+        let image = OpenAILogoRenderer.image()
+        guard
+            image.size == NSSize(width: 17, height: 17),
+            image.isTemplate,
+            let tiff = image.tiffRepresentation,
+            !tiff.isEmpty
+        else {
+            return diagnostic("OpenAI logo does not expose the required 17pt template image")
+        }
+
+        for scale in [1, 2] {
+            guard
+                let bitmap = AlphaBitmap(image: image, scale: scale),
+                let bounds = bitmap.nonTransparentBounds(threshold: 0.03)
+            else {
+                return diagnostic("OpenAI logo @\(scale)x has no visible pixels")
+            }
+            let requiredMargin = scale
+            let centerX: Double = Double(bounds.minX + bounds.maxX) / 2.0
+            let centerY: Double = Double(bounds.minY + bounds.maxY) / 2.0
+            let canvasCenterX: Double = Double(bitmap.width - 1) / 2.0
+            let canvasCenterY: Double = Double(bitmap.height - 1) / 2.0
+            guard
+                bounds.minX >= requiredMargin,
+                bounds.minY >= requiredMargin,
+                bounds.maxX <= bitmap.width - requiredMargin - 1,
+                bounds.maxY <= bitmap.height - requiredMargin - 1,
+                centerX - canvasCenterX >= -1,
+                centerX - canvasCenterX <= 1,
+                centerY - canvasCenterY >= -1,
+                centerY - canvasCenterY <= 1
+            else {
+                return diagnostic("OpenAI logo @\(scale)x bounds \(bounds) are clipped or off-center")
+            }
+        }
+        return true
+    }
+
+    private static func testStatusPresentationMatrix() -> Bool {
+        let renderer = BatteryStatusRenderer()
+        for scale in [1, 2] {
+            for style in BatteryStyle.allCases {
+                for identityMode in StatusIdentityMode.allCases {
+                    for compactReset in [nil, "2D"] as [String?] {
+                        let presentation = renderer.presentation(
+                            style: style,
+                            remainingPercent: 60,
+                            identityMode: identityMode,
+                            compactReset: compactReset
+                        )
+                        guard
+                            presentation.image.size.height == 18,
+                            presentation.image.isTemplate,
+                            let tiff = presentation.image.tiffRepresentation,
+                            !tiff.isEmpty,
+                            let bitmap = AlphaBitmap(image: presentation.image, scale: scale),
+                            let bounds = bitmap.nonTransparentBounds(threshold: 0.03),
+                            bounds.minX > 0,
+                            bounds.minY > 0,
+                            bounds.maxX < bitmap.width - 1,
+                            bounds.maxY < bitmap.height - 1
+                        else {
+                            return diagnostic(
+                                "\(style)/\(identityMode)/\(compactReset ?? "nil") @\(scale)x is empty or clipped"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    private static func testStatusPresentationWidthRelationships() -> Bool {
+        let renderer = BatteryStatusRenderer()
+        let suffixAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.menuBarFont(ofSize: 0),
+            .foregroundColor: NSColor.black.withAlphaComponent(0.9)
+        ]
+        let suffixWidth = ceil(NSAttributedString(
+            string: "2D",
+            attributes: suffixAttributes
+        ).size().width)
+
+        for style in BatteryStyle.allCases {
+            let hidden = renderer.presentation(
+                style: style,
+                remainingPercent: 60,
+                identityMode: .hidden,
+                compactReset: nil
+            )
+            let logo = renderer.presentation(
+                style: style,
+                remainingPercent: 60,
+                identityMode: .logo,
+                compactReset: nil
+            )
+            let text = renderer.presentation(
+                style: style,
+                remainingPercent: 60,
+                identityMode: .text,
+                compactReset: nil
+            )
+            let reset = renderer.presentation(
+                style: style,
+                remainingPercent: 60,
+                identityMode: .hidden,
+                compactReset: "2D"
+            )
+            guard
+                logo.image.size.width == hidden.image.size.width + 21,
+                text.image.size.width > hidden.image.size.width,
+                reset.image.size.width == hidden.image.size.width + suffixWidth + 4
+            else {
+                return diagnostic("\(style) identity or suffix width relationship is incorrect")
+            }
+        }
+        return true
+    }
+
+    private static func testStatusPresentationAccessibility() -> Bool {
+        let renderer = BatteryStatusRenderer()
+        return expect(renderer.presentation(
+            style: .native,
+            remainingPercent: 60,
+            identityMode: .text,
+            compactReset: nil
+        ).accessibilityLabel, equals: "Codex 剩余额度 60%，显示 Codex 文字")
+            && expect(renderer.presentation(
+                style: .embedded,
+                remainingPercent: nil,
+                identityMode: .logo,
+                compactReset: "2D"
+            ).accessibilityLabel, equals: "Codex 剩余额度未知，下次重置 2D，显示 OpenAI Logo")
+            && expect(renderer.presentation(
+                style: .segmented,
+                remainingPercent: 0,
+                identityMode: .hidden,
+                compactReset: ""
+            ).accessibilityLabel, equals: "Codex 剩余额度 0%，下次重置 ，不显示标识")
+    }
+
     private static func testBatteryRendererImageMatrix() -> Bool {
         let renderer = BatteryStatusRenderer()
         let expectedSizes: [BatteryStyle: NSSize] = [
@@ -1112,17 +1259,17 @@ enum QuotaParserTests {
             style: .native,
             remainingPercent: 49,
             showsCodexLabel: true
-        ).accessibilityLabel, equals: "Codex 剩余额度 49%")
+        ).accessibilityLabel, equals: "Codex 剩余额度 49%，显示 Codex 文字")
             && expect(renderer.presentation(
                 style: .embedded,
                 remainingPercent: nil,
                 showsCodexLabel: false
-            ).accessibilityLabel, equals: "Codex 剩余额度未知")
+            ).accessibilityLabel, equals: "Codex 剩余额度未知，不显示标识")
             && expect(renderer.presentation(
                 style: .segmented,
                 remainingPercent: 0,
                 showsCodexLabel: false
-            ).accessibilityLabel, equals: "Codex 剩余额度 0%")
+            ).accessibilityLabel, equals: "Codex 剩余额度 0%，不显示标识")
     }
 
     private static func testBatteryRendererClamping() -> Bool {

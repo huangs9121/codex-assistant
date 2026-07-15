@@ -24,6 +24,20 @@ public struct BatteryStatusRenderer {
         remainingPercent: Int?,
         showsCodexLabel: Bool
     ) -> StatusPresentation {
+        presentation(
+            style: style,
+            remainingPercent: remainingPercent,
+            identityMode: showsCodexLabel ? .text : .hidden,
+            compactReset: nil
+        )
+    }
+
+    public func presentation(
+        style: BatteryStyle,
+        remainingPercent: Int?,
+        identityMode: StatusIdentityMode,
+        compactReset: String?
+    ) -> StatusPresentation {
         let percent = remainingPercent.map { min(max($0, 0), 100) }
         let batteryImage: NSImage
         switch style {
@@ -39,12 +53,24 @@ public struct BatteryStatusRenderer {
         let image = statusImage(
             style: style,
             percent: percent,
-            showsCodexLabel: showsCodexLabel,
+            identityMode: identityMode,
+            compactReset: compactReset,
             batteryImage: batteryImage
         )
-        let accessibilityLabel = percent.map {
+        var accessibilityLabel = percent.map {
             "Codex 剩余额度 \($0)%"
         } ?? "Codex 剩余额度未知"
+        if let compactReset {
+            accessibilityLabel += "，下次重置 \(compactReset)"
+        }
+        switch identityMode {
+        case .text:
+            accessibilityLabel += "，显示 Codex 文字"
+        case .logo:
+            accessibilityLabel += "，显示 OpenAI Logo"
+        case .hidden:
+            accessibilityLabel += "，不显示标识"
+        }
 
         return StatusPresentation(
             image: image,
@@ -56,7 +82,8 @@ public struct BatteryStatusRenderer {
     private func statusImage(
         style: BatteryStyle,
         percent: Int?,
-        showsCodexLabel: Bool,
+        identityMode: StatusIdentityMode,
+        compactReset: String?,
         batteryImage: NSImage
     ) -> NSImage {
         let height: CGFloat = 18
@@ -71,26 +98,50 @@ public struct BatteryStatusRenderer {
             string: percent.map { "\($0)%" } ?? "--%",
             attributes: attributes
         )
+        let suffix = compactReset.map {
+            NSAttributedString(string: $0, attributes: attributes)
+        }
+        let logoImage = identityMode == .logo ? OpenAILogoRenderer.image() : nil
         let labelWidth = ceil(label.size().width)
         let percentageWidth = ceil(percentage.size().width)
+        let suffixWidth = suffix.map { ceil($0.size().width) } ?? 0
         let drawsPercentage = style != .embedded
 
         var width = horizontalMargin * 2 + batteryImage.size.width
-        if showsCodexLabel {
+        switch identityMode {
+        case .text:
             width += labelWidth + gap
+        case .logo:
+            width += 17 + gap
+        case .hidden:
+            break
         }
         if drawsPercentage {
             width += gap + percentageWidth
         }
+        if suffix != nil {
+            width += gap + suffixWidth
+        }
 
         let composed = image(size: NSSize(width: width, height: height)) { _ in
             var x = horizontalMargin
-            if showsCodexLabel {
+            switch identityMode {
+            case .text:
                 label.draw(at: NSPoint(
                     x: x,
                     y: floor((height - label.size().height) / 2)
                 ))
                 x += labelWidth + gap
+            case .logo:
+                logoImage?.draw(
+                    at: NSPoint(x: x, y: floor((height - 17) / 2)),
+                    from: .zero,
+                    operation: .sourceOver,
+                    fraction: 1
+                )
+                x += 17 + gap
+            case .hidden:
+                break
             }
 
             batteryImage.draw(
@@ -109,6 +160,15 @@ public struct BatteryStatusRenderer {
                 percentage.draw(at: NSPoint(
                     x: x,
                     y: floor((height - percentage.size().height) / 2)
+                ))
+                x += percentageWidth
+            }
+
+            if let suffix {
+                x += gap
+                suffix.draw(at: NSPoint(
+                    x: x,
+                    y: floor((height - suffix.size().height) / 2)
                 ))
             }
         }
