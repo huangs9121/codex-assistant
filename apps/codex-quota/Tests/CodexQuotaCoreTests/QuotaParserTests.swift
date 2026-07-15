@@ -1023,6 +1023,11 @@ enum QuotaParserTests {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         return UpdatePolicy.shouldAutomaticallyCheck(lastSuccess: nil, lastFailure: nil, now: now)
             && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: nil,
+                lastFailure: nil,
+                now: Date(timeIntervalSinceReferenceDate: .infinity)
+            )
+            && !UpdatePolicy.shouldAutomaticallyCheck(
                 lastSuccess: now.addingTimeInterval(-(24 * 60 * 60 - 60)),
                 lastFailure: nil,
                 now: now
@@ -1112,10 +1117,20 @@ enum QuotaParserTests {
 
             defaults.set("not a date", forKey: DisplayPreferences.lastUpdateCheckSuccessKey)
             defaults.set(123, forKey: DisplayPreferences.lastUpdateCheckFailureKey)
+            defaults.set(123, forKey: DisplayPreferences.lastPromptedVersionKey)
+            guard preferences.lastUpdateCheckSuccess == nil,
+                  preferences.lastUpdateCheckFailure == nil,
+                  preferences.lastPromptedVersion == nil else {
+                return false
+            }
+
+            defaults.set(Date(), forKey: DisplayPreferences.lastPromptedVersionKey)
+            guard preferences.lastPromptedVersion == nil else {
+                return false
+            }
+
             defaults.set("", forKey: DisplayPreferences.lastPromptedVersionKey)
-            return preferences.lastUpdateCheckSuccess == nil
-                && preferences.lastUpdateCheckFailure == nil
-                && preferences.lastPromptedVersion == nil
+            return preferences.lastPromptedVersion == nil
         }
     }
 

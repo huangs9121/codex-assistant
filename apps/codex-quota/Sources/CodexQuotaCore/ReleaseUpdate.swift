@@ -91,6 +91,9 @@ public enum UpdatePolicy {
         lastFailure: Date?,
         now: Date
     ) -> Bool {
+        guard now.timeIntervalSinceReferenceDate.isFinite else {
+            return false
+        }
         if let lastSuccess {
             let elapsed = now.timeIntervalSince(lastSuccess)
             guard elapsed.isFinite, elapsed >= 24 * 60 * 60 else {
