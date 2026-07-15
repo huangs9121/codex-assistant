@@ -1005,7 +1005,9 @@ enum QuotaParserTests {
     }
 
     private static func testLatestReleaseRequest() -> Bool {
-        guard let request = GitHubRelease.latestRequest() else {
+        guard let request = GitHubRelease.latestRequest(
+            appVersion: SemanticVersion("1.2.3")!
+        ) else {
             return false
         }
         return expect(
@@ -1015,7 +1017,7 @@ enum QuotaParserTests {
             && expect(request.httpMethod, equals: "GET")
             && expect(request.timeoutInterval, equals: 10)
             && expect(request.value(forHTTPHeaderField: "Accept"), equals: "application/vnd.github+json")
-            && expect(request.value(forHTTPHeaderField: "User-Agent"), equals: "Codex-Quota/1.1.0")
+            && expect(request.value(forHTTPHeaderField: "User-Agent"), equals: "Codex-Quota/1.2.3")
             && expect(request.value(forHTTPHeaderField: "Authorization"), equals: nil)
             && expect(request.value(forHTTPHeaderField: "Cookie"), equals: nil)
             && expect(request.allHTTPHeaderFields?.count, equals: 2)

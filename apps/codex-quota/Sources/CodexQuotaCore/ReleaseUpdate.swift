@@ -74,7 +74,7 @@ public struct GitHubRelease: Decodable, Sendable {
         return SemanticVersion(tagName)
     }
 
-    public static func latestRequest() -> URLRequest? {
+    public static func latestRequest(appVersion: SemanticVersion) -> URLRequest? {
         guard let url = URL(
             string: "https://api.github.com/repos/huangs9121/codex-assistant/releases/latest"
         ) else {
@@ -83,7 +83,8 @@ public struct GitHubRelease: Decodable, Sendable {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("Codex-Quota/1.1.0", forHTTPHeaderField: "User-Agent")
+        let canonicalVersion = "\(appVersion.major).\(appVersion.minor).\(appVersion.patch)"
+        request.setValue("Codex-Quota/\(canonicalVersion)", forHTTPHeaderField: "User-Agent")
         return request
     }
 }

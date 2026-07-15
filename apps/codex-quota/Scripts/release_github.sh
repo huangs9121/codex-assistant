@@ -8,7 +8,7 @@ REPO_ROOT="$(cd "$PACKAGE_ROOT/../.." && pwd)"
 # shellcheck source=version.env
 source "$SCRIPT_DIR/version.env"
 TAG="v$APP_VERSION"
-REPO="huangs9121/codex-assistant"
+REPOSITORY="huangs9121/codex-assistant"
 ZIP="outputs/Codex Quota-arm64.zip"
 RELEASE_NOTES="docs/releases/$TAG.md"
 TEMP_DIR=""
@@ -20,7 +20,41 @@ cleanup() {
 }
 trap cleanup EXIT
 
+ensure_public_release_absent() {
+    local release_error
+    local release_status
+    release_error="$(mktemp)"
+    if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>"$release_error"; then
+        rm -f "$release_error"
+        echo "Public release already exists: $TAG" >&2
+        exit 1
+    else
+        release_status=$?
+        if ! grep -Eqi 'release not found|HTTP 404' "$release_error"; then
+            cat "$release_error" >&2
+            rm -f "$release_error"
+            exit "$release_status"
+        fi
+    fi
+    rm -f "$release_error"
+}
+
 cd "$REPO_ROOT"
+
+ORIGIN_URL="$(git remote get-url origin)"
+case "$ORIGIN_URL" in
+    "https://github.com/$REPOSITORY" | \
+    "https://github.com/$REPOSITORY.git" | \
+    "git@github.com:$REPOSITORY" | \
+    "git@github.com:$REPOSITORY.git" | \
+    "ssh://git@github.com/$REPOSITORY" | \
+    "ssh://git@github.com/$REPOSITORY.git")
+        ;;
+    *)
+        echo "Origin must be huangs9121/codex-assistant on github.com" >&2
+        exit 1
+        ;;
+esac
 
 if [[ -n "$(git status --porcelain)" ]]; then
     echo "Release requires a clean Git worktree" >&2
@@ -37,25 +71,12 @@ if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
     echo "HEAD must match origin/main" >&2
     exit 1
 fi
+SOURCE_COMMIT="$(git rev-parse HEAD)"
 if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
     echo "Local tag already exists: $TAG" >&2
     exit 1
 fi
-
-RELEASE_ERROR="$(mktemp)"
-if gh release view "$TAG" --repo "$REPO" >/dev/null 2>"$RELEASE_ERROR"; then
-    rm -f "$RELEASE_ERROR"
-    echo "Public release already exists: $TAG" >&2
-    exit 1
-else
-    RELEASE_STATUS=$?
-    if ! grep -Eqi 'release not found|HTTP 404' "$RELEASE_ERROR"; then
-        cat "$RELEASE_ERROR" >&2
-        rm -f "$RELEASE_ERROR"
-        exit "$RELEASE_STATUS"
-    fi
-fi
-rm -f "$RELEASE_ERROR"
+ensure_public_release_absent
 
 "$SCRIPT_DIR/build_app.sh"
 
@@ -72,11 +93,36 @@ file "$ZIP_APP/Contents/MacOS/CodexQuotaApp" | grep -q 'arm64'
 rm -rf "$TEMP_DIR"
 TEMP_DIR=""
 
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Release requires a clean Git worktree after building" >&2
+    exit 1
+fi
+if [[ "$(git branch --show-current)" != "main" ]]; then
+    echo "Release branch changed while building" >&2
+    exit 1
+fi
+if [[ "$(git rev-parse HEAD)" != "$SOURCE_COMMIT" ]]; then
+    echo "HEAD changed while building" >&2
+    exit 1
+fi
+
+git fetch origin main --tags
+
+if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+    echo "HEAD no longer matches origin/main" >&2
+    exit 1
+fi
+if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
+    echo "Local tag already exists: $TAG" >&2
+    exit 1
+fi
+ensure_public_release_absent
+
 git tag -a "$TAG" -m "Codex Quota $APP_VERSION"
 git push origin "$TAG"
 
 if ! gh release create "$TAG" "$ZIP" \
-    --repo "$REPO" \
+    --repo "$REPOSITORY" \
     --title "Codex Quota $APP_VERSION" \
     --notes-file "$RELEASE_NOTES" \
     --verify-tag; then

@@ -40,7 +40,7 @@ final class GitHubUpdateController {
         ) {
             return
         }
-        guard let request = GitHubRelease.latestRequest() else {
+        guard let request = GitHubRelease.latestRequest(appVersion: currentVersion) else {
             recordFailure(at: now)
             completion(.failure("检查更新失败，请稍后重试。"))
             return
