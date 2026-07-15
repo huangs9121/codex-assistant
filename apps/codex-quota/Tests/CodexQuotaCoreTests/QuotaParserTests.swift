@@ -84,6 +84,16 @@ enum QuotaParserTests {
             ("identity mode persists across instances", testIdentityModePersistence),
             ("reset countdown status preference defaults to false", testDefaultResetCountdownStatusPreference),
             ("reset countdown status preference persists true", testResetCountdownStatusPreferencePersistence),
+            ("semantic versions accept exact numeric triples", testSemanticVersionAcceptedValues),
+            ("semantic versions reject malformed values", testSemanticVersionRejectedValues),
+            ("semantic versions compare components numerically", testSemanticVersionComparison),
+            ("GitHub releases decode required fields", testGitHubReleaseDecoding),
+            ("GitHub release eligibility rejects unsafe releases", testGitHubReleaseEligibility),
+            ("GitHub release decoding rejects invalid fixtures", testGitHubReleaseInvalidDecoding),
+            ("latest release request contains only public metadata", testLatestReleaseRequest),
+            ("update check policy enforces success and failure throttles", testUpdateCheckPolicy),
+            ("update prompt policy normalizes semantic versions", testUpdatePromptPolicy),
+            ("update preferences persist typed optional values", testUpdatePreferences),
             ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
             ("status presentation supports every style identity and reset combination", testStatusPresentationMatrix),
             ("status identity and reset widths compose exactly", testStatusPresentationWidthRelationships),
@@ -871,6 +881,241 @@ enum QuotaParserTests {
             let restored = DisplayPreferences(defaults: defaults)
             return expect(restored.batteryStyle, equals: .embedded)
                 && expect(restored.showsCodexLabel, equals: false)
+        }
+    }
+
+    private static func testSemanticVersionAcceptedValues() -> Bool {
+        guard
+            let plain = SemanticVersion("1.2.3"),
+            let prefixed = SemanticVersion("v1.2.3"),
+            let zero = SemanticVersion("0.0.0")
+        else {
+            return false
+        }
+        return expect(plain.major, equals: 1)
+            && expect(plain.minor, equals: 2)
+            && expect(plain.patch, equals: 3)
+            && expect(prefixed, equals: plain)
+            && expect(zero.major, equals: 0)
+            && expect(zero.minor, equals: 0)
+            && expect(zero.patch, equals: 0)
+    }
+
+    private static func testSemanticVersionRejectedValues() -> Bool {
+        let invalid = [
+            "", "1.2", "1.2.3.4", "vv1.2.3", "v", "-1.2.3",
+            "1.-2.3", "1.2.-3", "1..3", ".1.2", "1.2.", "1.a.3",
+            " 1.2.3", "1.2.3 ", "1. 2.3", "1.2.3\n",
+            "999999999999999999999999999999999.2.3"
+        ]
+        return invalid.allSatisfy { SemanticVersion($0) == nil }
+    }
+
+    private static func testSemanticVersionComparison() -> Bool {
+        guard
+            let oneNine = SemanticVersion("1.9.0"),
+            let oneTen = SemanticVersion("1.10.0"),
+            let two = SemanticVersion("2.0.0"),
+            let same = SemanticVersion("v1.10.0")
+        else {
+            return false
+        }
+        return oneNine < oneTen
+            && oneTen < two
+            && expect(oneTen, equals: same)
+            && !(same < oneTen)
+            && !(oneTen < same)
+    }
+
+    private static func testGitHubReleaseDecoding() -> Bool {
+        let fixture = """
+        {
+          "tag_name": "v1.2.0",
+          "name": "Codex Quota 1.2",
+          "body": "Release notes",
+          "html_url": "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0",
+          "draft": false,
+          "prerelease": false
+        }
+        """
+        guard let release = try? JSONDecoder().decode(
+            GitHubRelease.self,
+            from: Data(fixture.utf8)
+        ) else {
+            return false
+        }
+        return expect(release.tagName, equals: "v1.2.0")
+            && expect(release.name, equals: "Codex Quota 1.2")
+            && expect(release.body, equals: "Release notes")
+            && expect(
+                release.htmlURL.absoluteString,
+                equals: "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"
+            )
+            && expect(release.draft, equals: false)
+            && expect(release.prerelease, equals: false)
+            && expect(release.eligibleVersion, equals: SemanticVersion("1.2.0"))
+    }
+
+    private static func testGitHubReleaseEligibility() -> Bool {
+        func release(
+            tag: String = "v1.2.0",
+            url: String = "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0",
+            draft: Bool = false,
+            prerelease: Bool = false
+        ) -> GitHubRelease? {
+            let object: [String: Any] = [
+                "tag_name": tag,
+                "html_url": url,
+                "draft": draft,
+                "prerelease": prerelease
+            ]
+            return try? JSONDecoder().decode(GitHubRelease.self, from: jsonData(object))
+        }
+
+        guard let valid = release() else {
+            return false
+        }
+        let rejected = [
+            release(draft: true),
+            release(prerelease: true),
+            release(url: "http://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://user:pass@github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://user@github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://:pass@github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(tag: "not-a-version")
+        ]
+        return expect(valid.eligibleVersion, equals: SemanticVersion("1.2.0"))
+            && rejected.allSatisfy { $0?.eligibleVersion == nil }
+    }
+
+    private static func testGitHubReleaseInvalidDecoding() -> Bool {
+        let invalid: [[String: Any]] = [
+            ["html_url": "https://example.com", "draft": false, "prerelease": false],
+            ["tag_name": "v1.2.0", "draft": false, "prerelease": false],
+            ["tag_name": 120, "html_url": "https://example.com", "draft": false, "prerelease": false],
+            ["tag_name": "v1.2.0", "html_url": 120, "draft": false, "prerelease": false],
+            ["tag_name": "v1.2.0", "html_url": "https://example.com", "draft": "false", "prerelease": false]
+        ]
+        return invalid.allSatisfy {
+            (try? JSONDecoder().decode(GitHubRelease.self, from: jsonData($0))) == nil
+        }
+    }
+
+    private static func testLatestReleaseRequest() -> Bool {
+        guard let request = GitHubRelease.latestRequest() else {
+            return false
+        }
+        return expect(
+            request.url?.absoluteString,
+            equals: "https://api.github.com/repos/huangs9121/codex-assistant/releases/latest"
+        )
+            && expect(request.httpMethod, equals: "GET")
+            && expect(request.timeoutInterval, equals: 10)
+            && expect(request.value(forHTTPHeaderField: "Accept"), equals: "application/vnd.github+json")
+            && expect(request.value(forHTTPHeaderField: "User-Agent"), equals: "Codex-Quota/1.1.0")
+            && expect(request.value(forHTTPHeaderField: "Authorization"), equals: nil)
+            && expect(request.value(forHTTPHeaderField: "Cookie"), equals: nil)
+            && expect(request.allHTTPHeaderFields?.count, equals: 2)
+            && expect(request.httpBody, equals: nil)
+    }
+
+    private static func testUpdateCheckPolicy() -> Bool {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        return UpdatePolicy.shouldAutomaticallyCheck(lastSuccess: nil, lastFailure: nil, now: now)
+            && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: now.addingTimeInterval(-(24 * 60 * 60 - 60)),
+                lastFailure: nil,
+                now: now
+            )
+            && UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: now.addingTimeInterval(-24 * 60 * 60),
+                lastFailure: nil,
+                now: now
+            )
+            && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: nil,
+                lastFailure: now.addingTimeInterval(-(60 * 60 - 60)),
+                now: now
+            )
+            && UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: nil,
+                lastFailure: now.addingTimeInterval(-60 * 60),
+                now: now
+            )
+            && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: now.addingTimeInterval(-25 * 60 * 60),
+                lastFailure: now.addingTimeInterval(-30 * 60),
+                now: now
+            )
+            && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: now.addingTimeInterval(-23 * 60 * 60),
+                lastFailure: now.addingTimeInterval(-2 * 60 * 60),
+                now: now
+            )
+            && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: now.addingTimeInterval(1),
+                lastFailure: nil,
+                now: now
+            )
+            && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: nil,
+                lastFailure: now.addingTimeInterval(1),
+                now: now
+            )
+            && !UpdatePolicy.shouldAutomaticallyCheck(
+                lastSuccess: Date(timeIntervalSince1970: -.infinity),
+                lastFailure: nil,
+                now: now
+            )
+    }
+
+    private static func testUpdatePromptPolicy() -> Bool {
+        guard let version = SemanticVersion("1.2.0") else {
+            return false
+        }
+        return !UpdatePolicy.shouldPrompt(version: version, lastPromptedVersion: "1.2.0")
+            && !UpdatePolicy.shouldPrompt(version: version, lastPromptedVersion: "v1.2.0")
+            && UpdatePolicy.shouldPrompt(version: version, lastPromptedVersion: "1.2.1")
+            && UpdatePolicy.shouldPrompt(version: version, lastPromptedVersion: "invalid")
+            && UpdatePolicy.shouldPrompt(version: version, lastPromptedVersion: "")
+            && UpdatePolicy.shouldPrompt(version: version, lastPromptedVersion: nil)
+    }
+
+    private static func testUpdatePreferences() -> Bool {
+        withPreferencesSuite { defaults in
+            var preferences = DisplayPreferences(defaults: defaults)
+            guard preferences.lastUpdateCheckSuccess == nil,
+                  preferences.lastUpdateCheckFailure == nil,
+                  preferences.lastPromptedVersion == nil else {
+                return false
+            }
+
+            let success = Date(timeIntervalSince1970: 100)
+            let failure = Date(timeIntervalSince1970: 200)
+            preferences.lastUpdateCheckSuccess = success
+            preferences.lastUpdateCheckFailure = failure
+            preferences.lastPromptedVersion = "v1.2.0"
+            guard DisplayPreferences(defaults: defaults).lastUpdateCheckSuccess == success,
+                  DisplayPreferences(defaults: defaults).lastUpdateCheckFailure == failure,
+                  DisplayPreferences(defaults: defaults).lastPromptedVersion == "v1.2.0" else {
+                return false
+            }
+
+            preferences.lastUpdateCheckSuccess = nil
+            preferences.lastUpdateCheckFailure = nil
+            preferences.lastPromptedVersion = nil
+            guard defaults.object(forKey: DisplayPreferences.lastUpdateCheckSuccessKey) == nil,
+                  defaults.object(forKey: DisplayPreferences.lastUpdateCheckFailureKey) == nil,
+                  defaults.object(forKey: DisplayPreferences.lastPromptedVersionKey) == nil else {
+                return false
+            }
+
+            defaults.set("not a date", forKey: DisplayPreferences.lastUpdateCheckSuccessKey)
+            defaults.set(123, forKey: DisplayPreferences.lastUpdateCheckFailureKey)
+            defaults.set("", forKey: DisplayPreferences.lastPromptedVersionKey)
+            return preferences.lastUpdateCheckSuccess == nil
+                && preferences.lastUpdateCheckFailure == nil
+                && preferences.lastPromptedVersion == nil
         }
     }
 

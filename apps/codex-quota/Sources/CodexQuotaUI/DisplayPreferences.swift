@@ -7,6 +7,9 @@ public struct DisplayPreferences {
     public static let statusIdentityModeKey = "statusIdentityMode"
     public static let showsResetCountdownInStatusBarKey = "showsResetCountdownInStatusBar"
     public static let hasShownAutoRefreshNoticeKey = "hasShownAutoRefreshNotice"
+    public static let lastUpdateCheckSuccessKey = "lastUpdateCheckSuccess"
+    public static let lastUpdateCheckFailureKey = "lastUpdateCheckFailure"
+    public static let lastPromptedVersionKey = "lastPromptedVersion"
 
     private let defaults: UserDefaults
 
@@ -87,6 +90,51 @@ public struct DisplayPreferences {
         }
         set {
             defaults.set(newValue, forKey: Self.hasShownAutoRefreshNoticeKey)
+        }
+    }
+
+    public var lastUpdateCheckSuccess: Date? {
+        get {
+            defaults.object(forKey: Self.lastUpdateCheckSuccessKey) as? Date
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: Self.lastUpdateCheckSuccessKey)
+            } else {
+                defaults.removeObject(forKey: Self.lastUpdateCheckSuccessKey)
+            }
+        }
+    }
+
+    public var lastUpdateCheckFailure: Date? {
+        get {
+            defaults.object(forKey: Self.lastUpdateCheckFailureKey) as? Date
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: Self.lastUpdateCheckFailureKey)
+            } else {
+                defaults.removeObject(forKey: Self.lastUpdateCheckFailureKey)
+            }
+        }
+    }
+
+    public var lastPromptedVersion: String? {
+        get {
+            guard
+                let value = defaults.object(forKey: Self.lastPromptedVersionKey) as? String,
+                !value.isEmpty
+            else {
+                return nil
+            }
+            return value
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: Self.lastPromptedVersionKey)
+            } else {
+                defaults.removeObject(forKey: Self.lastPromptedVersionKey)
+            }
         }
     }
 }
