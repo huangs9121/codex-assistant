@@ -3,6 +3,8 @@ import Foundation
 public struct DisplayPreferences {
     public static let batteryStyleKey = "batteryStyle"
     public static let showsCodexLabelKey = "showsCodexLabel"
+    public static let statusIdentityModeKey = "statusIdentityMode"
+    public static let showsResetCountdownInStatusBarKey = "showsResetCountdownInStatusBar"
     public static let hasShownAutoRefreshNoticeKey = "hasShownAutoRefreshNotice"
 
     private let defaults: UserDefaults
@@ -35,6 +37,41 @@ public struct DisplayPreferences {
         }
         set {
             defaults.set(newValue, forKey: Self.showsCodexLabelKey)
+        }
+    }
+
+    public var identityMode: StatusIdentityMode {
+        get {
+            if defaults.object(forKey: Self.statusIdentityModeKey) != nil {
+                guard
+                    let rawValue = defaults.string(forKey: Self.statusIdentityModeKey),
+                    let mode = StatusIdentityMode(rawValue: rawValue)
+                else {
+                    return .text
+                }
+                return mode
+            }
+
+            let mode: StatusIdentityMode
+            if defaults.object(forKey: Self.showsCodexLabelKey) == nil {
+                mode = .text
+            } else {
+                mode = defaults.bool(forKey: Self.showsCodexLabelKey) ? .text : .hidden
+            }
+            defaults.set(mode.rawValue, forKey: Self.statusIdentityModeKey)
+            return mode
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Self.statusIdentityModeKey)
+        }
+    }
+
+    public var showsResetCountdownInStatusBar: Bool {
+        get {
+            defaults.bool(forKey: Self.showsResetCountdownInStatusBarKey)
+        }
+        set {
+            defaults.set(newValue, forKey: Self.showsResetCountdownInStatusBarKey)
         }
     }
 

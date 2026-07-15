@@ -37,6 +37,8 @@ enum QuotaParserTests {
             ("reset countdown formats hours only", testResetCountdownHoursOnly),
             ("expired reset countdown clamps to zero", testExpiredResetCountdown),
             ("huge reset countdown is unknown", testHugeResetCountdown),
+            ("compact reset countdown formats day and hour boundaries", testCompactResetCountdownBoundaries),
+            ("compact reset countdown handles zero and unknown values", testCompactResetCountdownFallbacks),
             ("negative used clamps to 100", testNegativeUsedPercent),
             ("used above 100 clamps to 0", testUsedPercentAboveOneHundred),
             ("invalid JSON returns nil", testInvalidJSON),
@@ -62,6 +64,8 @@ enum QuotaParserTests {
             ("battery style defaults to native", testDefaultBatteryStyle),
             ("battery styles have stable order and raw values", testBatteryStyleCases),
             ("battery styles have exact menu titles", testBatteryStyleMenuTitles),
+            ("status identity modes have stable order and raw values", testStatusIdentityModeCases),
+            ("status identity modes have exact menu titles", testStatusIdentityModeMenuTitles),
             ("update time includes seconds", testUpdateTimeIncludesSeconds),
             ("missing update time uses second precision placeholder", testMissingUpdateTime),
             ("Codex label defaults to visible", testDefaultCodexLabel),
@@ -70,6 +74,14 @@ enum QuotaParserTests {
             ("display preferences persist across instances", testDisplayPreferencesPersistence),
             ("invalid stored battery style falls back to native", testInvalidBatteryStyleFallback),
             ("stored false label preference is preserved", testStoredFalseCodexLabel),
+            ("identity mode defaults to text and writes the new key", testDefaultIdentityModeMigration),
+            ("legacy true identity preference migrates to text", testLegacyTrueIdentityMigration),
+            ("legacy false identity preference migrates to hidden", testLegacyFalseIdentityMigration),
+            ("valid new identity preference takes priority", testValidNewIdentityPreferencePriority),
+            ("invalid new identity preference falls back without migration", testInvalidNewIdentityPreferenceFallback),
+            ("identity mode persists across instances", testIdentityModePersistence),
+            ("reset countdown status preference defaults to false", testDefaultResetCountdownStatusPreference),
+            ("reset countdown status preference persists true", testResetCountdownStatusPreferencePersistence),
             ("battery renderer produces template glyphs for every style and value", testBatteryRendererImageMatrix),
             ("full status images compose label battery and percent in order", testFullStatusComposition),
             ("full status images keep safe margins at one and two x", testFullStatusCanvasMargins),
@@ -448,6 +460,46 @@ enum QuotaParserTests {
         )
     }
 
+    private static func testCompactResetCountdownBoundaries() -> Bool {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cases: [(TimeInterval, String)] = [
+            (51 * 60 * 60, "2D"),
+            (24 * 60 * 60, "1D"),
+            (23 * 60 * 60 + 59 * 60, "23H"),
+            (60 * 60, "1H"),
+            (59 * 60, "0H"),
+            (-1, "0H")
+        ]
+        return cases.allSatisfy { interval, expected in
+            expect(
+                ResetCountdownFormatter.compactString(
+                    resetsAt: now.addingTimeInterval(interval),
+                    now: now
+                ),
+                equals: expected
+            )
+        }
+    }
+
+    private static func testCompactResetCountdownFallbacks() -> Bool {
+        let now = Date(timeIntervalSince1970: 0)
+        return expect(ResetCountdownFormatter.compactString(resetsAt: nil), equals: "--")
+            && expect(
+                ResetCountdownFormatter.compactString(
+                    resetsAt: Date(timeIntervalSince1970: 1e308),
+                    now: now
+                ),
+                equals: "--"
+            )
+            && expect(
+                ResetCountdownFormatter.compactString(
+                    resetsAt: Date(timeIntervalSince1970: .infinity),
+                    now: now
+                ),
+                equals: "--"
+            )
+    }
+
 
 
     private static func testNegativeUsedPercent() -> Bool {
@@ -746,6 +798,21 @@ enum QuotaParserTests {
         ])
     }
 
+    private static func testStatusIdentityModeCases() -> Bool {
+        expect(StatusIdentityMode.allCases, equals: [.text, .logo, .hidden])
+            && expect(StatusIdentityMode.allCases.map(\.rawValue), equals: [
+                "text", "logo", "hidden"
+            ])
+    }
+
+    private static func testStatusIdentityModeMenuTitles() -> Bool {
+        expect(StatusIdentityMode.allCases.map(\.menuTitle), equals: [
+            "显示 Codex 文字",
+            "显示 OpenAI Logo",
+            "不显示标识"
+        ])
+    }
+
     private static func testUpdateTimeIncludesSeconds() -> Bool {
         guard let utc = TimeZone(secondsFromGMT: 0) else {
             return diagnostic("UTC timezone is unavailable")
@@ -817,6 +884,99 @@ enum QuotaParserTests {
             return expect(
                 DisplayPreferences(defaults: defaults).showsCodexLabel,
                 equals: false
+            )
+        }
+    }
+
+    private static func testDefaultIdentityModeMigration() -> Bool {
+        withPreferencesSuite { defaults in
+            let preferences = DisplayPreferences(defaults: defaults)
+            return expect(preferences.identityMode, equals: .text)
+                && expect(
+                    defaults.string(forKey: DisplayPreferences.statusIdentityModeKey),
+                    equals: StatusIdentityMode.text.rawValue
+                )
+        }
+    }
+
+    private static func testLegacyTrueIdentityMigration() -> Bool {
+        withPreferencesSuite { defaults in
+            defaults.set(true, forKey: DisplayPreferences.showsCodexLabelKey)
+            let preferences = DisplayPreferences(defaults: defaults)
+            return expect(preferences.identityMode, equals: .text)
+                && expect(
+                    defaults.string(forKey: DisplayPreferences.statusIdentityModeKey),
+                    equals: StatusIdentityMode.text.rawValue
+                )
+        }
+    }
+
+    private static func testLegacyFalseIdentityMigration() -> Bool {
+        withPreferencesSuite { defaults in
+            defaults.set(false, forKey: DisplayPreferences.showsCodexLabelKey)
+            let preferences = DisplayPreferences(defaults: defaults)
+            return expect(preferences.identityMode, equals: .hidden)
+                && expect(
+                    defaults.string(forKey: DisplayPreferences.statusIdentityModeKey),
+                    equals: StatusIdentityMode.hidden.rawValue
+                )
+        }
+    }
+
+    private static func testValidNewIdentityPreferencePriority() -> Bool {
+        withPreferencesSuite { defaults in
+            defaults.set(false, forKey: DisplayPreferences.showsCodexLabelKey)
+            defaults.set(
+                StatusIdentityMode.logo.rawValue,
+                forKey: DisplayPreferences.statusIdentityModeKey
+            )
+            return expect(
+                DisplayPreferences(defaults: defaults).identityMode,
+                equals: .logo
+            )
+        }
+    }
+
+    private static func testInvalidNewIdentityPreferenceFallback() -> Bool {
+        withPreferencesSuite { defaults in
+            defaults.set(false, forKey: DisplayPreferences.showsCodexLabelKey)
+            defaults.set("invalid", forKey: DisplayPreferences.statusIdentityModeKey)
+            let preferences = DisplayPreferences(defaults: defaults)
+            return expect(preferences.identityMode, equals: .text)
+                && expect(
+                    defaults.string(forKey: DisplayPreferences.statusIdentityModeKey),
+                    equals: "invalid"
+                )
+        }
+    }
+
+    private static func testIdentityModePersistence() -> Bool {
+        withPreferencesSuite { defaults in
+            var preferences = DisplayPreferences(defaults: defaults)
+            preferences.identityMode = .logo
+            return expect(
+                DisplayPreferences(defaults: defaults).identityMode,
+                equals: .logo
+            )
+        }
+    }
+
+    private static func testDefaultResetCountdownStatusPreference() -> Bool {
+        withPreferencesSuite { defaults in
+            expect(
+                DisplayPreferences(defaults: defaults).showsResetCountdownInStatusBar,
+                equals: false
+            )
+        }
+    }
+
+    private static func testResetCountdownStatusPreferencePersistence() -> Bool {
+        withPreferencesSuite { defaults in
+            var preferences = DisplayPreferences(defaults: defaults)
+            preferences.showsResetCountdownInStatusBar = true
+            return expect(
+                DisplayPreferences(defaults: defaults).showsResetCountdownInStatusBar,
+                equals: true
             )
         }
     }
