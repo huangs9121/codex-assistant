@@ -1,3 +1,4 @@
+import CoreFoundation
 import Foundation
 
 public struct DisplayPreferences {
@@ -53,10 +54,15 @@ public struct DisplayPreferences {
             }
 
             let mode: StatusIdentityMode
-            if defaults.object(forKey: Self.showsCodexLabelKey) == nil {
-                mode = .text
+            if
+                let legacyValue = defaults.object(
+                    forKey: Self.showsCodexLabelKey
+                ) as? NSNumber,
+                CFGetTypeID(legacyValue) == CFBooleanGetTypeID()
+            {
+                mode = legacyValue.boolValue ? .text : .hidden
             } else {
-                mode = defaults.bool(forKey: Self.showsCodexLabelKey) ? .text : .hidden
+                mode = .text
             }
             defaults.set(mode.rawValue, forKey: Self.statusIdentityModeKey)
             return mode

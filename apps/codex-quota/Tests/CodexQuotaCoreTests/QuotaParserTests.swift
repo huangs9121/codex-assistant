@@ -77,6 +77,8 @@ enum QuotaParserTests {
             ("identity mode defaults to text and writes the new key", testDefaultIdentityModeMigration),
             ("legacy true identity preference migrates to text", testLegacyTrueIdentityMigration),
             ("legacy false identity preference migrates to hidden", testLegacyFalseIdentityMigration),
+            ("legacy string identity preference migrates to text", testLegacyStringIdentityMigration),
+            ("legacy numeric identity preference migrates to text", testLegacyNumericIdentityMigration),
             ("valid new identity preference takes priority", testValidNewIdentityPreferencePriority),
             ("invalid new identity preference falls back without migration", testInvalidNewIdentityPreferenceFallback),
             ("identity mode persists across instances", testIdentityModePersistence),
@@ -919,6 +921,30 @@ enum QuotaParserTests {
                 && expect(
                     defaults.string(forKey: DisplayPreferences.statusIdentityModeKey),
                     equals: StatusIdentityMode.hidden.rawValue
+                )
+        }
+    }
+
+    private static func testLegacyStringIdentityMigration() -> Bool {
+        withPreferencesSuite { defaults in
+            defaults.set("invalid", forKey: DisplayPreferences.showsCodexLabelKey)
+            let preferences = DisplayPreferences(defaults: defaults)
+            return expect(preferences.identityMode, equals: .text)
+                && expect(
+                    defaults.string(forKey: DisplayPreferences.statusIdentityModeKey),
+                    equals: StatusIdentityMode.text.rawValue
+                )
+        }
+    }
+
+    private static func testLegacyNumericIdentityMigration() -> Bool {
+        withPreferencesSuite { defaults in
+            defaults.set(0, forKey: DisplayPreferences.showsCodexLabelKey)
+            let preferences = DisplayPreferences(defaults: defaults)
+            return expect(preferences.identityMode, equals: .text)
+                && expect(
+                    defaults.string(forKey: DisplayPreferences.statusIdentityModeKey),
+                    equals: StatusIdentityMode.text.rawValue
                 )
         }
     }
