@@ -3,6 +3,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=version.env
+source "$SCRIPT_DIR/version.env"
+if [[ ! "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Invalid APP_VERSION in version.env" >&2
+    exit 1
+fi
+if [[ ! "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Invalid BUILD_NUMBER in version.env" >&2
+    exit 1
+fi
 WORKSPACE_ROOT="$(cd "$PACKAGE_ROOT/../.." && pwd)"
 OUTPUT_DIR="$WORKSPACE_ROOT/outputs"
 APP="$OUTPUT_DIR/Codex Quota.app"
@@ -88,7 +99,7 @@ done <<'SIZES'
 SIZES
 iconutil -c icns "$ICONSET" -o "$STAGING_APP/Contents/Resources/icon.icns"
 
-cat > "$STAGING_APP/Contents/Info.plist" <<'PLIST'
+cat > "$STAGING_APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -106,9 +117,9 @@ cat > "$STAGING_APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
@@ -123,6 +134,8 @@ chmod -R u=rwX,go=rX "$STAGING_APP"
 chmod 755 "$STAGING_APP/Contents/MacOS/CodexQuotaApp"
 xattr -cr "$STAGING_APP"
 plutil -lint "$STAGING_APP/Contents/Info.plist"
+test "$(plutil -extract CFBundleShortVersionString raw "$STAGING_APP/Contents/Info.plist")" = "$APP_VERSION"
+test "$(plutil -extract CFBundleVersion raw "$STAGING_APP/Contents/Info.plist")" = "$BUILD_NUMBER"
 
 VERIFY_ICONSET="$TEMP_DIR/verify.iconset"
 EXPECTED_ICONS="$TEMP_DIR/expected-icons.txt"
@@ -160,6 +173,8 @@ test -x "$VERIFY_ZIP_APP/Contents/MacOS/CodexQuotaApp"
 test -f "$VERIFY_ZIP_APP/Contents/Resources/icon.icns"
 plutil -lint "$VERIFY_ZIP_APP/Contents/Info.plist"
 test "$(plutil -extract CFBundlePackageType raw "$VERIFY_ZIP_APP/Contents/Info.plist")" = "APPL"
+test "$(plutil -extract CFBundleShortVersionString raw "$VERIFY_ZIP_APP/Contents/Info.plist")" = "$APP_VERSION"
+test "$(plutil -extract CFBundleVersion raw "$VERIFY_ZIP_APP/Contents/Info.plist")" = "$BUILD_NUMBER"
 file "$VERIFY_ZIP_APP/Contents/MacOS/CodexQuotaApp" | grep -q 'arm64'
 if find "$VERIFY_ZIP_APP" \( -perm -002 -o -perm -020 \) -print -quit | grep -q .; then
     echo "staged ZIP contains group- or world-writable app paths" >&2
