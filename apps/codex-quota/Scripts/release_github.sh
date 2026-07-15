@@ -20,6 +20,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+validate_repository_url() {
+    case "$1" in
+        "https://github.com/$REPOSITORY" | \
+        "https://github.com/$REPOSITORY.git" | \
+        "git@github.com:$REPOSITORY" | \
+        "git@github.com:$REPOSITORY.git" | \
+        "ssh://git@github.com/$REPOSITORY" | \
+        "ssh://git@github.com/$REPOSITORY.git")
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 ensure_public_release_absent() {
     local release_error
     local release_status
@@ -42,19 +58,21 @@ ensure_public_release_absent() {
 cd "$REPO_ROOT"
 
 ORIGIN_URL="$(git remote get-url origin)"
-case "$ORIGIN_URL" in
-    "https://github.com/$REPOSITORY" | \
-    "https://github.com/$REPOSITORY.git" | \
-    "git@github.com:$REPOSITORY" | \
-    "git@github.com:$REPOSITORY.git" | \
-    "ssh://git@github.com/$REPOSITORY" | \
-    "ssh://git@github.com/$REPOSITORY.git")
-        ;;
-    *)
-        echo "Origin must be huangs9121/codex-assistant on github.com" >&2
-        exit 1
-        ;;
-esac
+if ! validate_repository_url "$ORIGIN_URL"; then
+    echo "Origin must be huangs9121/codex-assistant on github.com" >&2
+    exit 1
+fi
+
+PUSH_URLS=()
+while IFS= read -r push_url; do
+    if [[ -n "$push_url" ]]; then
+        PUSH_URLS+=("$push_url")
+    fi
+done < <(git remote get-url --push --all origin)
+if [[ "${#PUSH_URLS[@]}" -ne 1 ]] || ! validate_repository_url "${PUSH_URLS[0]:-}"; then
+    echo "Origin must have exactly one approved push URL" >&2
+    exit 1
+fi
 
 if [[ -n "$(git status --porcelain)" ]]; then
     echo "Release requires a clean Git worktree" >&2
@@ -108,8 +126,10 @@ fi
 
 git fetch origin main --tags
 
-if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
-    echo "HEAD no longer matches origin/main" >&2
+CURRENT_HEAD="$(git rev-parse HEAD)"
+REMOTE_HEAD="$(git rev-parse origin/main)"
+if [[ "$CURRENT_HEAD" != "$SOURCE_COMMIT" ]] || [[ "$REMOTE_HEAD" != "$SOURCE_COMMIT" ]]; then
+    echo "Release source changed after building" >&2
     exit 1
 fi
 if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
@@ -118,7 +138,7 @@ if git rev-parse --verify --quiet "refs/tags/$TAG" >/dev/null; then
 fi
 ensure_public_release_absent
 
-git tag -a "$TAG" -m "Codex Quota $APP_VERSION"
+git tag -a "$TAG" "$SOURCE_COMMIT" -m "Codex Quota $APP_VERSION"
 git push origin "$TAG"
 
 if ! gh release create "$TAG" "$ZIP" \
