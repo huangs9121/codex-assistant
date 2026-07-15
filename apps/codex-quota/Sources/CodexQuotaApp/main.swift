@@ -398,9 +398,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             setLaunchAtLogin(true)
         case .requiresApproval:
+            closeMenuForLaunchAtLoginInteraction()
             launchAtLoginController.openSystemSettings()
             syncMenuState()
         case .unavailable:
+            closeMenuForLaunchAtLoginInteraction()
             showAlert(
                 message: "开机自动启动不可用",
                 informativeText: "当前系统无法使用此功能，请稍后重试。"
@@ -414,9 +416,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try launchAtLoginController.setEnabled(enabled)
             syncMenuState()
             if enabled, launchAtLoginController.state == .requiresApproval {
+                closeMenuForLaunchAtLoginInteraction()
                 launchAtLoginController.openSystemSettings()
             }
         } catch {
+            closeMenuForLaunchAtLoginInteraction()
             showAlert(
                 message: enabled ? "无法开启开机自动启动" : "无法关闭开机自动启动",
                 informativeText: "请在“系统设置”中的“登录项”里检查后重试。"
@@ -429,6 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !Bundle.main.bundleURL.path.hasPrefix("/Applications/") else {
             return true
         }
+        closeMenuForLaunchAtLoginInteraction()
         activateApp()
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -436,6 +441,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "仍然开启")
         alert.addButton(withTitle: "取消")
         return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func closeMenuForLaunchAtLoginInteraction() {
+        statusItem.menu?.cancelTracking()
     }
 
     @objc private func refreshFromTimer() {
