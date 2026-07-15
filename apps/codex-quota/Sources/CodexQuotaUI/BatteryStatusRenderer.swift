@@ -24,11 +24,17 @@ public struct BatteryStatusRenderer {
         remainingPercent: Int?,
         showsCodexLabel: Bool
     ) -> StatusPresentation {
-        presentation(
+        let presentation = presentation(
             style: style,
             remainingPercent: remainingPercent,
             identityMode: showsCodexLabel ? .text : .hidden,
             compactReset: nil
+        )
+        let percent = remainingPercent.map { min(max($0, 0), 100) }
+        return StatusPresentation(
+            image: presentation.image,
+            batteryImage: presentation.batteryImage,
+            accessibilityLabel: baseAccessibilityLabel(percent: percent)
         )
     }
 
@@ -57,9 +63,7 @@ public struct BatteryStatusRenderer {
             compactReset: compactReset,
             batteryImage: batteryImage
         )
-        var accessibilityLabel = percent.map {
-            "Codex 剩余额度 \($0)%"
-        } ?? "Codex 剩余额度未知"
+        var accessibilityLabel = baseAccessibilityLabel(percent: percent)
         if let compactReset {
             accessibilityLabel += "，下次重置 \(compactReset)"
         }
@@ -77,6 +81,10 @@ public struct BatteryStatusRenderer {
             batteryImage: batteryImage,
             accessibilityLabel: accessibilityLabel
         )
+    }
+
+    private func baseAccessibilityLabel(percent: Int?) -> String {
+        percent.map { "Codex 剩余额度 \($0)%" } ?? "Codex 剩余额度未知"
     }
 
     private func statusImage(

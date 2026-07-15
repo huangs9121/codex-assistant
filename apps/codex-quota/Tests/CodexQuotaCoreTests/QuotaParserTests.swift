@@ -1257,19 +1257,19 @@ enum QuotaParserTests {
         let renderer = BatteryStatusRenderer()
         return expect(renderer.presentation(
             style: .native,
-            remainingPercent: 49,
+            remainingPercent: 60,
             showsCodexLabel: true
-        ).accessibilityLabel, equals: "Codex 剩余额度 49%，显示 Codex 文字")
+        ).accessibilityLabel, equals: "Codex 剩余额度 60%")
             && expect(renderer.presentation(
                 style: .embedded,
                 remainingPercent: nil,
                 showsCodexLabel: false
-            ).accessibilityLabel, equals: "Codex 剩余额度未知，不显示标识")
+            ).accessibilityLabel, equals: "Codex 剩余额度未知")
             && expect(renderer.presentation(
                 style: .segmented,
                 remainingPercent: 0,
                 showsCodexLabel: false
-            ).accessibilityLabel, equals: "Codex 剩余额度 0%，不显示标识")
+            ).accessibilityLabel, equals: "Codex 剩余额度 0%")
     }
 
     private static func testBatteryRendererClamping() -> Bool {
