@@ -14,6 +14,11 @@ enum QuotaParserTests {
             ("highest used percent wins", testHighestUsedPercent),
             ("known plan names are normalized", testKnownPlanNames),
             ("unknown and missing plan names are nil", testUnknownAndMissingPlanNames),
+            ("matching active subscription expiry is returned", testMatchingSubscriptionExpiry),
+            ("subscription expiry requires matching known plans", testSubscriptionExpiryPlanValidation),
+            ("subscription expiry must be in the future", testSubscriptionExpiryDateValidation),
+            ("malformed subscription JWTs are rejected", testMalformedSubscriptionJWTs),
+            ("missing subscription auth claims are rejected", testMissingSubscriptionAuthClaims),
             ("prolite snapshot carries Pro plan", testProliteSnapshotPlan),
             ("unknown plan keeps snapshot valid", testUnknownPlanKeepsSnapshotValid),
             ("primary window carries its reset", testPrimaryWindowReset),
@@ -129,6 +134,116 @@ enum QuotaParserTests {
     private static func testUnknownAndMissingPlanNames() -> Bool {
         expect(PlanInfo.normalizedName("unknown"), equals: nil)
             && expect(PlanInfo.normalizedName(nil), equals: nil)
+    }
+
+    private static func testMatchingSubscriptionExpiry() -> Bool {
+        let expiry = "2026-08-01T00:00:00Z"
+        let authData = subscriptionAuthData(plan: "prolite", expiry: expiry)
+        return expect(
+            PlanInfo.subscriptionExpiry(
+                authData: authData,
+                currentPlan: "Pro",
+                now: standardDate("2026-07-15T00:00:00Z")!
+            ),
+            equals: standardDate(expiry)
+        )
+    }
+
+    private static func testSubscriptionExpiryPlanValidation() -> Bool {
+        let now = standardDate("2026-07-15T00:00:00Z")!
+        return expect(
+            PlanInfo.subscriptionExpiry(
+                authData: subscriptionAuthData(plan: "plus", expiry: "2026-08-01T00:00:00Z"),
+                currentPlan: "Pro",
+                now: now
+            ),
+            equals: nil
+        ) && expect(
+            PlanInfo.subscriptionExpiry(
+                authData: subscriptionAuthData(plan: "unknown", expiry: "2026-08-01T00:00:00Z"),
+                currentPlan: "Pro",
+                now: now
+            ),
+            equals: nil
+        ) && expect(
+            PlanInfo.subscriptionExpiry(
+                authData: subscriptionAuthData(plan: "prolite", expiry: "2026-08-01T00:00:00Z"),
+                currentPlan: nil,
+                now: now
+            ),
+            equals: nil
+        )
+    }
+
+    private static func testSubscriptionExpiryDateValidation() -> Bool {
+        let now = standardDate("2026-07-15T00:00:00Z")!
+        return [
+            "2026-07-14T23:59:59Z",
+            "2026-07-15T00:00:00Z",
+            "not-a-date"
+        ].allSatisfy { expiry in
+            expect(
+                PlanInfo.subscriptionExpiry(
+                    authData: subscriptionAuthData(plan: "prolite", expiry: expiry),
+                    currentPlan: "Pro",
+                    now: now
+                ),
+                equals: nil
+            )
+        }
+    }
+
+    private static func testMalformedSubscriptionJWTs() -> Bool {
+        let now = standardDate("2026-07-15T00:00:00Z")!
+        let nonJSONPayload = base64URL(Data("not json".utf8))
+        let tokens = [
+            "header.payload",
+            "header.payload.signature.extra",
+            "header.***.signature",
+            "header.\(nonJSONPayload).signature"
+        ]
+        return tokens.allSatisfy { token in
+            expect(
+                PlanInfo.subscriptionExpiry(
+                    authData: authData(idToken: token),
+                    currentPlan: "Pro",
+                    now: now
+                ),
+                equals: nil
+            )
+        }
+    }
+
+    private static func testMissingSubscriptionAuthClaims() -> Bool {
+        let now = standardDate("2026-07-15T00:00:00Z")!
+        let validNamespace: [String: Any] = [
+            "chatgpt_plan_type": "prolite",
+            "chatgpt_subscription_active_until": "2026-08-01T00:00:00Z"
+        ]
+        let authCases: [Data] = [
+            Data("not json".utf8),
+            jsonData([:]),
+            jsonData(["tokens": [:]]),
+            jsonData(["tokens": ["id_token": 123]]),
+            authData(idToken: fakeJWT(payload: [:])),
+            authData(idToken: fakeJWT(payload: ["https://api.openai.com/auth": [
+                "chatgpt_subscription_active_until": "2026-08-01T00:00:00Z"
+            ]])),
+            authData(idToken: fakeJWT(payload: ["https://api.openai.com/auth": [
+                "chatgpt_plan_type": "prolite"
+            ]])),
+            authData(idToken: fakeJWT(payload: ["wrong_namespace": validNamespace]))
+        ]
+        return authCases.allSatisfy { authData in
+            expect(
+                PlanInfo.subscriptionExpiry(
+                    authData: authData,
+                    currentPlan: "Pro",
+                    now: now
+                ),
+                equals: nil
+            )
+        }
     }
 
     private static func testProliteSnapshotPlan() -> Bool {
@@ -1234,6 +1349,35 @@ enum QuotaParserTests {
         ]
         let data = try! JSONSerialization.data(withJSONObject: root)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func subscriptionAuthData(plan: String, expiry: String) -> Data {
+        authData(idToken: fakeJWT(payload: [
+            "https://api.openai.com/auth": [
+                "chatgpt_plan_type": plan,
+                "chatgpt_subscription_active_until": expiry
+            ]
+        ]))
+    }
+
+    private static func authData(idToken: Any) -> Data {
+        jsonData(["tokens": ["id_token": idToken]])
+    }
+
+    private static func fakeJWT(payload: [String: Any]) -> String {
+        let payloadData = jsonData(payload)
+        return "header.\(base64URL(payloadData)).signature"
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func jsonData(_ object: Any) -> Data {
+        try! JSONSerialization.data(withJSONObject: object)
     }
 
     private static func fractionalDate(_ value: String) -> Date? {
