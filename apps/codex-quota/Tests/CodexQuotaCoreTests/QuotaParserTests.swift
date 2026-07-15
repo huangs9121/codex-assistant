@@ -906,6 +906,7 @@ enum QuotaParserTests {
             "", "1.2", "1.2.3.4", "vv1.2.3", "v", "-1.2.3",
             "1.-2.3", "1.2.-3", "1..3", ".1.2", "1.2.", "1.a.3",
             " 1.2.3", "1.2.3 ", "1. 2.3", "1.2.3\n",
+            "01.2.3", "1.02.3", "v1.2.03",
             "999999999999999999999999999999999.2.3"
         ]
         return invalid.allSatisfy { SemanticVersion($0) == nil }
@@ -982,6 +983,8 @@ enum QuotaParserTests {
             release(url: "https://user:pass@github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
             release(url: "https://user@github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
             release(url: "https://:pass@github.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://example.com/huangs9121/codex-assistant/releases/tag/v1.2.0"),
+            release(url: "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0#notes"),
             release(tag: "not-a-version")
         ]
         return expect(valid.eligibleVersion, equals: SemanticVersion("1.2.0"))

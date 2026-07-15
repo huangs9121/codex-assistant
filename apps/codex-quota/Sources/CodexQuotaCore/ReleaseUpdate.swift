@@ -17,6 +17,7 @@ public struct SemanticVersion: Comparable, Equatable, Sendable {
         for component in components {
             guard
                 !component.isEmpty,
+                component.count == 1 || component.first != "0",
                 component.utf8.allSatisfy({ (48...57).contains($0) }),
                 let number = Int(component)
             else {
@@ -63,8 +64,10 @@ public struct GitHubRelease: Decodable, Sendable {
             !draft,
             !prerelease,
             htmlURL.scheme?.lowercased() == "https",
+            htmlURL.host?.lowercased() == "github.com",
             htmlURL.user == nil,
-            htmlURL.password == nil
+            htmlURL.password == nil,
+            htmlURL.fragment == nil
         else {
             return nil
         }
