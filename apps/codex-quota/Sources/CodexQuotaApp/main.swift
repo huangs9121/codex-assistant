@@ -93,7 +93,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var labelToggleItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
     private var refreshTimer: Timer?
+    private var updatePolicyTimer: Timer?
+    private var availableRelease: GitHubRelease?
     private var isRefreshing = false
+    private let updateController = GitHubUpdateController()
+    private let launchAtLoginController = LaunchAtLoginController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -109,10 +113,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
         showAutoRefreshNoticeIfNeeded()
+        checkForUpdatesAutomatically()
+        let updateTimer = Timer(
+            timeInterval: 3_600,
+            target: self,
+            selector: #selector(checkForUpdatesFromTimer),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(updateTimer, forMode: .common)
+        updatePolicyTimer = updateTimer
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
+        updatePolicyTimer?.invalidate()
+        updateController.invalidate()
     }
 
     private func configureStatusItem() {
@@ -247,6 +263,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func refreshFromTimer() {
         refresh()
+    }
+
+    @objc private func checkForUpdatesFromTimer() {
+        checkForUpdatesAutomatically()
+    }
+
+    private func checkForUpdatesAutomatically() {
+        guard
+            let versionString = Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleShortVersionString"
+            ) as? String,
+            let currentVersion = SemanticVersion(versionString)
+        else {
+            return
+        }
+        updateController.check(currentVersion: currentVersion, manual: false) { [weak self] result in
+            switch result {
+            case let .update(release):
+                self?.availableRelease = release
+            case .current, .failure:
+                break
+            }
+        }
     }
 
     private func refresh() {
