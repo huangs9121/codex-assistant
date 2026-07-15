@@ -5,3 +5,5 @@
 *.xcuserstate
 /outputs/
 /verification/
+/.superpowers/
+/.worktrees/
