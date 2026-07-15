@@ -109,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var updatePolicyTimer: Timer?
     private var availableRelease: GitHubRelease?
     private var isRefreshing = false
+    private var isUpdateCheckInFlight = false
     private let updateController = GitHubUpdateController()
     private let launchAtLoginController = LaunchAtLoginController()
 
@@ -459,12 +460,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let currentVersion = currentAppVersion() else {
             return
         }
-        updateController.check(currentVersion: currentVersion, manual: false) { [weak self] result in
-            self?.handleUpdateResult(result, manual: false)
-        }
+        performUpdateCheck(currentVersion: currentVersion, manual: false)
     }
 
     @objc private func checkForUpdatesManually() {
+        guard !isUpdateCheckInFlight else {
+            showAlert(message: "正在检查更新，请稍候。")
+            return
+        }
         if let availableRelease {
             showUpdateAlert(for: availableRelease)
             return
@@ -476,8 +479,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             )
             return
         }
-        updateController.check(currentVersion: currentVersion, manual: true) { [weak self] result in
-            self?.handleUpdateResult(result, manual: true)
+        performUpdateCheck(currentVersion: currentVersion, manual: true)
+    }
+
+    private func performUpdateCheck(currentVersion: SemanticVersion, manual: Bool) {
+        guard !isUpdateCheckInFlight else {
+            if manual {
+                showAlert(message: "正在检查更新，请稍候。")
+            }
+            return
+        }
+        if !manual, !UpdatePolicy.shouldAutomaticallyCheck(
+            lastSuccess: preferences.lastUpdateCheckSuccess,
+            lastFailure: preferences.lastUpdateCheckFailure,
+            now: Date()
+        ) {
+            return
+        }
+        isUpdateCheckInFlight = true
+        updateController.check(currentVersion: currentVersion, manual: manual) { [weak self] result in
+            self?.isUpdateCheckInFlight = false
+            self?.handleUpdateResult(result, manual: manual)
         }
     }
 
@@ -518,6 +540,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         preferences.lastPromptedVersion = canonicalVersion(version)
+        statusItem.menu?.cancelTracking()
         activateApp()
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -526,7 +549,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "前往更新")
         alert.addButton(withTitle: "稍后")
         if alert.runModal() == .alertFirstButtonReturn {
-            NSWorkspace.shared.open(release.htmlURL)
+            if !NSWorkspace.shared.open(release.htmlURL) {
+                showAlert(message: "无法打开更新页面，请稍后重试。")
+            }
         }
     }
 
