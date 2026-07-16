@@ -1,6 +1,7 @@
 import AppKit
 import CodexQuotaCore
 import CodexQuotaUI
+import UserNotifications
 
 @MainActor
 private final class MenuChoiceRow: NSView {
@@ -80,7 +81,9 @@ private final class MenuChoiceRow: NSView {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
+    @preconcurrency UNUserNotificationCenterDelegate
+{
     private let statusItem = NSStatusBar.system.statusItem(
         withLength: NSStatusItem.variableLength
     )
@@ -90,6 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let resetTimeLabel = NSTextField(labelWithString: "下次重置：--")
     private let planNameLabel = NSTextField(labelWithString: "当前套餐：--")
     private let expiryLabel = NSTextField(labelWithString: "套餐到期：--")
+    private let resetSignalLabel = NSTextField(labelWithString: "重置预告：暂无")
+    private let expectedResetLabel = NSTextField(labelWithString: "预期时间：--")
     private let sessionsRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/sessions", isDirectory: true)
     private let authURL = FileManager.default.homeDirectoryForCurrentUser
@@ -107,14 +112,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentSubscriptionExpiry: Date?
     private var refreshTimer: Timer?
     private var updatePolicyTimer: Timer?
+    private var resetMonitorTimer: Timer?
     private var availableRelease: GitHubRelease?
+    private var currentResetSignal: TiboResetSignal?
     private var isRefreshing = false
     private var isUpdateCheckInFlight = false
+    private var isResetMonitorInFlight = false
     private let updateController = GitHubUpdateController()
+    private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        currentResetSignal = preferences.latestResetSignal
         configureStatusItem()
         refresh()
         let timer = Timer(
@@ -137,12 +147,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         RunLoop.main.add(updateTimer, forMode: .common)
         updatePolicyTimer = updateTimer
+
+        configureResetNotifications()
+        checkTiboResetSignals()
+        let resetTimer = Timer(
+            timeInterval: 300,
+            target: self,
+            selector: #selector(checkTiboResetSignalsFromTimer),
+            userInfo: nil,
+            repeats: true
+        )
+        RunLoop.main.add(resetTimer, forMode: .common)
+        resetMonitorTimer = resetTimer
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
         updatePolicyTimer?.invalidate()
+        resetMonitorTimer?.invalidate()
         updateController.invalidate()
+        resetMonitorController.invalidate()
     }
 
     private func configureStatusItem() {
@@ -215,8 +239,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func makeHeaderItem() -> NSMenuItem {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 92))
-        let labels = [updateTimeLabel, resetTimeLabel, planNameLabel, expiryLabel]
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 132))
+        let labels = [
+            updateTimeLabel,
+            resetTimeLabel,
+            planNameLabel,
+            expiryLabel,
+            resetSignalLabel,
+            expectedResetLabel
+        ]
         for label in labels {
             label.translatesAutoresizingMaskIntoConstraints = false
             label.font = .menuFont(ofSize: 13)
@@ -232,7 +263,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updateTimeLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: 8),
             resetTimeLabel.topAnchor.constraint(equalTo: updateTimeLabel.bottomAnchor, constant: 3),
             planNameLabel.topAnchor.constraint(equalTo: resetTimeLabel.bottomAnchor, constant: 3),
-            expiryLabel.topAnchor.constraint(equalTo: planNameLabel.bottomAnchor, constant: 3)
+            expiryLabel.topAnchor.constraint(equalTo: planNameLabel.bottomAnchor, constant: 3),
+            resetSignalLabel.topAnchor.constraint(equalTo: expiryLabel.bottomAnchor, constant: 7),
+            expectedResetLabel.topAnchor.constraint(equalTo: resetSignalLabel.bottomAnchor, constant: 3)
         ])
 
         let item = NSMenuItem()
@@ -466,6 +499,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         checkForUpdatesAutomatically()
     }
 
+    @objc private func checkTiboResetSignalsFromTimer() {
+        checkTiboResetSignals()
+    }
+
     private func checkForUpdatesAutomatically() {
         guard let currentVersion = currentAppVersion() else {
             return
@@ -628,6 +665,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateHeaderLabels(now: Date = Date()) {
+        updateResetSignalLabels(now: now)
         guard let snapshot = currentSnapshot else {
             updateTimeLabel.stringValue = "更新时间：--:--:--"
             resetTimeLabel.stringValue = "下次重置：--"
@@ -639,6 +677,126 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         resetTimeLabel.stringValue = "下次重置：\(ResetCountdownFormatter.string(resetsAt: snapshot.resetDate(at: now), now: now))"
         planNameLabel.stringValue = "当前套餐：\(snapshot.planName ?? "--")"
         expiryLabel.stringValue = "套餐到期：\(expiryString(currentSubscriptionExpiry))"
+    }
+
+    private func updateResetSignalLabels(now: Date) {
+        guard let signal = currentResetSignal else {
+            resetSignalLabel.stringValue = "重置预告：暂无"
+            expectedResetLabel.stringValue = "预期时间：--"
+            return
+        }
+        resetSignalLabel.stringValue = "重置预告：\(signal.kind.statusText)"
+        expectedResetLabel.stringValue = "预期时间：\(signal.expectedTimeText(now: now))"
+    }
+
+    private func configureResetNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                self?.checkTiboResetSignals()
+            }
+        }
+    }
+
+    private func checkTiboResetSignals() {
+        guard !isResetMonitorInFlight else {
+            return
+        }
+        isResetMonitorInFlight = true
+        resetMonitorController.check { [weak self] result in
+            guard let self else {
+                return
+            }
+            isResetMonitorInFlight = false
+            switch result {
+            case let .signal(signal):
+                currentResetSignal = signal
+                preferences.latestResetSignal = signal
+                updateResetSignalLabels(now: Date())
+                if
+                    let signal,
+                    signal.id != preferences.lastNotifiedResetSignalID
+                {
+                    sendResetNotification(for: signal)
+                }
+            case .failure:
+                break
+            }
+        }
+    }
+
+    private func sendResetNotification(for signal: TiboResetSignal) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [weak self] settings in
+            guard
+                settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional
+            else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.deliverResetNotification(for: signal)
+            }
+        }
+    }
+
+    private func deliverResetNotification(for signal: TiboResetSignal) {
+        let content = UNMutableNotificationContent()
+        switch signal.kind {
+        case .proposal:
+            content.title = "Tibo 提到可能重置 Codex 额度"
+        case .announced:
+            content.title = "Tibo 已预告 Codex 额度重置"
+        case .completed:
+            content.title = "Codex 额度重置已发起"
+        }
+        content.body = "预期时间：\(signal.expectedTimeText())"
+        content.sound = .default
+        content.userInfo = ["url": signal.url.absoluteString]
+
+        let request = UNNotificationRequest(
+            identifier: "tibo-reset-\(signal.id)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            guard error == nil else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.preferences.lastNotifiedResetSignalID = signal.id
+            }
+        }
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (
+            UNNotificationPresentationOptions
+        ) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        defer {
+            completionHandler()
+        }
+        guard
+            let value = response.notification.request.content.userInfo["url"] as? String,
+            let url = URL(string: value),
+            url.scheme == "https",
+            ["x.com", "twitter.com"].contains(url.host?.lowercased())
+        else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     private func expiryString(_ date: Date?) -> String {

@@ -99,6 +99,10 @@ enum QuotaParserTests {
             ("update check policy enforces success and failure throttles", testUpdateCheckPolicy),
             ("update prompt policy normalizes semantic versions", testUpdatePromptPolicy),
             ("update preferences persist typed optional values", testUpdatePreferences),
+            ("Tibo feed selects the latest explicit reset signal", testLatestTiboResetSignal),
+            ("Tibo feed ignores failed and unsafe sources", testTiboResetSignalSourceValidation),
+            ("Tibo reset expectations render in Chinese", testTiboResetExpectationFormatting),
+            ("Tibo reset notification state persists", testTiboResetPreferences),
             ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
             ("status presentation supports every style identity and reset combination", testStatusPresentationMatrix),
             ("status identity and reset widths compose exactly", testStatusPresentationWidthRelationships),
@@ -1195,6 +1199,151 @@ enum QuotaParserTests {
 
             defaults.set("", forKey: DisplayPreferences.lastPromptedVersionKey)
             return preferences.lastPromptedVersion == nil
+        }
+    }
+
+    private static func testLatestTiboResetSignal() -> Bool {
+        let data = Data(
+            """
+            {
+              "sourceErrors": {},
+              "tiboPosts": [
+                {
+                  "guid": "new-vague",
+                  "pubDate": "2026-07-16T06:20:00.000Z",
+                  "title": "Should the limits look different?",
+                  "link": "https://x.com/thsottiaux/status/300",
+                  "tweetAssessment": {"category": "vague_hint"}
+                },
+                {
+                  "guid": "completed-reset",
+                  "pubDate": "2026-07-16T05:00:00.000Z",
+                  "title": "Another reset. You should have 100% back in a few minutes.",
+                  "link": "https://x.com/thsottiaux/status/200",
+                  "tweetAssessment": {"category": "reset_completed"}
+                },
+                {
+                  "guid": "proposal",
+                  "pubDate": "2026-07-15T05:00:00.000Z",
+                  "title": "Should we reset Codex usage again?",
+                  "link": "https://x.com/thsottiaux/status/100",
+                  "tweetAssessment": {"category": "reset_proposal"}
+                }
+              ]
+            }
+            """.utf8
+        )
+        guard
+            let now = fractionalDate("2026-07-16T06:30:00.000Z"),
+            let expectedAt = fractionalDate("2026-07-16T05:15:00.000Z")
+        else {
+            return false
+        }
+        guard let signal = try? TiboResetSignal.latest(from: data, now: now) else {
+            return false
+        }
+        return expect(signal.id, equals: "completed-reset")
+            && expect(signal.kind, equals: .completed)
+            && expect(signal.expectedAt, equals: expectedAt)
+    }
+
+    private static func testTiboResetSignalSourceValidation() -> Bool {
+        guard let now = fractionalDate("2026-07-16T06:30:00.000Z") else {
+            return false
+        }
+        let failedData = Data(
+            """
+            {
+              "sourceErrors": {"tibo": "feed unavailable"},
+              "tiboPosts": [{
+                "guid": "reset",
+                "pubDate": "2026-07-16T05:00:00.000Z",
+                "title": "Reset within 2 hours.",
+                "link": "https://x.com/thsottiaux/status/200",
+                "tweetAssessment": {"category": "reset_announced"}
+              }]
+            }
+            """.utf8
+        )
+        let unsafeData = Data(
+            """
+            {
+              "sourceErrors": {},
+              "tiboPosts": [{
+                "guid": "reset",
+                "pubDate": "2026-07-16T05:00:00.000Z",
+                "title": "Reset within 2 hours.",
+                "link": "https://example.com/thsottiaux/status/200",
+                "tweetAssessment": {"category": "reset_announced"}
+              }]
+            }
+            """.utf8
+        )
+        return (try? TiboResetSignal.latest(from: failedData, now: now)) == nil
+            && (try? TiboResetSignal.latest(from: unsafeData, now: now)) == nil
+    }
+
+    private static func testTiboResetExpectationFormatting() -> Bool {
+        guard let utc = TimeZone(secondsFromGMT: 0) else {
+            return false
+        }
+        guard
+            let publishedAt = fractionalDate("2026-07-16T05:00:00.000Z"),
+            let expectedAt = fractionalDate("2026-07-16T07:00:00.000Z"),
+            let now = fractionalDate("2026-07-16T06:30:00.000Z")
+        else {
+            return false
+        }
+        let signal = TiboResetSignal(
+            id: "reset",
+            kind: .announced,
+            publishedAt: publishedAt,
+            text: "Reset within 2 hours.",
+            url: URL(string: "https://x.com/thsottiaux/status/200")!,
+            expectedAt: expectedAt,
+            expectationHint: nil
+        )
+        return expect(
+            signal.expectedTimeText(
+                now: now,
+                timeZone: utc
+            ),
+            equals: "今天 07:00 前"
+        )
+    }
+
+    private static func testTiboResetPreferences() -> Bool {
+        withPreferencesSuite { defaults in
+            guard let publishedAt = fractionalDate("2026-07-16T05:00:00.000Z") else {
+                return false
+            }
+            var preferences = DisplayPreferences(defaults: defaults)
+            let signal = TiboResetSignal(
+                id: "reset",
+                kind: .proposal,
+                publishedAt: publishedAt,
+                text: "Should we reset Codex?",
+                url: URL(string: "https://x.com/thsottiaux/status/200")!,
+                expectedAt: nil,
+                expectationHint: "时间待确认"
+            )
+            preferences.lastNotifiedResetSignalID = signal.id
+            preferences.latestResetSignal = signal
+            let reloaded = DisplayPreferences(defaults: defaults)
+            guard
+                reloaded.lastNotifiedResetSignalID == signal.id,
+                reloaded.latestResetSignal == signal
+            else {
+                return false
+            }
+            preferences.lastNotifiedResetSignalID = nil
+            preferences.latestResetSignal = nil
+            return defaults.object(
+                forKey: DisplayPreferences.lastNotifiedResetSignalIDKey
+            ) == nil
+                && defaults.object(
+                    forKey: DisplayPreferences.latestResetSignalKey
+                ) == nil
         }
     }
 

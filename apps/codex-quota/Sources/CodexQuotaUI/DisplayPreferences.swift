@@ -1,4 +1,5 @@
 import CoreFoundation
+import CodexQuotaCore
 import Foundation
 
 public struct DisplayPreferences {
@@ -10,6 +11,8 @@ public struct DisplayPreferences {
     public static let lastUpdateCheckSuccessKey = "lastUpdateCheckSuccess"
     public static let lastUpdateCheckFailureKey = "lastUpdateCheckFailure"
     public static let lastPromptedVersionKey = "lastPromptedVersion"
+    public static let lastNotifiedResetSignalIDKey = "lastNotifiedResetSignalID"
+    public static let latestResetSignalKey = "latestResetSignal"
 
     private let defaults: UserDefaults
 
@@ -135,6 +138,34 @@ public struct DisplayPreferences {
             } else {
                 defaults.removeObject(forKey: Self.lastPromptedVersionKey)
             }
+        }
+    }
+
+    public var lastNotifiedResetSignalID: String? {
+        get {
+            defaults.string(forKey: Self.lastNotifiedResetSignalIDKey)
+        }
+        set {
+            defaults.set(newValue, forKey: Self.lastNotifiedResetSignalIDKey)
+        }
+    }
+
+    public var latestResetSignal: TiboResetSignal? {
+        get {
+            guard
+                let data = defaults.data(forKey: Self.latestResetSignalKey),
+                let signal = try? JSONDecoder().decode(TiboResetSignal.self, from: data)
+            else {
+                return nil
+            }
+            return signal
+        }
+        set {
+            guard let newValue, let data = try? JSONEncoder().encode(newValue) else {
+                defaults.removeObject(forKey: Self.latestResetSignalKey)
+                return
+            }
+            defaults.set(data, forKey: Self.latestResetSignalKey)
         }
     }
 }
