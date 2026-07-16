@@ -110,6 +110,7 @@ enum QuotaParserTests {
             ("battery renderer clamps values outside zero through one hundred", testBatteryRendererClamping),
             ("native battery fill changes with percentage", testNativeBatteryFillChanges),
             ("embedded battery renders its value inside the image", testEmbeddedBatteryValueChanges),
+            ("plain number style renders only the value", testDigitsStyleIsPlain),
             ("segmented battery changes only across segment boundaries", testSegmentedBatteryBoundaries),
             ("battery artwork keeps safe transparent canvas margins", testBatteryCanvasMargins),
             ("battery outlines and terminals remain visible", testBatteryOutlineAndTerminalVisibility),
@@ -829,17 +830,18 @@ enum QuotaParserTests {
     }
 
     private static func testBatteryStyleCases() -> Bool {
-        expect(BatteryStyle.allCases, equals: [.native, .embedded, .segmented])
+        expect(BatteryStyle.allCases, equals: [.native, .embedded, .segmented, .digits])
             && expect(BatteryStyle.allCases.map(\.rawValue), equals: [
-                "native", "embedded", "segmented"
+                "native", "embedded", "segmented", "digits"
             ])
     }
 
     private static func testBatteryStyleMenuTitles() -> Bool {
         expect(BatteryStyle.allCases.map(\.menuTitle), equals: [
-            "A · 原生电池",
-            "B · 数字徽章",
-            "C · 分段电池"
+            "原生电池",
+            "数字徽章",
+            "分段电池",
+            "纯数字"
         ])
     }
 
@@ -1537,7 +1539,8 @@ enum QuotaParserTests {
         let expectedSizes: [BatteryStyle: NSSize] = [
             .native: NSSize(width: 36, height: 16),
             .embedded: NSSize(width: 34, height: 18),
-            .segmented: NSSize(width: 40, height: 16)
+            .segmented: NSSize(width: 40, height: 16),
+            .digits: NSSize(width: 26, height: 18)
         ]
 
         for style in BatteryStyle.allCases {
@@ -1583,9 +1586,9 @@ enum QuotaParserTests {
                 return diagnostic("\(style) full image label sizing is incorrect")
             }
 
-            if style == .embedded {
+            if style == .embedded || style == .digits {
                 guard withoutLabel.image.size.width == withoutLabel.batteryImage.size.width + 2 else {
-                    return diagnostic("embedded style repeats an external percentage")
+                    return diagnostic("\(style) style repeats an external percentage")
                 }
             } else {
                 guard
@@ -1709,6 +1712,30 @@ enum QuotaParserTests {
         }
         return images.allSatisfy { $0.size == NSSize(width: 34, height: 18) }
             && Set(images.compactMap(bitmapData)).count == images.count
+    }
+
+    private static func testDigitsStyleIsPlain() -> Bool {
+        let renderer = BatteryStatusRenderer()
+        let presentation = renderer.presentation(
+            style: .digits,
+            remainingPercent: 60,
+            identityMode: .hidden,
+            compactReset: nil
+        )
+        guard
+            presentation.batteryImage.size == NSSize(width: 26, height: 18),
+            presentation.image.size == NSSize(width: 28, height: 18),
+            let bitmap = AlphaBitmap(image: presentation.batteryImage, scale: 2),
+            let bounds = bitmap.nonTransparentBounds(threshold: 0.03)
+        else {
+            return false
+        }
+        let coverage = bitmap.coverage(alphaAtLeast: 0.03)
+        return bounds.minX > 0
+            && bounds.minY > 0
+            && bounds.maxX < bitmap.width - 1
+            && bounds.maxY < bitmap.height - 1
+            && coverage < 0.30
     }
 
     private static func testSegmentedBatteryBoundaries() -> Bool {
@@ -1926,9 +1953,10 @@ enum QuotaParserTests {
                         return diagnostic("\(style) \(String(describing: percent)) @\(scale)x could not render")
                     }
                     let coverage = bitmap.coverage(alphaAtLeast: 0.03)
-                    guard coverage >= 0.08, coverage <= 0.85 else {
+                    let minimumCoverage = style == .digits ? 0.025 : 0.08
+                    guard coverage >= minimumCoverage, coverage <= 0.85 else {
                         return diagnostic(
-                            "\(style) \(String(describing: percent)) @\(scale)x alpha coverage \(coverage) outside 0.08...0.85"
+                            "\(style) \(String(describing: percent)) @\(scale)x alpha coverage \(coverage) outside \(minimumCoverage)...0.85"
                         )
                     }
                 }

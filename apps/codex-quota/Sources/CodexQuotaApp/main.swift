@@ -153,11 +153,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(makeHeaderItem())
         menu.addItem(.separator())
 
+        let styleItem = NSMenuItem(
+            title: "展示形式",
+            action: nil,
+            keyEquivalent: ""
+        )
+        let styleMenu = NSMenu(title: "展示形式")
         for style in BatteryStyle.allCases {
             let item = makeStyleItem(style)
             styleItems[style] = item
-            menu.addItem(item)
+            styleMenu.addItem(item)
         }
+        styleItem.submenu = styleMenu
+        menu.addItem(styleItem)
 
         for mode in StatusIdentityMode.allCases {
             let item = makeIdentityItem(mode)

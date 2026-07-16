@@ -53,6 +53,8 @@ public struct BatteryStatusRenderer {
             batteryImage = embeddedImage(percent: percent)
         case .segmented:
             batteryImage = segmentedImage(percent: percent)
+        case .digits:
+            batteryImage = digitsImage(percent: percent)
         }
         batteryImage.isTemplate = true
 
@@ -113,7 +115,7 @@ public struct BatteryStatusRenderer {
         let labelWidth = ceil(label.size().width)
         let percentageWidth = ceil(percentage.size().width)
         let suffixWidth = suffix.map { ceil($0.size().width) } ?? 0
-        let drawsPercentage = style != .embedded
+        let drawsPercentage = style == .native || style == .segmented
 
         var width = horizontalMargin * 2 + batteryImage.size.width
         switch identityMode {
@@ -255,6 +257,22 @@ public struct BatteryStatusRenderer {
                 NSColor.black.withAlphaComponent(alpha).setFill()
                 NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
             }
+        }
+    }
+
+    private func digitsImage(percent: Int?) -> NSImage {
+        image(size: NSSize(width: 26, height: 18)) { _ in
+            let value = percent.map(String.init) ?? "--"
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium),
+                .foregroundColor: NSColor.black.withAlphaComponent(0.9)
+            ]
+            let text = NSAttributedString(string: value, attributes: attributes)
+            let size = text.size()
+            text.draw(at: NSPoint(
+                x: floor((26 - size.width) / 2),
+                y: floor((18 - size.height) / 2)
+            ))
         }
     }
 
