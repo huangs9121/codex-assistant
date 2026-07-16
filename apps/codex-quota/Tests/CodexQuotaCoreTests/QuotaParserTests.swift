@@ -509,12 +509,12 @@ enum QuotaParserTests {
     private static func testCompactResetCountdownBoundaries() -> Bool {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let cases: [(TimeInterval, String)] = [
-            (51 * 60 * 60, "2D"),
-            (24 * 60 * 60, "1D"),
-            (23 * 60 * 60 + 59 * 60, "23H"),
-            (60 * 60, "1H"),
-            (59 * 60, "0H"),
-            (-1, "0H")
+            (51 * 60 * 60, "2天"),
+            (24 * 60 * 60, "1天"),
+            (23 * 60 * 60 + 59 * 60, "23小时"),
+            (60 * 60, "1小时"),
+            (59 * 60, "0小时"),
+            (-1, "0小时")
         ]
         return cases.allSatisfy { interval, expected in
             expect(
@@ -1435,7 +1435,7 @@ enum QuotaParserTests {
         for scale in [1, 2] {
             for style in BatteryStyle.allCases {
                 for identityMode in StatusIdentityMode.allCases {
-                    for compactReset in [nil, "2D"] as [String?] {
+                    for compactReset in [nil, "2天"] as [String?] {
                         let presentation = renderer.presentation(
                             style: style,
                             remainingPercent: 60,
@@ -1472,7 +1472,7 @@ enum QuotaParserTests {
             .foregroundColor: NSColor.black.withAlphaComponent(0.9)
         ]
         let suffixWidth = ceil(NSAttributedString(
-            string: "2D",
+            string: "2天",
             attributes: suffixAttributes
         ).size().width)
 
@@ -1499,7 +1499,7 @@ enum QuotaParserTests {
                 style: style,
                 remainingPercent: 60,
                 identityMode: .hidden,
-                compactReset: "2D"
+                compactReset: "2天"
             )
             guard
                 logo.image.size.width == hidden.image.size.width + 21,
@@ -1524,8 +1524,8 @@ enum QuotaParserTests {
                 style: .embedded,
                 remainingPercent: nil,
                 identityMode: .logo,
-                compactReset: "2D"
-            ).accessibilityLabel, equals: "Codex 剩余额度未知，下次重置 2D，显示 OpenAI Logo")
+                compactReset: "2天"
+            ).accessibilityLabel, equals: "Codex 剩余额度未知，下次重置 2天，显示 OpenAI Logo")
             && expect(renderer.presentation(
                 style: .segmented,
                 remainingPercent: 0,
@@ -1540,7 +1540,7 @@ enum QuotaParserTests {
             .native: NSSize(width: 36, height: 16),
             .embedded: NSSize(width: 34, height: 18),
             .segmented: NSSize(width: 40, height: 16),
-            .digits: NSSize(width: 26, height: 18)
+            .digits: NSSize(width: 38, height: 18)
         ]
 
         for style in BatteryStyle.allCases {
@@ -1723,8 +1723,8 @@ enum QuotaParserTests {
             compactReset: nil
         )
         guard
-            presentation.batteryImage.size == NSSize(width: 26, height: 18),
-            presentation.image.size == NSSize(width: 28, height: 18),
+            presentation.batteryImage.size == NSSize(width: 38, height: 18),
+            presentation.image.size == NSSize(width: 40, height: 18),
             let bitmap = AlphaBitmap(image: presentation.batteryImage, scale: 2),
             let bounds = bitmap.nonTransparentBounds(threshold: 0.03)
         else {

@@ -37,8 +37,8 @@ public enum ResetCountdownFormatter {
         }
         let totalHours = Int(hours)
         if totalHours < 24 {
-            return "\(totalHours)H"
+            return "\(totalHours)小时"
         }
-        return "\(totalHours / 24)D"
+        return "\(totalHours / 24)天"
     }
 }

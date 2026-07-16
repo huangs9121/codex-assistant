@@ -261,8 +261,9 @@ public struct BatteryStatusRenderer {
     }
 
     private func digitsImage(percent: Int?) -> NSImage {
-        image(size: NSSize(width: 26, height: 18)) { _ in
-            let value = percent.map(String.init) ?? "--"
+        let canvasWidth: CGFloat = 38
+        return image(size: NSSize(width: canvasWidth, height: 18)) { _ in
+            let value = percent.map { "\($0)%" } ?? "--%"
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium),
                 .foregroundColor: NSColor.black.withAlphaComponent(0.9)
@@ -270,7 +271,7 @@ public struct BatteryStatusRenderer {
             let text = NSAttributedString(string: value, attributes: attributes)
             let size = text.size()
             text.draw(at: NSPoint(
-                x: floor((26 - size.width) / 2),
+                x: floor((canvasWidth - size.width) / 2),
                 y: floor((18 - size.height) / 2)
             ))
         }
