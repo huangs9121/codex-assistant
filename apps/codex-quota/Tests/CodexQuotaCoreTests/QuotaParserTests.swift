@@ -32,6 +32,8 @@ enum QuotaParserTests {
             ("huge reset is rejected", testHugeReset),
             ("negative reset is rejected", testNegativeReset),
             ("equal usage chooses primary reset", testEqualUsageChoosesPrimaryReset),
+            ("scheduled reset restores displayed quota", testScheduledResetRestoresQuota),
+            ("future reset preserves snapshot quota", testFutureResetPreservesQuota),
             ("missing reset countdown is unknown", testMissingResetCountdown),
             ("reset countdown formats days and hours", testResetCountdownDaysAndHours),
             ("reset countdown formats hours only", testResetCountdownHoursOnly),
@@ -433,6 +435,30 @@ enum QuotaParserTests {
             secondaryReset: 1_900_000_000
         ))
         return expect(snapshot?.resetsAt, equals: Date(timeIntervalSince1970: 1_800_000_000))
+    }
+
+    private static func testScheduledResetRestoresQuota() -> Bool {
+        let reset = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = QuotaSnapshot(
+            remainingPercent: 17,
+            observedAt: reset.addingTimeInterval(-60),
+            resetsAt: reset
+        )
+        return expect(snapshot.remainingPercent(at: reset), equals: 100)
+            && expect(snapshot.remainingPercent(at: reset.addingTimeInterval(1)), equals: 100)
+            && expect(snapshot.resetDate(at: reset), equals: nil)
+    }
+
+    private static func testFutureResetPreservesQuota() -> Bool {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(60)
+        let snapshot = QuotaSnapshot(
+            remainingPercent: 17,
+            observedAt: now,
+            resetsAt: reset
+        )
+        return expect(snapshot.remainingPercent(at: now), equals: 17)
+            && expect(snapshot.resetDate(at: now), equals: reset)
     }
 
     private static func testResetCountdownDaysAndHours() -> Bool {

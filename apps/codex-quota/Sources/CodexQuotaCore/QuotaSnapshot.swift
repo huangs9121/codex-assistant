@@ -17,4 +17,18 @@ public struct QuotaSnapshot: Equatable, Sendable {
         self.resetsAt = resetsAt
         self.planName = planName
     }
+
+    public func remainingPercent(at date: Date) -> Int {
+        guard let resetsAt, resetsAt <= date else {
+            return remainingPercent
+        }
+        return 100
+    }
+
+    public func resetDate(at date: Date) -> Date? {
+        guard let resetsAt, resetsAt > date else {
+            return nil
+        }
+        return resetsAt
+    }
 }

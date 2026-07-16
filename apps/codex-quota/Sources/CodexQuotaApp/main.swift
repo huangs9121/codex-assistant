@@ -347,12 +347,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateStatusPresentation() {
+        let now = Date()
+        let effectiveReset = currentSnapshot?.resetDate(at: now)
         let compactReset = preferences.showsResetCountdownInStatusBar
-            ? ResetCountdownFormatter.compactString(resetsAt: currentSnapshot?.resetsAt)
+            ? ResetCountdownFormatter.compactString(resetsAt: effectiveReset, now: now)
             : nil
         let presentation = renderer.presentation(
             style: preferences.batteryStyle,
-            remainingPercent: currentSnapshot?.remainingPercent,
+            remainingPercent: currentSnapshot?.remainingPercent(at: now),
             identityMode: preferences.identityMode,
             compactReset: compactReset
         )
@@ -626,7 +628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         updateTimeLabel.stringValue = UpdateTimeFormatter.label(lastRefreshAt: now)
-        resetTimeLabel.stringValue = "下次重置：\(ResetCountdownFormatter.string(resetsAt: snapshot.resetsAt, now: now))"
+        resetTimeLabel.stringValue = "下次重置：\(ResetCountdownFormatter.string(resetsAt: snapshot.resetDate(at: now), now: now))"
         planNameLabel.stringValue = "当前套餐：\(snapshot.planName ?? "--")"
         expiryLabel.stringValue = "套餐到期：\(expiryString(currentSubscriptionExpiry))"
     }
