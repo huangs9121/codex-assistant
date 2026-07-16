@@ -625,7 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             expiryLabel.stringValue = "套餐到期：--"
             return
         }
-        updateTimeLabel.stringValue = "更新时间：\(UpdateTimeFormatter.string(observedAt: snapshot.observedAt))"
+        updateTimeLabel.stringValue = UpdateTimeFormatter.label(lastRefreshAt: now)
         resetTimeLabel.stringValue = "下次重置：\(ResetCountdownFormatter.string(resetsAt: snapshot.resetsAt, now: now))"
         planNameLabel.stringValue = "当前套餐：\(snapshot.planName ?? "--")"
         expiryLabel.stringValue = "套餐到期：\(expiryString(currentSubscriptionExpiry))"

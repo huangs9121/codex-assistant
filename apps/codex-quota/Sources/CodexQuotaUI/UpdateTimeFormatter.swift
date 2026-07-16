@@ -1,6 +1,13 @@
 import Foundation
 
 public enum UpdateTimeFormatter {
+    public static func label(
+        lastRefreshAt date: Date?,
+        timeZone: TimeZone = .current
+    ) -> String {
+        "更新时间：\(string(observedAt: date, timeZone: timeZone))"
+    }
+
     public static func string(
         observedAt: Date?,
         timeZone: TimeZone = .current

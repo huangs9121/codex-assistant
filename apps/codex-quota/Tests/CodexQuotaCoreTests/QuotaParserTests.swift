@@ -67,6 +67,7 @@ enum QuotaParserTests {
             ("status identity modes have stable order and raw values", testStatusIdentityModeCases),
             ("status identity modes have exact menu titles", testStatusIdentityModeMenuTitles),
             ("update time includes seconds", testUpdateTimeIncludesSeconds),
+            ("update time label describes the latest refresh", testUpdateTimeLabel),
             ("missing update time uses second precision placeholder", testMissingUpdateTime),
             ("Codex label defaults to visible", testDefaultCodexLabel),
             ("launch notice defaults to not shown", testLaunchNoticeDefaultsToNotShown),
@@ -841,6 +842,19 @@ enum QuotaParserTests {
                 timeZone: utc
             ),
             equals: "12:34:56"
+        )
+    }
+
+    private static func testUpdateTimeLabel() -> Bool {
+        guard let utc = TimeZone(secondsFromGMT: 0) else {
+            return diagnostic("UTC timezone is unavailable")
+        }
+        return expect(
+            UpdateTimeFormatter.label(
+                lastRefreshAt: Date(timeIntervalSince1970: 45_296),
+                timeZone: utc
+            ),
+            equals: "更新时间：12:34:56"
         )
     }
 
