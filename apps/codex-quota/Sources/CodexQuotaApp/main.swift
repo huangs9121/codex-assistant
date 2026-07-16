@@ -92,13 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let updateTimeLabel = NSTextField(labelWithString: "更新时间：--:--:--")
     private let resetTimeLabel = NSTextField(labelWithString: "下次重置：--")
     private let planNameLabel = NSTextField(labelWithString: "当前套餐：--")
-    private let expiryLabel = NSTextField(labelWithString: "套餐到期：--")
     private let resetSignalLabel = NSTextField(labelWithString: "重置预告：暂无")
     private let expectedResetLabel = NSTextField(labelWithString: "预期时间：--")
     private let sessionsRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/sessions", isDirectory: true)
-    private let authURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".codex/auth.json")
     private let refreshQueue = DispatchQueue(
         label: "CodexQuota.refresh",
         qos: .utility
@@ -109,7 +106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var launchAtLoginItem: NSMenuItem?
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
-    private var currentSubscriptionExpiry: Date?
     private var refreshTimer: Timer?
     private var updatePolicyTimer: Timer?
     private var resetMonitorTimer: Timer?
@@ -239,12 +235,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func makeHeaderItem() -> NSMenuItem {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 132))
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 112))
         let labels = [
             updateTimeLabel,
             resetTimeLabel,
             planNameLabel,
-            expiryLabel,
             resetSignalLabel,
             expectedResetLabel
         ]
@@ -263,8 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             updateTimeLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: 8),
             resetTimeLabel.topAnchor.constraint(equalTo: updateTimeLabel.bottomAnchor, constant: 3),
             planNameLabel.topAnchor.constraint(equalTo: resetTimeLabel.bottomAnchor, constant: 3),
-            expiryLabel.topAnchor.constraint(equalTo: planNameLabel.bottomAnchor, constant: 3),
-            resetSignalLabel.topAnchor.constraint(equalTo: expiryLabel.bottomAnchor, constant: 7),
+            resetSignalLabel.topAnchor.constraint(equalTo: planNameLabel.bottomAnchor, constant: 7),
             expectedResetLabel.topAnchor.constraint(equalTo: resetSignalLabel.bottomAnchor, constant: 3)
         ])
 
@@ -631,35 +625,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         isRefreshing = true
 
         let sessionsRoot = sessionsRoot
-        let authURL = authURL
         refreshQueue.async { [weak self] in
             let snapshot = QuotaStore().latestSnapshot(in: sessionsRoot)
-            let expiry: Date?
-            if
-                let planName = snapshot?.planName,
-                let authData = try? Data(contentsOf: authURL)
-            {
-                expiry = PlanInfo.subscriptionExpiry(
-                    authData: authData,
-                    currentPlan: planName,
-                    now: Date()
-                )
-            } else {
-                expiry = nil
-            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else {
                     return
                 }
                 self.isRefreshing = false
-                self.apply(snapshot, expiry: expiry)
+                self.apply(snapshot)
             }
         }
     }
 
-    private func apply(_ snapshot: QuotaSnapshot?, expiry: Date?) {
+    private func apply(_ snapshot: QuotaSnapshot?) {
         currentSnapshot = snapshot
-        currentSubscriptionExpiry = expiry
         updateHeaderLabels()
         updateStatusPresentation()
     }
@@ -670,13 +649,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             updateTimeLabel.stringValue = "更新时间：--:--:--"
             resetTimeLabel.stringValue = "下次重置：--"
             planNameLabel.stringValue = "当前套餐：--"
-            expiryLabel.stringValue = "套餐到期：--"
             return
         }
         updateTimeLabel.stringValue = UpdateTimeFormatter.label(lastRefreshAt: now)
         resetTimeLabel.stringValue = "下次重置：\(ResetCountdownFormatter.string(resetsAt: snapshot.resetDate(at: now), now: now))"
         planNameLabel.stringValue = "当前套餐：\(snapshot.planName ?? "--")"
-        expiryLabel.stringValue = "套餐到期：\(expiryString(currentSubscriptionExpiry))"
     }
 
     private func updateResetSignalLabels(now: Date) {
@@ -797,18 +774,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             return
         }
         NSWorkspace.shared.open(url)
-    }
-
-    private func expiryString(_ date: Date?) -> String {
-        guard let date else {
-            return "--"
-        }
-        let formatter = DateFormatter()
-        formatter.timeZone = .current
-        formatter.calendar = .current
-        formatter.locale = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
     }
 
     private func activateApp() {
