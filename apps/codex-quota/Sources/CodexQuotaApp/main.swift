@@ -187,11 +187,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         styleItem.submenu = styleMenu
         menu.addItem(styleItem)
 
+        let identityItem = NSMenuItem(
+            title: "标识形式",
+            action: nil,
+            keyEquivalent: ""
+        )
+        let identityMenu = NSMenu(title: "标识形式")
         for mode in StatusIdentityMode.allCases {
             let item = makeIdentityItem(mode)
             identityItems[mode] = item
-            menu.addItem(item)
+            identityMenu.addItem(item)
         }
+        identityItem.submenu = identityMenu
+        menu.addItem(identityItem)
 
         menu.addItem(.separator())
 
