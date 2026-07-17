@@ -23,6 +23,7 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
     public let publishedAt: Date
     public let text: String
     public let url: URL
+    public let signalStrength: Double
     public let expectedAt: Date?
     public let expectationHint: String?
 
@@ -32,6 +33,7 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
         publishedAt: Date,
         text: String,
         url: URL,
+        signalStrength: Double,
         expectedAt: Date?,
         expectationHint: String?
     ) {
@@ -40,6 +42,7 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
         self.publishedAt = publishedAt
         self.text = text
         self.url = url
+        self.signalStrength = signalStrength
         self.expectedAt = expectedAt
         self.expectationHint = expectationHint
     }
@@ -101,6 +104,8 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
             guard
                 let category = post.tweetAssessment?.category,
                 let kind = TiboResetSignalKind(rawValue: category),
+                let strength = post.tweetAssessment?.resetSignalStrength,
+                strength >= 50,
                 !post.guid.isEmpty,
                 !post.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 now.timeIntervalSince(post.pubDate) >= 0,
@@ -120,6 +125,7 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
                 publishedAt: post.pubDate,
                 text: post.title.trimmingCharacters(in: .whitespacesAndNewlines),
                 url: url,
+                signalStrength: strength,
                 expectedAt: expectation.date,
                 expectationHint: expectation.hint
             )
@@ -159,6 +165,7 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
 
     private struct Assessment: Decodable {
         let category: String
+        let resetSignalStrength: Double?
     }
 
     private static func validatedTiboURL(_ value: String) -> URL? {

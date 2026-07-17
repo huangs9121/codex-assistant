@@ -9,6 +9,7 @@ public enum QuotaParser {
             let payload = root["payload"] as? [String: Any],
             payload["type"] as? String == "token_count",
             let rateLimits = payload["rate_limits"] as? [String: Any],
+            rateLimits["limit_id"] as? String == "codex",
             let observedAt = observedAt(from: root["timestamp"])
         else {
             return nil

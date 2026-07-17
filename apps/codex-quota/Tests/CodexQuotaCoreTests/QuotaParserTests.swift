@@ -37,10 +37,12 @@ enum QuotaParserTests {
             ("used above 100 clamps to 0", testUsedPercentAboveOneHundred),
             ("invalid JSON returns nil", testInvalidJSON),
             ("non-token-count returns nil", testNonTokenCountEvent),
+            ("non-primary Codex quota pools are ignored", testNonPrimaryQuotaPool),
             ("missing rate limits returns nil", testMissingRateLimits),
             ("invalid timestamp returns nil", testInvalidTimestamp),
             ("standard internet date is accepted", testStandardInternetDate),
             ("newest observed snapshot wins across nested files", testNewestObservedSnapshotWins),
+            ("newer model-specific pools cannot override Codex quota", testModelPoolCannotOverrideCodexQuota),
             ("empty root returns nil", testEmptyRoot),
             ("latest valid event wins within a file", testLatestValidEventInFile),
             ("truncated large-file prefix is ignored", testTruncatedLargeFilePrefix),
@@ -389,6 +391,15 @@ enum QuotaParserTests {
         return expect(QuotaParser.snapshot(from: line), equals: nil)
     }
 
+    private static func testNonPrimaryQuotaPool() -> Bool {
+        QuotaParser.snapshot(
+            from: tokenCountLine(primary: 0, limitID: "codex_bengalfox")
+        ) == nil
+            && QuotaParser.snapshot(
+                from: tokenCountLine(primary: 0, limitID: "codex_other")
+            ) == nil
+    }
+
     private static func testMissingRateLimits() -> Bool {
         let line = """
         {"timestamp":"2026-07-14T08:30:00Z","type":"event_msg","payload":{"type":"token_count"}}
@@ -433,6 +444,31 @@ enum QuotaParserTests {
             let snapshot = QuotaStore().latestSnapshot(in: root)
             return expect(snapshot?.remainingPercent, equals: 20)
                 && expect(snapshot?.observedAt, equals: standardDate("2026-07-14T09:00:00Z"))
+        }
+    }
+
+    private static func testModelPoolCannotOverrideCodexQuota() -> Bool {
+        withTemporaryDirectory { root in
+            let contents = [
+                tokenCountLine(
+                    primary: 10,
+                    timestamp: "2026-07-17T01:58:00Z"
+                ),
+                tokenCountLine(
+                    primary: 0,
+                    limitID: "codex_bengalfox",
+                    timestamp: "2026-07-17T01:59:00Z"
+                )
+            ].joined(separator: "\n")
+            guard write(contents, to: root.appendingPathComponent("mixed-pools.jsonl")) else {
+                return false
+            }
+            let snapshot = QuotaStore().latestSnapshot(in: root)
+            return expect(snapshot?.remainingPercent, equals: 90)
+                && expect(
+                    snapshot?.observedAt,
+                    equals: standardDate("2026-07-17T01:58:00Z")
+                )
         }
     }
 
@@ -1029,21 +1065,28 @@ enum QuotaParserTests {
                   "pubDate": "2026-07-16T06:20:00.000Z",
                   "title": "Should the limits look different?",
                   "link": "https://x.com/thsottiaux/status/300",
-                  "tweetAssessment": {"category": "vague_hint"}
+                  "tweetAssessment": {"category": "vague_hint", "resetSignalStrength": 20}
+                },
+                {
+                  "guid": "false-completed",
+                  "pubDate": "2026-07-16T06:10:00.000Z",
+                  "title": "No five hour limit lately. How should it work?",
+                  "link": "https://x.com/thsottiaux/status/250",
+                  "tweetAssessment": {"category": "reset_completed", "resetSignalStrength": 5}
                 },
                 {
                   "guid": "completed-reset",
                   "pubDate": "2026-07-16T05:00:00.000Z",
                   "title": "Another reset. You should have 100% back in a few minutes.",
                   "link": "https://x.com/thsottiaux/status/200",
-                  "tweetAssessment": {"category": "reset_completed"}
+                  "tweetAssessment": {"category": "reset_completed", "resetSignalStrength": 70}
                 },
                 {
                   "guid": "proposal",
                   "pubDate": "2026-07-15T05:00:00.000Z",
                   "title": "Should we reset Codex usage again?",
                   "link": "https://x.com/thsottiaux/status/100",
-                  "tweetAssessment": {"category": "reset_proposal"}
+                  "tweetAssessment": {"category": "reset_proposal", "resetSignalStrength": 60}
                 }
               ]
             }
@@ -1060,6 +1103,7 @@ enum QuotaParserTests {
         }
         return expect(signal.id, equals: "completed-reset")
             && expect(signal.kind, equals: .completed)
+            && expect(signal.signalStrength, equals: 70)
             && expect(signal.expectedAt, equals: expectedAt)
     }
 
@@ -1076,7 +1120,7 @@ enum QuotaParserTests {
                 "pubDate": "2026-07-16T05:00:00.000Z",
                 "title": "Reset within 2 hours.",
                 "link": "https://x.com/thsottiaux/status/200",
-                "tweetAssessment": {"category": "reset_announced"}
+                "tweetAssessment": {"category": "reset_announced", "resetSignalStrength": 70}
               }]
             }
             """.utf8
@@ -1090,7 +1134,7 @@ enum QuotaParserTests {
                 "pubDate": "2026-07-16T05:00:00.000Z",
                 "title": "Reset within 2 hours.",
                 "link": "https://example.com/thsottiaux/status/200",
-                "tweetAssessment": {"category": "reset_announced"}
+                "tweetAssessment": {"category": "reset_announced", "resetSignalStrength": 70}
               }]
             }
             """.utf8
@@ -1116,6 +1160,7 @@ enum QuotaParserTests {
             publishedAt: publishedAt,
             text: "Reset within 2 hours.",
             url: URL(string: "https://x.com/thsottiaux/status/200")!,
+            signalStrength: 70,
             expectedAt: expectedAt,
             expectationHint: nil
         )
@@ -1140,6 +1185,7 @@ enum QuotaParserTests {
                 publishedAt: publishedAt,
                 text: "Should we reset Codex?",
                 url: URL(string: "https://x.com/thsottiaux/status/200")!,
+                signalStrength: 60,
                 expectedAt: nil,
                 expectationHint: "时间待确认"
             )
@@ -2090,6 +2136,7 @@ enum QuotaParserTests {
 
     private static func tokenCountLine(
         primary: Double,
+        limitID: String = "codex",
         primaryReset: Any? = nil,
         secondary: Double? = nil,
         secondaryReset: Any? = nil,
@@ -2100,7 +2147,10 @@ enum QuotaParserTests {
         if let primaryReset {
             primaryWindow["resets_at"] = primaryReset
         }
-        var rateLimits: [String: Any] = ["primary": primaryWindow]
+        var rateLimits: [String: Any] = [
+            "limit_id": limitID,
+            "primary": primaryWindow
+        ]
         if let secondary {
             var secondaryWindow: [String: Any] = ["used_percent": secondary]
             if let secondaryReset {
