@@ -94,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let planNameLabel = NSTextField(labelWithString: "当前套餐：--")
     private let resetSignalLabel = NSTextField(labelWithString: "重置预告：暂无")
     private let expectedResetLabel = NSTextField(labelWithString: "预期时间：--")
+    private let resetSignalButton = NSButton()
     private let sessionsRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/sessions", isDirectory: true)
     private let refreshQueue = DispatchQueue(
@@ -268,6 +269,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             planNameLabel.topAnchor.constraint(equalTo: resetTimeLabel.bottomAnchor, constant: 3),
             resetSignalLabel.topAnchor.constraint(equalTo: planNameLabel.bottomAnchor, constant: 7),
             expectedResetLabel.topAnchor.constraint(equalTo: resetSignalLabel.bottomAnchor, constant: 3)
+        ])
+
+        resetSignalButton.translatesAutoresizingMaskIntoConstraints = false
+        resetSignalButton.title = ""
+        resetSignalButton.isBordered = false
+        resetSignalButton.focusRingType = .none
+        resetSignalButton.target = self
+        resetSignalButton.action = #selector(openCurrentResetAnnouncement)
+        resetSignalButton.toolTip = "在 X 上查看 Tibo 的重置预告"
+        resetSignalButton.setAccessibilityLabel("查看 Tibo 的重置预告原帖")
+        resetSignalButton.isHidden = true
+        row.addSubview(resetSignalButton)
+        NSLayoutConstraint.activate([
+            resetSignalButton.leadingAnchor.constraint(equalTo: row.leadingAnchor),
+            resetSignalButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+            resetSignalButton.topAnchor.constraint(equalTo: resetSignalLabel.topAnchor, constant: -2),
+            resetSignalButton.bottomAnchor.constraint(equalTo: expectedResetLabel.bottomAnchor, constant: 2)
         ])
 
         let item = NSMenuItem()
@@ -665,13 +683,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func updateResetSignalLabels(now: Date) {
-        guard let signal = currentResetSignal else {
+        guard let signal = currentResetSignal, signal.shouldDisplay(at: now) else {
             resetSignalLabel.stringValue = "重置预告：暂无"
             expectedResetLabel.stringValue = "预期时间：--"
+            resetSignalLabel.textColor = .labelColor
+            resetSignalButton.isHidden = true
             return
         }
-        resetSignalLabel.stringValue = "重置预告：\(signal.kind.statusText)"
+        let isClickableAnnouncement = signal.kind == .announced
+        resetSignalLabel.stringValue = "重置预告：\(signal.kind.statusText)\(isClickableAnnouncement ? "  ↗" : "")"
         expectedResetLabel.stringValue = "预期时间：\(signal.expectedTimeText(now: now))"
+        resetSignalLabel.textColor = isClickableAnnouncement ? .linkColor : .labelColor
+        resetSignalButton.isHidden = !isClickableAnnouncement
+    }
+
+    @objc private func openCurrentResetAnnouncement() {
+        let now = Date()
+        guard
+            let signal = currentResetSignal,
+            signal.kind == .announced,
+            signal.shouldDisplay(at: now)
+        else {
+            return
+        }
+        statusItem.menu?.cancelTracking()
+        NSWorkspace.shared.open(signal.url)
     }
 
     private func configureResetNotifications() {
@@ -701,6 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                 updateResetSignalLabels(now: Date())
                 if
                     let signal,
+                    signal.shouldDisplay(at: Date()),
                     signal.id != preferences.lastNotifiedResetSignalID
                 {
                     sendResetNotification(for: signal)

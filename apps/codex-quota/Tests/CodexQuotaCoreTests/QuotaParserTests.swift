@@ -96,6 +96,7 @@ enum QuotaParserTests {
             ("Tibo feed selects the latest explicit reset signal", testLatestTiboResetSignal),
             ("Tibo feed ignores failed and unsafe sources", testTiboResetSignalSourceValidation),
             ("Tibo reset expectations render in Chinese", testTiboResetExpectationFormatting),
+            ("expired Tibo reset signals are hidden at the deadline", testTiboResetSignalExpiry),
             ("Tibo reset notification state persists", testTiboResetPreferences),
             ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
             ("status presentation supports every style identity and reset combination", testStatusPresentationMatrix),
@@ -1171,6 +1172,33 @@ enum QuotaParserTests {
             ),
             equals: "今天 07:00 前"
         )
+    }
+
+    private static func testTiboResetSignalExpiry() -> Bool {
+        let expectedAt = Date(timeIntervalSince1970: 10_000)
+        let signal = TiboResetSignal(
+            id: "reset",
+            kind: .announced,
+            publishedAt: Date(timeIntervalSince1970: 9_000),
+            text: "Reset within a few minutes.",
+            url: URL(string: "https://x.com/thsottiaux/status/200")!,
+            signalStrength: 70,
+            expectedAt: expectedAt,
+            expectationHint: nil
+        )
+        return signal.shouldDisplay(at: expectedAt.addingTimeInterval(-1))
+            && !signal.shouldDisplay(at: expectedAt)
+            && !signal.shouldDisplay(at: expectedAt.addingTimeInterval(1))
+            && !TiboResetSignal(
+                id: "completed",
+                kind: .completed,
+                publishedAt: Date(timeIntervalSince1970: 9_000),
+                text: "Reset completed.",
+                url: URL(string: "https://x.com/thsottiaux/status/201")!,
+                signalStrength: 70,
+                expectedAt: expectedAt,
+                expectationHint: nil
+            ).shouldDisplay(at: expectedAt)
     }
 
     private static func testTiboResetPreferences() -> Bool {

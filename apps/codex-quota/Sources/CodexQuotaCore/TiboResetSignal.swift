@@ -78,6 +78,13 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
         return "\(formatter.string(from: expectedAt)) 前"
     }
 
+    public func shouldDisplay(at now: Date = Date()) -> Bool {
+        guard let expectedAt else {
+            return true
+        }
+        return now < expectedAt
+    }
+
     public static func latest(
         from data: Data,
         now: Date = Date(),
