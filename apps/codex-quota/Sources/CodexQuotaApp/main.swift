@@ -132,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let updateController = GitHubUpdateController()
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
+    private let rateLimitController = CodexRateLimitController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -179,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         resetMonitorTimer?.invalidate()
         updateController.invalidate()
         resetMonitorController.invalidate()
+        rateLimitController.invalidate()
     }
 
     private func configureStatusItem() {
@@ -690,13 +692,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
         let sessionsRoot = sessionsRoot
         refreshQueue.async { [weak self] in
-            let snapshot = QuotaStore().latestSnapshot(in: sessionsRoot)
+            let fallbackSnapshot = QuotaStore().latestSnapshot(in: sessionsRoot)
             DispatchQueue.main.async { [weak self] in
                 guard let self else {
                     return
                 }
-                self.isRefreshing = false
-                self.apply(snapshot)
+                self.rateLimitController.check { [weak self] result in
+                    guard let self else {
+                        return
+                    }
+                    self.isRefreshing = false
+                    switch result {
+                    case let .snapshot(snapshot):
+                        self.apply(snapshot)
+                    case .failure:
+                        self.apply(fallbackSnapshot)
+                    }
+                }
             }
         }
     }

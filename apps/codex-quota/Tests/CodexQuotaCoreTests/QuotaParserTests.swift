@@ -45,6 +45,7 @@ enum QuotaParserTests {
             ("standard internet date is accepted", testStandardInternetDate),
             ("newest observed snapshot wins across nested files", testNewestObservedSnapshotWins),
             ("newer model-specific pools cannot override Codex quota", testModelPoolCannotOverrideCodexQuota),
+            ("live multi-bucket response uses the primary Codex quota", testLiveAccountQuotaAfterReset),
             ("empty root returns nil", testEmptyRoot),
             ("latest valid event wins within a file", testLatestValidEventInFile),
             ("truncated large-file prefix is ignored", testTruncatedLargeFilePrefix),
@@ -511,6 +512,56 @@ enum QuotaParserTests {
                     equals: standardDate("2026-07-17T01:58:00Z")
                 )
         }
+    }
+
+    private static func testLiveAccountQuotaAfterReset() -> Bool {
+        let response = jsonData([
+            "id": 2,
+            "result": [
+                "rateLimits": [
+                    "limitId": "codex",
+                    "primary": [
+                        "usedPercent": 99,
+                        "windowDurationMins": 10_080,
+                        "resetsAt": 1_784_882_768
+                    ],
+                    "planType": "prolite"
+                ],
+                "rateLimitsByLimitId": [
+                    "codex": [
+                        "limitId": "codex",
+                        "primary": [
+                            "usedPercent": 1,
+                            "windowDurationMins": 10_080,
+                            "resetsAt": 1_784_882_768
+                        ],
+                        "planType": "prolite"
+                    ],
+                    "codex_bengalfox": [
+                        "limitId": "codex_bengalfox",
+                        "primary": [
+                            "usedPercent": 0,
+                            "windowDurationMins": 10_080,
+                            "resetsAt": 1_784_883_016
+                        ],
+                        "planType": "prolite"
+                    ]
+                ]
+            ]
+        ])
+        let observedAt = Date(timeIntervalSince1970: 1_784_278_400)
+
+        let snapshot = AccountRateLimitsParser.snapshot(
+            from: response,
+            observedAt: observedAt
+        )
+        return expect(snapshot?.remainingPercent, equals: 99)
+            && expect(snapshot?.observedAt, equals: observedAt)
+            && expect(
+                snapshot?.resetsAt,
+                equals: Date(timeIntervalSince1970: 1_784_882_768)
+            )
+            && expect(snapshot?.planName, equals: "Pro")
     }
 
     private static func testEmptyRoot() -> Bool {
