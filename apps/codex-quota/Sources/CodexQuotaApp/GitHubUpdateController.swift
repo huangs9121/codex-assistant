@@ -7,7 +7,7 @@ final class GitHubUpdateController {
     enum Result {
         case update(GitHubRelease)
         case current
-        case failure(String)
+        case failure
     }
 
     private var preferences: DisplayPreferences
@@ -42,7 +42,7 @@ final class GitHubUpdateController {
         }
         guard let request = GitHubRelease.latestRequest(appVersion: currentVersion) else {
             recordFailure(at: now)
-            completion(.failure("检查更新失败，请稍后重试。"))
+            completion(.failure)
             return
         }
 
@@ -54,12 +54,12 @@ final class GitHubUpdateController {
                 let (data, response) = try await session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
                     recordFailure(at: Date())
-                    completion(.failure("检查更新失败，请稍后重试。"))
+                    completion(.failure)
                     return
                 }
                 guard httpResponse.statusCode == 200 else {
                     recordFailure(at: Date())
-                    completion(.failure("检查更新失败，请稍后重试。"))
+                    completion(.failure)
                     return
                 }
 
@@ -68,7 +68,7 @@ final class GitHubUpdateController {
                     release = try JSONDecoder().decode(GitHubRelease.self, from: data)
                 } catch {
                     recordFailure(at: Date())
-                    completion(.failure("检查更新失败，请稍后重试。"))
+                    completion(.failure)
                     return
                 }
 
@@ -80,7 +80,7 @@ final class GitHubUpdateController {
                 }
             } catch {
                 recordFailure(at: Date())
-                completion(.failure("检查更新失败，请稍后重试。"))
+                completion(.failure)
             }
         }
     }

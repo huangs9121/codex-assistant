@@ -114,6 +114,13 @@ cat > "$STAGING_APP/Contents/Info.plist" <<PLIST
     <string>Codex Quota</string>
     <key>CFBundleDisplayName</key>
     <string>Codex Quota</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>zh-Hans</string>
+    </array>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -136,6 +143,9 @@ xattr -cr "$STAGING_APP"
 plutil -lint "$STAGING_APP/Contents/Info.plist"
 test "$(plutil -extract CFBundleShortVersionString raw "$STAGING_APP/Contents/Info.plist")" = "$APP_VERSION"
 test "$(plutil -extract CFBundleVersion raw "$STAGING_APP/Contents/Info.plist")" = "$BUILD_NUMBER"
+test "$(plutil -extract CFBundleDevelopmentRegion raw "$STAGING_APP/Contents/Info.plist")" = "en"
+test "$(plutil -extract CFBundleLocalizations.0 raw "$STAGING_APP/Contents/Info.plist")" = "en"
+test "$(plutil -extract CFBundleLocalizations.1 raw "$STAGING_APP/Contents/Info.plist")" = "zh-Hans"
 
 VERIFY_ICONSET="$TEMP_DIR/verify.iconset"
 EXPECTED_ICONS="$TEMP_DIR/expected-icons.txt"

@@ -8,11 +8,15 @@ private final class MenuChoiceRow: NSView {
     private let checkmarkLabel = NSTextField(labelWithString: "✓")
     private let titleLabel = NSTextField(labelWithString: "")
     private let actionButton = NSButton()
+    private let selectedAccessibilityValue: String
+    private let notSelectedAccessibilityValue: String
 
     var isSelected = false {
         didSet {
             checkmarkLabel.isHidden = !isSelected
-            actionButton.setAccessibilityValue(isSelected ? "已选择" : "未选择")
+            actionButton.setAccessibilityValue(
+                isSelected ? selectedAccessibilityValue : notSelectedAccessibilityValue
+            )
         }
     }
 
@@ -21,9 +25,14 @@ private final class MenuChoiceRow: NSView {
         previewImage: NSImage? = nil,
         tag: Int,
         target: AnyObject,
-        action: Selector
+        action: Selector,
+        selectedAccessibilityValue: String,
+        notSelectedAccessibilityValue: String,
+        width: CGFloat
     ) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 32))
+        self.selectedAccessibilityValue = selectedAccessibilityValue
+        self.notSelectedAccessibilityValue = notSelectedAccessibilityValue
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 32))
 
         checkmarkLabel.translatesAutoresizingMaskIntoConstraints = false
         checkmarkLabel.font = .menuFont(ofSize: 13)
@@ -84,16 +93,21 @@ private final class MenuChoiceRow: NSView {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     @preconcurrency UNUserNotificationCenterDelegate
 {
+    private let language = AppLanguage.current
+    private lazy var text = AppText(language: language)
+    private var menuWidth: CGFloat {
+        language == .simplifiedChinese ? 260 : 340
+    }
     private let statusItem = NSStatusBar.system.statusItem(
         withLength: NSStatusItem.variableLength
     )
     private var preferences = DisplayPreferences(defaults: .standard)
     private let renderer = BatteryStatusRenderer()
-    private let updateTimeLabel = NSTextField(labelWithString: "更新时间：--:--:--")
-    private let resetTimeLabel = NSTextField(labelWithString: "下次重置：--")
-    private let planNameLabel = NSTextField(labelWithString: "当前套餐：--")
-    private let resetSignalLabel = NSTextField(labelWithString: "重置预告：暂无")
-    private let expectedResetLabel = NSTextField(labelWithString: "预期时间：--")
+    private let updateTimeLabel = NSTextField(labelWithString: "")
+    private let resetTimeLabel = NSTextField(labelWithString: "")
+    private let planNameLabel = NSTextField(labelWithString: "")
+    private let resetSignalLabel = NSTextField(labelWithString: "")
+    private let expectedResetLabel = NSTextField(labelWithString: "")
     private let resetSignalButton = NSButton()
     private let sessionsRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/sessions", isDirectory: true)
@@ -122,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         currentResetSignal = preferences.latestResetSignal
+        updateHeaderLabels()
         configureStatusItem()
         refresh()
         let timer = Timer(
@@ -175,11 +190,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(.separator())
 
         let styleItem = NSMenuItem(
-            title: "展示形式",
+            title: text.displayStyle,
             action: nil,
             keyEquivalent: ""
         )
-        let styleMenu = NSMenu(title: "展示形式")
+        let styleMenu = NSMenu(title: text.displayStyle)
         for style in BatteryStyle.allCases {
             let item = makeStyleItem(style)
             styleItems[style] = item
@@ -189,11 +204,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(styleItem)
 
         let identityItem = NSMenuItem(
-            title: "标识形式",
+            title: text.identityStyle,
             action: nil,
             keyEquivalent: ""
         )
-        let identityMenu = NSMenu(title: "标识形式")
+        let identityMenu = NSMenu(title: text.identityStyle)
         for mode in StatusIdentityMode.allCases {
             let item = makeIdentityItem(mode)
             identityItems[mode] = item
@@ -205,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(.separator())
 
         let resetItem = makeChoiceItem(
-            title: "显示重置时间",
+            title: text.showResetTime,
             tag: 0,
             action: #selector(toggleResetCountdown(_:))
         )
@@ -213,7 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(resetItem)
 
         let loginItem = makeChoiceItem(
-            title: "开机自动启动",
+            title: text.launchAtLogin,
             tag: 0,
             action: #selector(toggleLaunchAtLogin(_:))
         )
@@ -223,7 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(.separator())
 
         let moveHintItem = NSMenuItem(
-            title: "按住 ⌘ 可自由拖动位置",
+            title: text.moveHint,
             action: nil,
             keyEquivalent: ""
         )
@@ -231,7 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(moveHintItem)
 
         let updateItem = NSMenuItem(
-            title: "检查更新…",
+            title: text.checkForUpdates,
             action: #selector(checkForUpdatesManually),
             keyEquivalent: ""
         )
@@ -240,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(updateItem)
 
         let quitItem = NSMenuItem(
-            title: "退出",
+            title: text.quit,
             action: #selector(quit),
             keyEquivalent: ""
         )
@@ -252,7 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func makeHeaderItem() -> NSMenuItem {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 112))
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: menuWidth, height: 112))
         let labels = [
             updateTimeLabel,
             resetTimeLabel,
@@ -285,8 +300,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         resetSignalButton.focusRingType = .none
         resetSignalButton.target = self
         resetSignalButton.action = #selector(openCurrentResetAnnouncement)
-        resetSignalButton.toolTip = "在 X 上查看 Tibo 的重置预告"
-        resetSignalButton.setAccessibilityLabel("查看 Tibo 的重置预告原帖")
+        resetSignalButton.toolTip = text.resetAnnouncementTooltip
+        resetSignalButton.setAccessibilityLabel(text.resetAnnouncementAccessibility)
         resetSignalButton.isHidden = true
         row.addSubview(resetSignalButton)
         NSLayoutConstraint.activate([
@@ -306,11 +321,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             style: style,
             remainingPercent: 60,
             identityMode: .hidden,
-            compactReset: nil
+            compactReset: nil,
+            language: language
         ).image
         preview.isTemplate = true
         return makeChoiceItem(
-            title: style.menuTitle,
+            title: style.menuTitle(language: language),
             previewImage: preview,
             tag: BatteryStyle.allCases.firstIndex(of: style) ?? 0,
             action: #selector(selectBatteryStyle(_:))
@@ -328,7 +344,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             preview = nil
         }
         return makeChoiceItem(
-            title: mode.menuTitle,
+            title: mode.menuTitle(language: language),
             previewImage: preview,
             tag: StatusIdentityMode.allCases.firstIndex(of: mode) ?? 0,
             action: #selector(selectIdentityMode(_:))
@@ -346,7 +362,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             previewImage: previewImage,
             tag: tag,
             target: self,
-            action: action
+            action: action,
+            selectedAccessibilityValue: text.selected,
+            notSelectedAccessibilityValue: text.notSelected,
+            width: menuWidth
         )
         let item = NSMenuItem()
         item.view = row
@@ -392,16 +411,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         let launchSelected: Bool
         switch launchState {
         case .enabled:
-            launchTitle = "开机自动启动"
+            launchTitle = text.launchAtLogin
             launchSelected = true
         case .disabled:
-            launchTitle = "开机自动启动"
+            launchTitle = text.launchAtLogin
             launchSelected = false
         case .requiresApproval:
-            launchTitle = "开机自动启动（需系统确认）"
+            launchTitle = text.launchAtLoginApproval
             launchSelected = false
         case .unavailable:
-            launchTitle = "开机自动启动（不可用）"
+            launchTitle = text.launchAtLoginUnavailable
             launchSelected = false
         }
         launchAtLoginItem?.state = launchSelected ? .on : .off
@@ -409,9 +428,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         (launchAtLoginItem?.view as? MenuChoiceRow)?.updateTitle(launchTitle)
 
         if let version = availableRelease?.eligibleVersion {
-            updateMenuItem?.title = "新版本 \(canonicalVersion(version)) 可用…"
+            updateMenuItem?.title = text.newVersionAvailable(canonicalVersion(version))
         } else {
-            updateMenuItem?.title = "检查更新…"
+            updateMenuItem?.title = text.checkForUpdates
         }
     }
 
@@ -419,19 +438,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         let now = Date()
         let effectiveReset = currentSnapshot?.resetDate(at: now)
         let compactReset = preferences.showsResetCountdownInStatusBar
-            ? ResetCountdownFormatter.compactString(resetsAt: effectiveReset, now: now)
+            ? ResetCountdownFormatter.compactString(
+                resetsAt: effectiveReset,
+                now: now,
+                language: language
+            )
             : nil
         let presentation = renderer.presentation(
             style: preferences.batteryStyle,
             remainingPercent: currentSnapshot?.remainingPercent(at: now),
             identityMode: preferences.identityMode,
-            compactReset: compactReset
+            compactReset: compactReset,
+            language: language
         )
         statusItem.button?.image = presentation.image
         statusItem.button?.title = ""
         statusItem.button?.imagePosition = .imageOnly
         statusItem.button?.setAccessibilityLabel(
-            "\(presentation.accessibilityLabel)，\(preferences.batteryStyle.menuTitle)"
+            presentation.accessibilityLabel
+                + text.accessibilityStyle(
+                    preferences.batteryStyle.menuTitle(language: language)
+                )
         )
     }
 
@@ -476,8 +503,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         case .unavailable:
             closeMenuForLaunchAtLoginInteraction()
             showAlert(
-                message: "开机自动启动不可用",
-                informativeText: "当前系统无法使用此功能，请稍后重试。"
+                message: text.launchUnavailableMessage,
+                informativeText: text.unavailableRetry
             )
             syncMenuState()
         }
@@ -494,8 +521,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         } catch {
             closeMenuForLaunchAtLoginInteraction()
             showAlert(
-                message: enabled ? "无法开启开机自动启动" : "无法关闭开机自动启动",
-                informativeText: "请在“系统设置”中的“登录项”里检查后重试。"
+                message: enabled ? text.cannotEnableLaunch : text.cannotDisableLaunch,
+                informativeText: text.checkLoginItems
             )
             syncMenuState()
         }
@@ -509,9 +536,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         activateApp()
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "建议先将 Codex Quota 移到“应用程序”文件夹，开机启动会更稳定。"
-        alert.addButton(withTitle: "仍然开启")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = text.moveToApplications
+        alert.addButton(withTitle: text.enableAnyway)
+        alert.addButton(withTitle: text.cancel)
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -540,7 +567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     @objc private func checkForUpdatesManually() {
         guard !isUpdateCheckInFlight else {
-            showAlert(message: "正在检查更新，请稍候。")
+            showAlert(message: text.checkingUpdates)
             return
         }
         if let availableRelease {
@@ -549,8 +576,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
         guard let currentVersion = currentAppVersion() else {
             showAlert(
-                message: "无法检查更新",
-                informativeText: "当前版本信息无效，请重新安装 Codex Quota。"
+                message: text.cannotCheckUpdates,
+                informativeText: text.invalidVersion
             )
             return
         }
@@ -560,7 +587,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private func performUpdateCheck(currentVersion: SemanticVersion, manual: Bool) {
         guard !isUpdateCheckInFlight else {
             if manual {
-                showAlert(message: "正在检查更新，请稍候。")
+                showAlert(message: text.checkingUpdates)
             }
             return
         }
@@ -586,8 +613,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             guard let version = release.eligibleVersion else {
                 if manual {
                     showAlert(
-                        message: "无法检查更新",
-                        informativeText: "检查更新失败，请稍后重试。"
+                        message: text.cannotCheckUpdates,
+                        informativeText: text.updateFailed
                     )
                 }
                 return
@@ -601,11 +628,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             }
         case .current:
             if manual {
-                showAlert(message: "当前已是最新版本")
+                showAlert(message: text.upToDate)
             }
-        case let .failure(message):
+        case .failure:
             if manual {
-                showAlert(message: message)
+                showAlert(message: text.updateFailed)
             }
         }
     }
@@ -619,21 +646,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         activateApp()
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "发现新版本 \(canonicalVersion(version))"
+        alert.messageText = text.foundNewVersion(canonicalVersion(version))
         alert.informativeText = releaseNotes(release.body)
-        alert.addButton(withTitle: "前往更新")
-        alert.addButton(withTitle: "稍后")
+        alert.addButton(withTitle: text.goToUpdate)
+        alert.addButton(withTitle: text.later)
         if alert.runModal() == .alertFirstButtonReturn {
             if !NSWorkspace.shared.open(release.htmlURL) {
-                showAlert(message: "无法打开更新页面，请稍后重试。")
+                showAlert(message: text.cannotOpenUpdate)
             }
         }
     }
 
     private func releaseNotes(_ body: String?) -> String {
+        guard language == .simplifiedChinese else {
+            return text.githubReleaseNotes
+        }
         let trimmed = body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !trimmed.isEmpty else {
-            return "前往 GitHub 查看更新说明。"
+            return text.githubReleaseNotes
         }
         let prefix = String(trimmed.prefix(600))
         return trimmed.count > 600 ? prefix + "…" : prefix
@@ -680,27 +710,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private func updateHeaderLabels(now: Date = Date()) {
         updateResetSignalLabels(now: now)
         guard let snapshot = currentSnapshot else {
-            updateTimeLabel.stringValue = "更新时间：--:--:--"
-            resetTimeLabel.stringValue = "下次重置：--"
-            planNameLabel.stringValue = "当前套餐：--"
+            updateTimeLabel.stringValue = text.updatedPlaceholder
+            resetTimeLabel.stringValue = text.nextResetPlaceholder
+            planNameLabel.stringValue = text.planPlaceholder
             return
         }
-        updateTimeLabel.stringValue = UpdateTimeFormatter.label(lastRefreshAt: now)
-        resetTimeLabel.stringValue = "下次重置：\(ResetCountdownFormatter.string(resetsAt: snapshot.resetDate(at: now), now: now))"
-        planNameLabel.stringValue = "当前套餐：\(snapshot.planName ?? "--")"
+        updateTimeLabel.stringValue = UpdateTimeFormatter.label(
+            lastRefreshAt: now,
+            language: language
+        )
+        resetTimeLabel.stringValue = text.nextReset(
+            ResetCountdownFormatter.string(
+                resetsAt: snapshot.resetDate(at: now),
+                now: now,
+                language: language
+            )
+        )
+        planNameLabel.stringValue = text.plan(snapshot.planName ?? "--")
     }
 
     private func updateResetSignalLabels(now: Date) {
         guard let signal = currentResetSignal, signal.shouldDisplay(at: now) else {
-            resetSignalLabel.stringValue = "重置预告：暂无"
-            expectedResetLabel.stringValue = "预期时间：--"
+            resetSignalLabel.stringValue = text.resetForecastNone
+            expectedResetLabel.stringValue = text.expectedTimePlaceholder
             resetSignalLabel.textColor = .labelColor
             resetSignalButton.isHidden = true
             return
         }
         let isClickableAnnouncement = signal.kind == .announced
-        resetSignalLabel.stringValue = "重置预告：\(signal.kind.statusText)\(isClickableAnnouncement ? "  ↗" : "")"
-        expectedResetLabel.stringValue = "预期时间：\(signal.expectedTimeText(now: now))"
+        resetSignalLabel.stringValue = text.resetForecast(
+            signal.kind.statusText(language: language),
+            linked: isClickableAnnouncement
+        )
+        expectedResetLabel.stringValue = text.expectedTime(
+            signal.expectedTimeText(now: now, language: language)
+        )
         resetSignalLabel.textColor = isClickableAnnouncement ? .linkColor : .labelColor
         resetSignalButton.isHidden = !isClickableAnnouncement
     }
@@ -773,15 +817,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     private func deliverResetNotification(for signal: TiboResetSignal) {
         let content = UNMutableNotificationContent()
-        switch signal.kind {
-        case .proposal:
-            content.title = "Tibo 提到可能重置 Codex 额度"
-        case .announced:
-            content.title = "Tibo 已预告 Codex 额度重置"
-        case .completed:
-            content.title = "Codex 额度重置已发起"
-        }
-        content.body = "预期时间：\(signal.expectedTimeText())"
+        content.title = text.resetNotificationTitle(kind: signal.kind)
+        content.body = text.expectedTime(
+            signal.expectedTimeText(language: language)
+        )
         content.sound = .default
         content.userInfo = ["url": signal.url.absoluteString]
 
@@ -843,7 +882,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         alert.alertStyle = .informational
         alert.messageText = message
         alert.informativeText = informativeText
-        alert.addButton(withTitle: "知道了")
+        alert.addButton(withTitle: text.dismiss)
         alert.runModal()
     }
 
@@ -854,9 +893,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         activateApp()
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Codex Quota 已启动"
-        alert.informativeText = "额度每 15 秒自动更新一次，无需手动刷新。按住 Command（⌘）并拖动菜单栏图标，可以自由调整位置。"
-        alert.addButton(withTitle: "知道了")
+        alert.messageText = text.launched
+        alert.informativeText = text.launchNotice
+        alert.addButton(withTitle: text.dismiss)
         alert.runModal()
         preferences.hasShownAutoRefreshNotice = true
     }

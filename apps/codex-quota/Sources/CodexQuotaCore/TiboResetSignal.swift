@@ -6,13 +6,17 @@ public enum TiboResetSignalKind: String, Codable, Sendable {
     case completed = "reset_completed"
 
     public var statusText: String {
+        statusText(language: .simplifiedChinese)
+    }
+
+    public func statusText(language: AppLanguage) -> String {
         switch self {
         case .proposal:
-            return "可能重置"
+            return language == .simplifiedChinese ? "可能重置" : "Possible"
         case .announced:
-            return "已预告"
+            return language == .simplifiedChinese ? "已预告" : "Announced"
         case .completed:
-            return "已发起"
+            return language == .simplifiedChinese ? "已发起" : "Started"
         }
     }
 }
@@ -50,10 +54,11 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
     public func expectedTimeText(
         now: Date = Date(),
         calendar: Calendar = .current,
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        language: AppLanguage = .simplifiedChinese
     ) -> String {
         guard let expectedAt else {
-            return expectationHint ?? (kind == .completed ? "已发起" : "时间待确认")
+            return localizedExpectationHint(language: language)
         }
 
         var calendar = calendar
@@ -61,21 +66,40 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.timeZone = timeZone
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = language.locale
 
         if calendar.isDate(expectedAt, inSameDayAs: now) {
             formatter.dateFormat = "HH:mm"
-            return "今天 \(formatter.string(from: expectedAt)) 前"
+            let value = formatter.string(from: expectedAt)
+            return language == .simplifiedChinese ? "今天 \(value) 前" : "Today by \(value)"
         }
         if
             let tomorrow = calendar.date(byAdding: .day, value: 1, to: now),
             calendar.isDate(expectedAt, inSameDayAs: tomorrow)
         {
             formatter.dateFormat = "HH:mm"
-            return "明天 \(formatter.string(from: expectedAt)) 前"
+            let value = formatter.string(from: expectedAt)
+            return language == .simplifiedChinese ? "明天 \(value) 前" : "Tomorrow by \(value)"
         }
-        formatter.dateFormat = "M月d日 HH:mm"
-        return "\(formatter.string(from: expectedAt)) 前"
+        formatter.dateFormat = language == .simplifiedChinese ? "M月d日 HH:mm" : "MMM d, HH:mm"
+        let value = formatter.string(from: expectedAt)
+        return language == .simplifiedChinese ? "\(value) 前" : "By \(value)"
+    }
+
+    private func localizedExpectationHint(language: AppLanguage) -> String {
+        switch expectationHint {
+        case "即将进行":
+            return language == .simplifiedChinese ? "即将进行" : "Soon"
+        case "已发起":
+            return language == .simplifiedChinese ? "已发起" : "Started"
+        case "时间待确认", nil:
+            if kind == .completed {
+                return language == .simplifiedChinese ? "已发起" : "Started"
+            }
+            return language == .simplifiedChinese ? "时间待确认" : "Time to be confirmed"
+        default:
+            return expectationHint ?? (language == .simplifiedChinese ? "时间待确认" : "Time to be confirmed")
+        }
     }
 
     public func shouldDisplay(at now: Date = Date()) -> Bool {

@@ -33,6 +33,8 @@ enum QuotaParserTests {
             ("huge reset countdown is unknown", testHugeResetCountdown),
             ("compact reset countdown formats day and hour boundaries", testCompactResetCountdownBoundaries),
             ("compact reset countdown handles zero and unknown values", testCompactResetCountdownFallbacks),
+            ("preferred app language follows supported system languages", testPreferredAppLanguage),
+            ("reset countdown supports English", testEnglishResetCountdown),
             ("negative used clamps to 100", testNegativeUsedPercent),
             ("used above 100 clamps to 0", testUsedPercentAboveOneHundred),
             ("invalid JSON returns nil", testInvalidJSON),
@@ -60,10 +62,12 @@ enum QuotaParserTests {
             ("battery style defaults to native", testDefaultBatteryStyle),
             ("battery styles have stable order and raw values", testBatteryStyleCases),
             ("battery styles have exact menu titles", testBatteryStyleMenuTitles),
+            ("battery styles have English menu titles", testEnglishBatteryStyleMenuTitles),
             ("status identity modes have stable order and raw values", testStatusIdentityModeCases),
             ("status identity modes have exact menu titles", testStatusIdentityModeMenuTitles),
             ("update time includes seconds", testUpdateTimeIncludesSeconds),
             ("update time label describes the latest refresh", testUpdateTimeLabel),
+            ("update time label supports English", testEnglishUpdateTimeLabel),
             ("missing update time uses second precision placeholder", testMissingUpdateTime),
             ("Codex label defaults to visible", testDefaultCodexLabel),
             ("launch notice defaults to not shown", testLaunchNoticeDefaultsToNotShown),
@@ -96,12 +100,14 @@ enum QuotaParserTests {
             ("Tibo feed selects the latest explicit reset signal", testLatestTiboResetSignal),
             ("Tibo feed ignores failed and unsafe sources", testTiboResetSignalSourceValidation),
             ("Tibo reset expectations render in Chinese", testTiboResetExpectationFormatting),
+            ("Tibo reset expectations render in English", testEnglishTiboResetExpectationFormatting),
             ("expired Tibo reset signals are hidden at the deadline", testTiboResetSignalExpiry),
             ("Tibo reset notification state persists", testTiboResetPreferences),
             ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
             ("status presentation supports every style identity and reset combination", testStatusPresentationMatrix),
             ("status identity and reset widths compose exactly", testStatusPresentationWidthRelationships),
             ("status presentation exposes identity and reset accessibility semantics", testStatusPresentationAccessibility),
+            ("status presentation accessibility supports English", testEnglishStatusPresentationAccessibility),
             ("battery renderer produces template glyphs for every style and value", testBatteryRendererImageMatrix),
             ("full status images compose label battery and percent in order", testFullStatusComposition),
             ("full status images keep safe margins at one and two x", testFullStatusCanvasMargins),
@@ -367,6 +373,40 @@ enum QuotaParserTests {
                 ),
                 equals: "--"
             )
+    }
+
+    private static func testPreferredAppLanguage() -> Bool {
+        expect(AppLanguage.preferred(from: ["zh-Hans-CN"]), equals: .simplifiedChinese)
+            && expect(AppLanguage.preferred(from: ["en-US"]), equals: .english)
+            && expect(AppLanguage.preferred(from: ["ja-JP", "zh-Hans"]), equals: .simplifiedChinese)
+            && expect(AppLanguage.preferred(from: ["fr-FR"]), equals: .english)
+            && expect(AppLanguage.preferred(from: []), equals: .english)
+    }
+
+    private static func testEnglishResetCountdown() -> Bool {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        return expect(
+            ResetCountdownFormatter.string(
+                resetsAt: now.addingTimeInterval((2 * 24 + 3) * 60 * 60),
+                now: now,
+                language: .english
+            ),
+            equals: "2 days 3 hours"
+        ) && expect(
+            ResetCountdownFormatter.compactString(
+                resetsAt: now.addingTimeInterval(51 * 60 * 60),
+                now: now,
+                language: .english
+            ),
+            equals: "2d"
+        ) && expect(
+            ResetCountdownFormatter.string(
+                resetsAt: now.addingTimeInterval(25 * 60 * 60),
+                now: now,
+                language: .english
+            ),
+            equals: "1 day 1 hour"
+        )
     }
 
 
@@ -702,6 +742,16 @@ enum QuotaParserTests {
         ])
     }
 
+    private static func testEnglishBatteryStyleMenuTitles() -> Bool {
+        expect(
+            BatteryStyle.allCases.map { $0.menuTitle(language: .english) },
+            equals: ["Native Battery", "Number Badge", "Segmented Battery", "Number Only"]
+        ) && expect(
+            StatusIdentityMode.allCases.map { $0.menuTitle(language: .english) },
+            equals: ["Show Codex Text", "Show OpenAI Logo", "Hide Identity"]
+        )
+    }
+
     private static func testStatusIdentityModeCases() -> Bool {
         expect(StatusIdentityMode.allCases, equals: [.text, .logo, .hidden])
             && expect(StatusIdentityMode.allCases.map(\.rawValue), equals: [
@@ -740,6 +790,20 @@ enum QuotaParserTests {
                 timeZone: utc
             ),
             equals: "更新时间：12:34:56"
+        )
+    }
+
+    private static func testEnglishUpdateTimeLabel() -> Bool {
+        guard let utc = TimeZone(secondsFromGMT: 0) else {
+            return diagnostic("UTC timezone is unavailable")
+        }
+        return expect(
+            UpdateTimeFormatter.label(
+                lastRefreshAt: Date(timeIntervalSince1970: 45_296),
+                timeZone: utc,
+                language: .english
+            ),
+            equals: "Updated: 12:34:56"
         )
     }
 
@@ -1174,6 +1238,37 @@ enum QuotaParserTests {
         )
     }
 
+    private static func testEnglishTiboResetExpectationFormatting() -> Bool {
+        guard let utc = TimeZone(secondsFromGMT: 0) else {
+            return false
+        }
+        guard
+            let publishedAt = fractionalDate("2026-07-16T05:00:00.000Z"),
+            let expectedAt = fractionalDate("2026-07-16T07:00:00.000Z"),
+            let now = fractionalDate("2026-07-16T06:30:00.000Z")
+        else {
+            return false
+        }
+        let signal = TiboResetSignal(
+            id: "reset",
+            kind: .announced,
+            publishedAt: publishedAt,
+            text: "Reset within 2 hours.",
+            url: URL(string: "https://x.com/thsottiaux/status/200")!,
+            signalStrength: 70,
+            expectedAt: expectedAt,
+            expectationHint: nil
+        )
+        return expect(
+            signal.expectedTimeText(
+                now: now,
+                timeZone: utc,
+                language: .english
+            ),
+            equals: "Today by 07:00"
+        ) && expect(signal.kind.statusText(language: .english), equals: "Announced")
+    }
+
     private static func testTiboResetSignalExpiry() -> Bool {
         let expectedAt = Date(timeIntervalSince1970: 10_000)
         let signal = TiboResetSignal(
@@ -1571,6 +1666,17 @@ enum QuotaParserTests {
                 identityMode: .hidden,
                 compactReset: ""
             ).accessibilityLabel, equals: "Codex 剩余额度 0%，下次重置 ，不显示标识")
+    }
+
+    private static func testEnglishStatusPresentationAccessibility() -> Bool {
+        let renderer = BatteryStatusRenderer()
+        return expect(renderer.presentation(
+            style: .native,
+            remainingPercent: 60,
+            identityMode: .text,
+            compactReset: "2d",
+            language: .english
+        ).accessibilityLabel, equals: "Codex quota remaining 60%, next reset 2d, showing Codex text")
     }
 
     private static func testBatteryRendererImageMatrix() -> Bool {

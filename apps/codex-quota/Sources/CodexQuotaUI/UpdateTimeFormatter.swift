@@ -1,11 +1,14 @@
+import CodexQuotaCore
 import Foundation
 
 public enum UpdateTimeFormatter {
     public static func label(
         lastRefreshAt date: Date?,
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        language: AppLanguage = .simplifiedChinese
     ) -> String {
-        "更新时间：\(string(observedAt: date, timeZone: timeZone))"
+        let value = string(observedAt: date, timeZone: timeZone)
+        return language == .simplifiedChinese ? "更新时间：\(value)" : "Updated: \(value)"
     }
 
     public static func string(

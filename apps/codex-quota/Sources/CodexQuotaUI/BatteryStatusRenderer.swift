@@ -1,4 +1,5 @@
 import AppKit
+import CodexQuotaCore
 
 public struct StatusPresentation {
     public let image: NSImage
@@ -22,19 +23,21 @@ public struct BatteryStatusRenderer {
     public func presentation(
         style: BatteryStyle,
         remainingPercent: Int?,
-        showsCodexLabel: Bool
+        showsCodexLabel: Bool,
+        language: AppLanguage = .simplifiedChinese
     ) -> StatusPresentation {
         let presentation = presentation(
             style: style,
             remainingPercent: remainingPercent,
             identityMode: showsCodexLabel ? .text : .hidden,
-            compactReset: nil
+            compactReset: nil,
+            language: language
         )
         let percent = remainingPercent.map { min(max($0, 0), 100) }
         return StatusPresentation(
             image: presentation.image,
             batteryImage: presentation.batteryImage,
-            accessibilityLabel: baseAccessibilityLabel(percent: percent)
+            accessibilityLabel: baseAccessibilityLabel(percent: percent, language: language)
         )
     }
 
@@ -42,7 +45,8 @@ public struct BatteryStatusRenderer {
         style: BatteryStyle,
         remainingPercent: Int?,
         identityMode: StatusIdentityMode,
-        compactReset: String?
+        compactReset: String?,
+        language: AppLanguage = .simplifiedChinese
     ) -> StatusPresentation {
         let percent = remainingPercent.map { min(max($0, 0), 100) }
         let batteryImage: NSImage
@@ -65,17 +69,25 @@ public struct BatteryStatusRenderer {
             compactReset: compactReset,
             batteryImage: batteryImage
         )
-        var accessibilityLabel = baseAccessibilityLabel(percent: percent)
+        var accessibilityLabel = baseAccessibilityLabel(percent: percent, language: language)
         if let compactReset {
-            accessibilityLabel += "，下次重置 \(compactReset)"
+            accessibilityLabel += language == .simplifiedChinese
+                ? "，下次重置 \(compactReset)"
+                : ", next reset \(compactReset)"
         }
         switch identityMode {
         case .text:
-            accessibilityLabel += "，显示 Codex 文字"
+            accessibilityLabel += language == .simplifiedChinese
+                ? "，显示 Codex 文字"
+                : ", showing Codex text"
         case .logo:
-            accessibilityLabel += "，显示 OpenAI Logo"
+            accessibilityLabel += language == .simplifiedChinese
+                ? "，显示 OpenAI Logo"
+                : ", showing OpenAI logo"
         case .hidden:
-            accessibilityLabel += "，不显示标识"
+            accessibilityLabel += language == .simplifiedChinese
+                ? "，不显示标识"
+                : ", identity hidden"
         }
 
         return StatusPresentation(
@@ -85,8 +97,16 @@ public struct BatteryStatusRenderer {
         )
     }
 
-    private func baseAccessibilityLabel(percent: Int?) -> String {
-        percent.map { "Codex 剩余额度 \($0)%" } ?? "Codex 剩余额度未知"
+    private func baseAccessibilityLabel(
+        percent: Int?,
+        language: AppLanguage
+    ) -> String {
+        switch language {
+        case .simplifiedChinese:
+            return percent.map { "Codex 剩余额度 \($0)%" } ?? "Codex 剩余额度未知"
+        case .english:
+            return percent.map { "Codex quota remaining \($0)%" } ?? "Codex quota remaining unknown"
+        }
     }
 
     private func statusImage(

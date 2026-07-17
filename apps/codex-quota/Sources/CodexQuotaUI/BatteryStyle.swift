@@ -1,3 +1,5 @@
+import CodexQuotaCore
+
 public enum BatteryStyle: String, CaseIterable, Sendable {
     case native
     case embedded
@@ -7,15 +9,19 @@ public enum BatteryStyle: String, CaseIterable, Sendable {
     public static let defaultStyle: BatteryStyle = .native
 
     public var menuTitle: String {
+        menuTitle(language: .simplifiedChinese)
+    }
+
+    public func menuTitle(language: AppLanguage) -> String {
         switch self {
         case .native:
-            "原生电池"
+            language == .simplifiedChinese ? "原生电池" : "Native Battery"
         case .embedded:
-            "数字徽章"
+            language == .simplifiedChinese ? "数字徽章" : "Number Badge"
         case .segmented:
-            "分段电池"
+            language == .simplifiedChinese ? "分段电池" : "Segmented Battery"
         case .digits:
-            "纯数字"
+            language == .simplifiedChinese ? "纯数字" : "Number Only"
         }
     }
 }
