@@ -222,6 +222,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
         menu.addItem(.separator())
 
+        let moveHintItem = NSMenuItem(
+            title: "按住 ⌘ 可自由拖动位置",
+            action: nil,
+            keyEquivalent: ""
+        )
+        moveHintItem.isEnabled = false
+        menu.addItem(moveHintItem)
+
         let updateItem = NSMenuItem(
             title: "检查更新…",
             action: #selector(checkForUpdatesManually),
@@ -847,7 +855,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "Codex Quota 已启动"
-        alert.informativeText = "额度每 15 秒自动更新一次，无需手动刷新。"
+        alert.informativeText = "额度每 15 秒自动更新一次，无需手动刷新。按住 Command（⌘）并拖动菜单栏图标，可以自由调整位置。"
         alert.addButton(withTitle: "知道了")
         alert.runModal()
         preferences.hasShownAutoRefreshNotice = true
