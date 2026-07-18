@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Quota 小红书海报候选</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+      background: #d9dde4;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 56px; }
+    .board { display: grid; grid-template-columns: repeat(2, 540px); gap: 46px; justify-content: center; }
+    figure { margin: 0; }
+    figcaption { min-height: 44px; margin: 0 0 12px; color: #344050; font-size: 19px; font-weight: 700; }
+    .poster {
+      --ink: #16181c; --muted: #5c6572; --accent: #ff3c67; --paper: #fff9f5;
+      position: relative; width: 1080px; height: 1440px; overflow: hidden; isolation: isolate;
+      transform: scale(.5); transform-origin: top left; margin-bottom: -720px;
+      color: var(--ink); background: var(--paper);
+    }
+    .poster-inner { position: absolute; inset: 0; padding: 78px 76px 68px; }
+    .eyebrow { font-size: 25px; font-weight: 800; letter-spacing: .055em; text-transform: uppercase; }
+    h1 { margin: 34px 0 0; font-size: 104px; line-height: .98; letter-spacing: -.065em; }
+    h1 code { font: inherit; color: var(--accent); }
+    .sub { margin: 30px 0 0; font-size: 35px; line-height: 1.45; font-weight: 600; color: var(--muted); }
+    .feature-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    .feature { min-height: 92px; padding: 21px 23px; border-radius: 24px; font-size: 27px; font-weight: 760; }
+    .feature small { display: block; margin-top: 5px; font-size: 17px; font-weight: 600; opacity: .62; }
+    .product {
+      position: relative; overflow: hidden; color: #172027; background: linear-gradient(180deg, #e7f9ff, #f7f9fb);
+      box-shadow: 0 24px 70px rgba(22, 36, 52, .22); border: 1px solid rgba(37, 65, 85, .17);
+    }
+    .statusbar { display: flex; align-items: center; height: 70px; padding: 0 18px; color: #fff; background: linear-gradient(180deg, #278fd0, #1477b5); font-size: 23px; font-weight: 780; }
+    .status-logo { width: 34px; height: 34px; margin-right: 12px; fill: currentColor; flex: 0 0 auto; }
+    .quota-pill { padding: 6px 11px 7px; border-radius: 11px; background: rgba(255, 255, 255, .15); box-shadow: inset 0 0 0 2px rgba(255,255,255,.16); white-space: nowrap; }
+    .status-tools { display: flex; align-items: center; gap: 16px; margin-left: auto; font-size: 18px; opacity: .96; white-space: nowrap; }
+    .mini-battery { display: inline-flex; align-items: center; gap: 5px; }
+    .mini-battery::after { content: ""; width: 34px; height: 16px; border: 2px solid currentColor; border-radius: 5px; box-shadow: inset 23px 0 rgba(255,255,255,.95); }
+    .menu { padding: 25px 28px 23px; font-size: 25px; line-height: 1.48; }
+    .menu b { font-weight: 820; }
+    .rule { height: 1px; margin: 18px 0; background: rgba(27, 41, 50, .18); }
+    .row { display: flex; align-items: center; min-height: 49px; }
+    .row .arrow { margin-left: auto; font-size: 38px; line-height: 1; }
+    .row .check { width: 36px; font-weight: 850; }
+    .row.hint { color: #7b858d; font-size: 21px; }
+    .footer { position: absolute; left: 76px; right: 76px; bottom: 62px; display: flex; align-items: flex-end; justify-content: space-between; }
+    .footer-note { font-size: 20px; line-height: 1.5; font-weight: 700; letter-spacing: .02em; }
+    .cta { padding: 16px 21px; border-radius: 18px; font-size: 21px; font-weight: 820; white-space: nowrap; }
+    .privacy { display: inline-flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 700; }
+    .privacy::before { content: "✓"; display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; color: #fff; background: var(--accent); }
+
+    /* A · 小红书高亮卡片 */
+    .a { --ink: #24171c; --muted: #744c5b; --accent: #ff365f; --paper: #fff5f2; }
+    .a::before { content: ""; position: absolute; width: 650px; height: 650px; right: -210px; top: -210px; border-radius: 50%; background: #ffd43d; opacity: .95; z-index: -2; }
+    .a::after { content: "✦"; position: absolute; right: 74px; top: 58px; color: #ff365f; font-size: 106px; transform: rotate(13deg); }
+    .a .eyebrow { display: inline-block; padding: 13px 19px; color: #fff; background: #24171c; border-radius: 999px; }
+    .a .product { position: absolute; left: 76px; right: 76px; top: 550px; height: 535px; border-radius: 34px; transform: rotate(-1.1deg); box-shadow: 12px 16px 0 #ffb8c6, 0 34px 78px rgba(88, 34, 52, .22); }
+    .a .menu { font-size: 23px; padding-top: 21px; }
+    .a .feature-grid { position: absolute; left: 76px; right: 76px; top: 1115px; }
+    .a .feature { color: #5f2738; background: #ffe3e8; border: 1px solid #ffc1cc; }
+    .a .footer { bottom: 33px; }
+    .a .cta { color: #fff; background: #ff365f; }
+
+    /* B · macOS 原生蓝 */
+    .b { --ink: #f7fbff; --muted: #c9ecff; --accent: #7ee3ff; --paper: #0879b8; }
+    .b::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 85% 10%, rgba(122, 231, 255, .65), transparent 28%), linear-gradient(145deg, #1595d7 0%, #0871af 52%, #043b62 100%); z-index: -2; }
+    .b .eyebrow { color: #d9f7ff; }
+    .b h1 code { color: #fff; text-decoration: underline; text-decoration-color: #7ee3ff; text-decoration-thickness: 10px; text-underline-offset: 13px; }
+    .b .product { position: absolute; right: 58px; top: 535px; width: 650px; height: 590px; border-radius: 38px; transform: rotate(2.2deg); border: 14px solid rgba(233, 250, 255, .82); }
+    .b .menu { font-size: 23px; }
+    .b .feature-grid { position: absolute; left: 76px; top: 605px; width: 300px; grid-template-columns: 1fr; }
+    .b .feature { color: #ebfaff; background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.26); backdrop-filter: blur(14px); }
+    .b .footer-note { color: #c9ecff; }
+    .b .cta { color: #075782; background: #dff8ff; }
+    .b .privacy::before { color: #075782; background: #dff8ff; }
+
+    /* C · 黑白黄编辑风 */
+    .c { --ink: #101113; --muted: #555a61; --accent: #ff4d53; --paper: #f8f7f2; }
+    .c::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 18px; background: #101113; }
+    .c h1 { font-size: 110px; }
+    .c h1 code { color: #101113; text-decoration: line-through; text-decoration-color: #ff4d53; text-decoration-thickness: 10px; }
+    .c .product { position: absolute; left: 76px; right: 76px; top: 555px; height: 555px; border-radius: 0; border: 3px solid #101113; box-shadow: 18px 18px 0 #ffd231; }
+    .c .menu { font-size: 23px; }
+    .c .feature-grid { position: absolute; left: 76px; right: 76px; top: 1152px; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .c .feature { min-height: 105px; padding: 17px 15px; color: #101113; background: transparent; border-top: 4px solid #101113; border-radius: 0; font-size: 23px; }
+    .c .feature small { font-size: 15px; }
+    .c .footer { bottom: 26px; }
+    .c .cta { color: #101113; background: #ffd231; border: 2px solid #101113; border-radius: 0; }
+
+    /* D · 墨绿数据可信风 */
+    .d { --ink: #15352a; --muted: #496b5e; --accent: #247252; --paper: #eaf3ed; }
+    .d::before { content: ""; position: absolute; inset: 0; opacity: .34; background-image: linear-gradient(#94b0a4 1px, transparent 1px), linear-gradient(90deg, #94b0a4 1px, transparent 1px); background-size: 34px 34px; z-index: -2; }
+    .d .eyebrow { color: #24694f; }
+    .d h1 { font-size: 101px; }
+    .d h1 code { color: #247252; }
+    .d .product { position: absolute; right: 70px; top: 555px; width: 610px; height: 580px; border-radius: 17px; box-shadow: 0 25px 60px rgba(30, 74, 57, .24); border: 1px solid #7fa493; }
+    .d .statusbar { background: #257254; }
+    .d .menu { font-size: 23px; }
+    .d .feature-grid { position: absolute; left: 76px; top: 590px; width: 300px; grid-template-columns: 1fr; }
+    .d .feature { color: #24513f; background: rgba(255,255,255,.65); border: 1px solid #91b5a5; border-radius: 10px; }
+    .d .cta { color: #fff; background: #247252; border-radius: 8px; }
+
+    body.single { padding: 0; background: transparent; }
+    body.single .board { display: block; }
+    body.single figure { display: none; }
+    body.single figure.active { display: block; }
+    body.single figcaption { display: none; }
+    body.single .poster { transform: none; margin: 0; }
+  </style>
+</head>
+<body>
+  <main class="board" id="board"></main>
+  <template id="poster-template">
+    <figure>
+      <figcaption></figcaption>
+      <section class="poster">
+        <div class="poster-inner">
+          <div class="eyebrow">Codex 额度助手 · v1.1.4</div>
+          <h1>不用再输<br><code>/status</code></h1>
+          <p class="sub">额度、重置、预告，一眼看清。</p>
+          <div class="product" aria-label="Codex Quota 产品界面预览">
+            <div class="statusbar">
+              <svg class="status-logo" viewBox="146.694 227.042 267.198 264.812" aria-label="OpenAI Logo"><path d="M249.176 323.434V298.276C249.176 296.158 249.971 294.569 251.825 293.509L302.406 264.381C309.29 260.409 317.5 258.555 325.973 258.555C357.75 258.555 377.877 283.185 377.877 309.399C377.877 311.253 377.877 313.371 377.611 315.49L325.178 284.771C322.001 282.919 318.822 282.919 315.645 284.771L249.176 323.434ZM367.283 421.415V361.301C367.283 357.592 365.694 354.945 362.516 353.092L296.048 314.43L317.763 301.982C319.617 300.925 321.206 300.925 323.058 301.982L373.639 331.112C388.205 339.586 398.003 357.592 398.003 375.069C398.003 395.195 386.087 413.733 367.283 421.412V421.415ZM233.553 368.452L211.838 355.742C209.986 354.684 209.19 353.095 209.19 350.975V292.718C209.19 264.383 230.905 242.932 260.301 242.932C271.423 242.932 281.748 246.641 290.49 253.26L238.321 283.449C235.146 285.303 233.555 287.951 233.555 291.659V368.455L233.553 368.452ZM280.292 395.462L249.176 377.985V340.913L280.292 323.436L311.407 340.913V377.985L280.292 395.462ZM300.286 475.968C289.163 475.968 278.837 472.259 270.097 465.64L322.264 435.449C325.441 433.597 327.03 430.949 327.03 427.239V350.445L349.011 363.155C350.865 364.213 351.66 365.802 351.66 367.922V426.179C351.66 454.514 329.679 475.965 300.286 475.965V475.968ZM237.525 416.915L186.944 387.785C172.378 379.31 162.582 361.305 162.582 343.827C162.582 323.436 174.763 305.164 193.563 297.485V357.861C193.563 361.571 195.154 364.217 198.33 366.071L264.535 404.467L242.82 416.915C240.967 417.972 239.377 417.972 237.525 416.915ZM234.614 460.343C204.689 460.343 182.71 437.833 182.71 410.028C182.71 407.91 182.976 405.792 183.238 403.672L235.405 433.863C238.582 435.715 241.763 435.715 244.938 433.863L311.407 395.466V420.622C311.407 422.742 310.612 424.331 308.758 425.389L258.179 454.519C251.293 458.491 243.083 460.343 234.611 460.343H234.614ZM300.286 491.854C332.329 491.854 359.073 469.082 365.167 438.892C394.825 431.211 413.892 403.406 413.892 375.073C413.892 356.535 405.948 338.529 391.648 325.552C392.972 319.991 393.766 314.43 393.766 308.87C393.766 271.003 363.048 242.666 327.562 242.666C320.413 242.666 313.528 243.723 306.644 246.109C294.725 234.457 278.307 227.042 260.301 227.042C228.258 227.042 201.513 249.815 195.42 280.004C165.761 287.685 146.694 315.49 146.694 343.824C146.694 362.362 154.638 380.368 168.938 393.344C167.613 398.906 166.819 404.467 166.819 410.027C166.819 447.894 197.538 476.231 233.024 476.231C240.172 476.231 247.058 475.173 253.943 472.788C265.859 484.441 282.278 491.854 300.286 491.854Z"/></svg>
+              <span class="quota-pill">65%&nbsp;&nbsp;6天</span>
+              <span class="status-tools"><span>▶</span><span>⌁</span><span class="mini-battery">93%</span><span>13:09</span></span>
+            </div>
+            <div class="menu">
+              <div>更新时间：13:09:15<br>下次重置：6 天 23 小时<br>当前套餐：<b>Pro</b><br><span style="color:#0879cf;font-weight:820">重置预告：已预告 ↗</span><br>预计时间：7 月 18 日 16:00</div>
+              <div class="rule"></div>
+              <div class="row">展示形式 <span class="arrow">›</span></div>
+              <div class="row">标识形式 <span class="arrow">›</span></div>
+              <div class="rule"></div>
+              <div class="row"><span class="check">✓</span>显示重置时间</div>
+              <div class="row"><span class="check">✓</span>开机自动启动</div>
+              <div class="rule"></div>
+              <div class="row hint">按住 ⌘ 可自由拖动位置</div>
+            </div>
+          </div>
+          <div class="feature-grid">
+            <div class="feature">15秒自动刷新<small>主动读取真实额度</small></div>
+            <div class="feature">重置立即通知<small>按周期去重提醒</small></div>
+            <div class="feature">时刻关注 Tibo 义父的 X<small>有重置消息第一时间知道</small></div>
+            <div class="feature">4种菜单栏样式<small>文字 / Logo 可隐藏</small></div>
+          </div>
+          <div class="footer">
+            <div class="footer-note"><span class="privacy">不读取对话，不保存 token</span><br>免费开源 · Apple Silicon · macOS 13+</div>
+            <div class="cta">GitHub 搜索 codex-assistant</div>
+          </div>
+        </div>
+      </section>
+    </figure>
+  </template>
+  <script>
+    const candidates = [
+      ["a", "A · 小红书高亮卡片｜推荐：醒目、亲和、适合信息流"],
+      ["b", "B · macOS 原生蓝｜成熟工具感，产品可信度强"],
+      ["c", "C · 黑白黄编辑风｜痛点直给，开发者气质更强"],
+      ["d", "D · 墨绿数据可信风｜强调准确、隐私与本机工具"]
+    ];
+    const target = new URLSearchParams(location.search).get("poster");
+    for (const [key, label] of candidates) {
+      const node = document.getElementById("poster-template").content.cloneNode(true);
+      const figure = node.querySelector("figure");
+      figure.dataset.poster = key;
+      figure.querySelector("figcaption").textContent = label;
+      figure.querySelector(".poster").classList.add(key);
+      if (target === key) figure.classList.add("active");
+      document.getElementById("board").appendChild(node);
+    }
+    if (target) document.body.classList.add("single");
+  </script>
+</body>
+</html>
