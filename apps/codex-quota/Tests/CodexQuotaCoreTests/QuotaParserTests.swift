@@ -103,6 +103,7 @@ enum QuotaParserTests {
             ("Tibo reset expectations render in Chinese", testTiboResetExpectationFormatting),
             ("Tibo reset expectations render in English", testEnglishTiboResetExpectationFormatting),
             ("expired Tibo reset signals are hidden at the deadline", testTiboResetSignalExpiry),
+            ("Tibo announcement is hidden after the confirmed quota cycle starts", testTiboSignalClearsAfterQuotaReset),
             ("Tibo reset notification state persists", testTiboResetPreferences),
             ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
             ("status presentation supports every style identity and reset combination", testStatusPresentationMatrix),
@@ -557,6 +558,7 @@ enum QuotaParserTests {
         )
         return expect(snapshot?.remainingPercent, equals: 99)
             && expect(snapshot?.observedAt, equals: observedAt)
+            && expect(snapshot?.windowDuration, equals: 10_080 * 60)
             && expect(
                 snapshot?.resetsAt,
                 equals: Date(timeIntervalSince1970: 1_784_882_768)
@@ -1345,6 +1347,42 @@ enum QuotaParserTests {
                 expectedAt: expectedAt,
                 expectationHint: nil
             ).shouldDisplay(at: expectedAt)
+    }
+
+    private static func testTiboSignalClearsAfterQuotaReset() -> Bool {
+        let publishedAt = Date(timeIntervalSince1970: 1_784_346_898)
+        let signal = TiboResetSignal(
+            id: "reset",
+            kind: .announced,
+            publishedAt: publishedAt,
+            text: "Confirmed",
+            url: URL(string: "https://x.com/thsottiaux/status/200")!,
+            signalStrength: 67,
+            expectedAt: nil,
+            expectationHint: "时间待确认"
+        )
+        let previousCycle = QuotaSnapshot(
+            remainingPercent: 37,
+            observedAt: Date(timeIntervalSince1970: 1_784_353_000),
+            resetsAt: Date(timeIntervalSince1970: 1_784_786_894),
+            windowDuration: 10_080 * 60,
+            planName: "Pro"
+        )
+        let newCycle = QuotaSnapshot(
+            remainingPercent: 100,
+            observedAt: Date(timeIntervalSince1970: 1_784_353_100),
+            resetsAt: Date(timeIntervalSince1970: 1_784_953_855),
+            windowDuration: 10_080 * 60,
+            planName: "Pro"
+        )
+
+        return signal.shouldDisplay(
+            at: newCycle.observedAt,
+            quotaSnapshot: previousCycle
+        ) && !signal.shouldDisplay(
+            at: newCycle.observedAt,
+            quotaSnapshot: newCycle
+        )
     }
 
     private static func testTiboResetPreferences() -> Bool {

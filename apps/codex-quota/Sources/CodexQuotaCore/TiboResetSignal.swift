@@ -109,6 +109,19 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
         return now < expectedAt
     }
 
+    public func shouldDisplay(
+        at now: Date = Date(),
+        quotaSnapshot: QuotaSnapshot?
+    ) -> Bool {
+        guard shouldDisplay(at: now) else {
+            return false
+        }
+        guard let windowStartedAt = quotaSnapshot?.windowStartedAt else {
+            return true
+        }
+        return windowStartedAt < publishedAt
+    }
+
     public static func latest(
         from data: Data,
         now: Date = Date(),

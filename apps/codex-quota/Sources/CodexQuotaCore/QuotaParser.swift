@@ -25,7 +25,8 @@ public enum QuotaParser {
             }
             return Window(
                 usedPercent: usedPercent,
-                resetsAt: resetDate(from: limit["resets_at"])
+                resetsAt: resetDate(from: limit["resets_at"]),
+                duration: duration(fromMinutes: limit["window_minutes"])
             )
         }
 
@@ -43,6 +44,7 @@ public enum QuotaParser {
             remainingPercent: remainingPercent,
             observedAt: observedAt,
             resetsAt: selectedWindow.resetsAt,
+            windowDuration: selectedWindow.duration,
             planName: planName
         )
     }
@@ -50,6 +52,7 @@ public enum QuotaParser {
     private struct Window {
         let usedPercent: Double
         let resetsAt: Date?
+        let duration: TimeInterval?
     }
 
     private static func resetDate(from value: Any?) -> Date? {
@@ -78,5 +81,17 @@ public enum QuotaParser {
         let standardFormatter = ISO8601DateFormatter()
         standardFormatter.formatOptions = [.withInternetDateTime]
         return standardFormatter.date(from: timestamp)
+    }
+
+    private static func duration(fromMinutes value: Any?) -> TimeInterval? {
+        guard
+            let number = value as? NSNumber,
+            CFGetTypeID(number) != CFBooleanGetTypeID(),
+            number.doubleValue.isFinite,
+            number.doubleValue > 0
+        else {
+            return nil
+        }
+        return number.doubleValue * 60
     }
 }

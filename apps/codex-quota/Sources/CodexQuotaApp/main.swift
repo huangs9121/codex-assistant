@@ -742,7 +742,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func updateResetSignalLabels(now: Date) {
-        guard let signal = currentResetSignal, signal.shouldDisplay(at: now) else {
+        guard
+            let signal = currentResetSignal,
+            signal.shouldDisplay(at: now, quotaSnapshot: currentSnapshot)
+        else {
             resetSignalLabel.stringValue = text.resetForecastNone
             expectedResetLabel.stringValue = text.expectedTimePlaceholder
             resetSignalLabel.textColor = .labelColor
@@ -766,7 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         guard
             let signal = currentResetSignal,
             signal.kind == .announced,
-            signal.shouldDisplay(at: now)
+            signal.shouldDisplay(at: now, quotaSnapshot: currentSnapshot)
         else {
             return
         }
@@ -801,7 +804,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                 updateResetSignalLabels(now: Date())
                 if
                     let signal,
-                    signal.shouldDisplay(at: Date()),
+                    signal.shouldDisplay(
+                        at: Date(),
+                        quotaSnapshot: currentSnapshot
+                    ),
                     signal.id != preferences.lastNotifiedResetSignalID
                 {
                     sendResetNotification(for: signal)

@@ -24,7 +24,8 @@ public enum AccountRateLimitsParser {
             }
             return Window(
                 usedPercent: number.doubleValue,
-                resetsAt: resetDate(from: window["resetsAt"])
+                resetsAt: resetDate(from: window["resetsAt"]),
+                duration: duration(fromMinutes: window["windowDurationMins"])
             )
         }
 
@@ -43,6 +44,7 @@ public enum AccountRateLimitsParser {
             remainingPercent: remaining,
             observedAt: observedAt,
             resetsAt: selectedWindow.resetsAt,
+            windowDuration: selectedWindow.duration,
             planName: PlanInfo.normalizedName(rateLimits["planType"] as? String)
         )
     }
@@ -50,6 +52,7 @@ public enum AccountRateLimitsParser {
     private struct Window {
         let usedPercent: Double
         let resetsAt: Date?
+        let duration: TimeInterval?
     }
 
     private static func codexRateLimits(
@@ -80,5 +83,17 @@ public enum AccountRateLimitsParser {
             return nil
         }
         return Date(timeIntervalSince1970: number.doubleValue)
+    }
+
+    private static func duration(fromMinutes value: Any?) -> TimeInterval? {
+        guard
+            let number = value as? NSNumber,
+            CFGetTypeID(number) != CFBooleanGetTypeID(),
+            number.doubleValue.isFinite,
+            number.doubleValue > 0
+        else {
+            return nil
+        }
+        return number.doubleValue * 60
     }
 }
