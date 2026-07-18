@@ -104,7 +104,9 @@ enum QuotaParserTests {
             ("Tibo reset expectations render in English", testEnglishTiboResetExpectationFormatting),
             ("expired Tibo reset signals are hidden at the deadline", testTiboResetSignalExpiry),
             ("Tibo announcement is hidden after the confirmed quota cycle starts", testTiboSignalClearsAfterQuotaReset),
+            ("quota reset detector only reports a newly observed cycle", testQuotaResetDetector),
             ("Tibo reset notification state persists", testTiboResetPreferences),
+            ("quota cycle notification state persists", testQuotaCycleNotificationPreferences),
             ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
             ("status presentation supports every style identity and reset combination", testStatusPresentationMatrix),
             ("status identity and reset widths compose exactly", testStatusPresentationWidthRelationships),
@@ -1383,6 +1385,41 @@ enum QuotaParserTests {
             at: newCycle.observedAt,
             quotaSnapshot: newCycle
         )
+    }
+
+    private static func testQuotaResetDetector() -> Bool {
+        let cycleStart = Date(timeIntervalSince1970: 20_000)
+        let snapshot = QuotaSnapshot(
+            remainingPercent: 100,
+            observedAt: cycleStart.addingTimeInterval(30),
+            resetsAt: cycleStart.addingTimeInterval(7 * 24 * 3_600),
+            windowDuration: 7 * 24 * 3_600,
+            planName: "Pro"
+        )
+
+        return QuotaResetDetector.newCycleStart(
+            in: snapshot,
+            after: nil
+        ) == nil && QuotaResetDetector.newCycleStart(
+            in: snapshot,
+            after: cycleStart.addingTimeInterval(-1)
+        ) == cycleStart && QuotaResetDetector.newCycleStart(
+            in: snapshot,
+            after: cycleStart
+        ) == nil
+    }
+
+    private static func testQuotaCycleNotificationPreferences() -> Bool {
+        withPreferencesSuite { defaults in
+            let cycleStart = Date(timeIntervalSince1970: 20_000)
+            var preferences = DisplayPreferences(defaults: defaults)
+            guard preferences.lastNotifiedQuotaCycleStart == nil else {
+                return false
+            }
+            preferences.lastNotifiedQuotaCycleStart = cycleStart
+            return DisplayPreferences(defaults: defaults)
+                .lastNotifiedQuotaCycleStart == cycleStart
+        }
     }
 
     private static func testTiboResetPreferences() -> Bool {

@@ -714,9 +714,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func apply(_ snapshot: QuotaSnapshot?) {
+        if let snapshot {
+            handleQuotaResetNotification(snapshot)
+        }
         currentSnapshot = snapshot
         updateHeaderLabels()
         updateStatusPresentation()
+    }
+
+    private func handleQuotaResetNotification(_ snapshot: QuotaSnapshot) {
+        guard let currentCycleStart = snapshot.windowStartedAt else {
+            return
+        }
+        guard let previousCycleStart = preferences.lastNotifiedQuotaCycleStart else {
+            preferences.lastNotifiedQuotaCycleStart = currentCycleStart
+            return
+        }
+        guard let newCycleStart = QuotaResetDetector.newCycleStart(
+            in: snapshot,
+            after: previousCycleStart
+        ) else {
+            return
+        }
+        sendQuotaResetNotification(cycleStart: newCycleStart)
+    }
+
+    private func sendQuotaResetNotification(cycleStart: Date) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [weak self] settings in
+            guard
+                settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional
+            else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.deliverQuotaResetNotification(cycleStart: cycleStart)
+            }
+        }
+    }
+
+    private func deliverQuotaResetNotification(cycleStart: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = text.quotaResetNotificationTitle
+        content.body = text.quotaResetNotificationBody
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "quota-reset-\(Int(cycleStart.timeIntervalSince1970))",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
+            guard error == nil else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.preferences.lastNotifiedQuotaCycleStart = cycleStart
+            }
+        }
     }
 
     private func updateHeaderLabels(now: Date = Date()) {

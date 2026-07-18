@@ -49,6 +49,12 @@ struct AppText {
         "额度每 15 秒自动更新一次，无需手动刷新。按住 Command（⌘）并拖动菜单栏图标，可以自由调整位置。",
         "Your quota updates automatically every 15 seconds. Hold Command (⌘) and drag the menu bar icon to reposition it."
     ) }
+    var quotaResetNotificationTitle: String {
+        choose("Codex 额度已重置", "Codex Quota Has Reset")
+    }
+    var quotaResetNotificationBody: String {
+        choose("新周期额度已经生效。", "Your new quota cycle is now active.")
+    }
 
     func newVersionAvailable(_ version: String) -> String {
         choose("新版本 \(version) 可用…", "Version \(version) Available…")

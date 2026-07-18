@@ -12,6 +12,7 @@ public struct DisplayPreferences {
     public static let lastUpdateCheckFailureKey = "lastUpdateCheckFailure"
     public static let lastPromptedVersionKey = "lastPromptedVersion"
     public static let lastNotifiedResetSignalIDKey = "lastNotifiedResetSignalID"
+    public static let lastNotifiedQuotaCycleStartKey = "lastNotifiedQuotaCycleStart"
     public static let latestResetSignalKey = "latestResetSignal"
 
     private let defaults: UserDefaults
@@ -147,6 +148,19 @@ public struct DisplayPreferences {
         }
         set {
             defaults.set(newValue, forKey: Self.lastNotifiedResetSignalIDKey)
+        }
+    }
+
+    public var lastNotifiedQuotaCycleStart: Date? {
+        get {
+            defaults.object(forKey: Self.lastNotifiedQuotaCycleStartKey) as? Date
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: Self.lastNotifiedQuotaCycleStartKey)
+            } else {
+                defaults.removeObject(forKey: Self.lastNotifiedQuotaCycleStartKey)
+            }
         }
     }
 
