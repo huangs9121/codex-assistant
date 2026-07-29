@@ -1,5 +1,6 @@
 import Darwin
 import AppKit
+import CryptoKit
 import Foundation
 import CodexQuotaCore
 import CodexQuotaUI
@@ -95,16 +96,21 @@ enum QuotaParserTests {
             ("GitHub release eligibility rejects unsafe releases", testGitHubReleaseEligibility),
             ("GitHub release decoding rejects invalid fixtures", testGitHubReleaseInvalidDecoding),
             ("latest release request contains only public metadata", testLatestReleaseRequest),
+            ("GitHub release selects one authenticated update ZIP", testGitHubUpdateAsset),
+            ("GitHub update ZIP rejects unsafe metadata", testGitHubUpdateAssetValidation),
+            ("update download request contains no credentials", testGitHubUpdateDownloadRequest),
+            ("automatic update validates a signed arm64 app archive", testAutomaticUpdatePackageValidation),
             ("update check policy enforces success and failure throttles", testUpdateCheckPolicy),
             ("update prompt policy normalizes semantic versions", testUpdatePromptPolicy),
             ("update preferences persist typed optional values", testUpdatePreferences),
             ("Tibo feed selects the latest explicit reset signal", testLatestTiboResetSignal),
+            ("Tibo feed upgrades a vague timed reset announcement", testVagueTiboResetSignal),
             ("Tibo feed ignores failed and unsafe sources", testTiboResetSignalSourceValidation),
             ("Tibo reset expectations render in Chinese", testTiboResetExpectationFormatting),
             ("Tibo reset expectations render in English", testEnglishTiboResetExpectationFormatting),
             ("expired Tibo reset signals are hidden at the deadline", testTiboResetSignalExpiry),
             ("Tibo announcement is hidden after the confirmed quota cycle starts", testTiboSignalClearsAfterQuotaReset),
-            ("quota reset detector only reports a newly observed cycle", testQuotaResetDetector),
+            ("quota reset detector suppresses same-cycle timestamp drift", testQuotaResetDetector),
             ("Tibo reset notification state persists", testTiboResetPreferences),
             ("quota cycle notification state persists", testQuotaCycleNotificationPreferences),
             ("OpenAI logo is a centered template glyph with safe margins", testOpenAILogoRendering),
@@ -956,7 +962,14 @@ enum QuotaParserTests {
           "body": "Release notes",
           "html_url": "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0",
           "draft": false,
-          "prerelease": false
+          "prerelease": false,
+          "assets": [{
+            "name": "Codex.Quota-arm64.zip",
+            "browser_download_url": "https://github.com/huangs9121/codex-assistant/releases/download/v1.2.0/Codex.Quota-arm64.zip",
+            "content_type": "application/zip",
+            "size": 259268,
+            "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          }]
         }
         """
         guard let release = try? JSONDecoder().decode(
@@ -975,6 +988,7 @@ enum QuotaParserTests {
             && expect(release.draft, equals: false)
             && expect(release.prerelease, equals: false)
             && expect(release.eligibleVersion, equals: SemanticVersion("1.2.0"))
+            && expect(release.eligibleUpdateAsset?.name, equals: "Codex.Quota-arm64.zip")
     }
 
     private static func testGitHubReleaseEligibility() -> Bool {
@@ -1057,6 +1071,225 @@ enum QuotaParserTests {
             && expect(request.value(forHTTPHeaderField: "Cookie"), equals: nil)
             && expect(request.allHTTPHeaderFields?.count, equals: 2)
             && expect(request.httpBody, equals: nil)
+    }
+
+    private static func testGitHubUpdateAsset() -> Bool {
+        let object: [String: Any] = [
+            "tag_name": "v1.2.0",
+            "html_url": "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0",
+            "draft": false,
+            "prerelease": false,
+            "assets": [[
+                "name": "Codex.Quota-arm64.zip",
+                "browser_download_url": "https://github.com/huangs9121/codex-assistant/releases/download/v1.2.0/Codex.Quota-arm64.zip",
+                "content_type": "application/zip",
+                "size": 259_268,
+                "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            ]]
+        ]
+        guard
+            let release = try? JSONDecoder().decode(GitHubRelease.self, from: jsonData(object)),
+            let asset = release.eligibleUpdateAsset,
+            let request = asset.downloadRequest(appVersion: SemanticVersion("1.1.4")!)
+        else {
+            return false
+        }
+        return expect(asset.expectedSHA256, equals: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+            && expect(asset.size, equals: 259_268)
+            && expect(request.url, equals: asset.browserDownloadURL)
+    }
+
+    private static func testGitHubUpdateAssetValidation() -> Bool {
+        func release(assets: [[String: Any]], tag: String = "v1.2.0") -> GitHubRelease? {
+            let object: [String: Any] = [
+                "tag_name": tag,
+                "html_url": "https://github.com/huangs9121/codex-assistant/releases/tag/\(tag)",
+                "draft": false,
+                "prerelease": false,
+                "assets": assets
+            ]
+            return try? JSONDecoder().decode(GitHubRelease.self, from: jsonData(object))
+        }
+        func asset(
+            name: String = "Codex.Quota-arm64.zip",
+            url: String = "https://github.com/huangs9121/codex-assistant/releases/download/v1.2.0/Codex.Quota-arm64.zip",
+            contentType: String = "application/zip",
+            size: Int = 259_268,
+            digest: Any = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        ) -> [String: Any] {
+            [
+                "name": name,
+                "browser_download_url": url,
+                "content_type": contentType,
+                "size": size,
+                "digest": digest
+            ]
+        }
+
+        guard let valid = release(assets: [asset()]) else {
+            return false
+        }
+        let rejected = [
+            release(assets: []),
+            release(assets: [asset(), asset()]),
+            release(assets: [asset(name: "Source.zip")]),
+            release(assets: [asset(url: "http://github.com/huangs9121/codex-assistant/releases/download/v1.2.0/Codex.Quota-arm64.zip")]),
+            release(assets: [asset(url: "https://example.com/Codex.Quota-arm64.zip")]),
+            release(assets: [asset(url: "https://github.com/huangs9121/codex-assistant/releases/download/v1.3.0/Codex.Quota-arm64.zip")]),
+            release(assets: [asset(url: "https://github.com/huangs9121/codex-assistant/releases/download/v1.2.0/Codex.Quota-arm64.zip?raw=1")]),
+            release(assets: [asset(contentType: "application/octet-stream")]),
+            release(assets: [asset(size: 0)]),
+            release(assets: [asset(size: 101 * 1024 * 1024)]),
+            release(assets: [asset(digest: "sha256:xyz")]),
+            release(assets: [asset(digest: NSNull())])
+        ]
+        return valid.eligibleUpdateAsset != nil
+            && rejected.allSatisfy { $0?.eligibleUpdateAsset == nil }
+    }
+
+    private static func testGitHubUpdateDownloadRequest() -> Bool {
+        let object: [String: Any] = [
+            "tag_name": "v1.2.0",
+            "html_url": "https://github.com/huangs9121/codex-assistant/releases/tag/v1.2.0",
+            "draft": false,
+            "prerelease": false,
+            "assets": [[
+                "name": "Codex.Quota-arm64.zip",
+                "browser_download_url": "https://github.com/huangs9121/codex-assistant/releases/download/v1.2.0/Codex.Quota-arm64.zip",
+                "content_type": "application/zip",
+                "size": 259_268,
+                "digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            ]]
+        ]
+        guard
+            let release = try? JSONDecoder().decode(GitHubRelease.self, from: jsonData(object)),
+            let request = release.eligibleUpdateAsset?.downloadRequest(
+                appVersion: SemanticVersion("1.1.4")!
+            )
+        else {
+            return false
+        }
+        return expect(request.httpMethod, equals: "GET")
+            && expect(request.timeoutInterval, equals: 60)
+            && expect(request.value(forHTTPHeaderField: "Accept"), equals: "application/octet-stream")
+            && expect(request.value(forHTTPHeaderField: "User-Agent"), equals: "Codex-Quota/1.1.4")
+            && expect(request.value(forHTTPHeaderField: "Authorization"), equals: nil)
+            && expect(request.value(forHTTPHeaderField: "Cookie"), equals: nil)
+            && expect(request.allHTTPHeaderFields?.count, equals: 2)
+            && expect(request.httpBody, equals: nil)
+    }
+
+    private static func testAutomaticUpdatePackageValidation() -> Bool {
+        withTemporaryDirectory { root in
+            let appURL = root.appendingPathComponent("Codex Quota.app", isDirectory: true)
+            let macOSURL = appURL.appendingPathComponent("Contents/MacOS", isDirectory: true)
+            let executableURL = macOSURL.appendingPathComponent("CodexQuotaApp")
+            let plistURL = appURL.appendingPathComponent("Contents/Info.plist")
+            let archiveURL = root.appendingPathComponent("Codex.Quota-arm64.zip")
+            let currentExecutable = URL(
+                fileURLWithPath: CommandLine.arguments[0],
+                relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            ).standardizedFileURL
+            do {
+                try FileManager.default.createDirectory(
+                    at: macOSURL,
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.copyItem(at: currentExecutable, to: executableURL)
+                try FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755],
+                    ofItemAtPath: executableURL.path
+                )
+                let plist: [String: Any] = [
+                    "CFBundleExecutable": "CodexQuotaApp",
+                    "CFBundleIdentifier": "local.openclaw.codexquota",
+                    "CFBundleName": "Codex Quota",
+                    "CFBundlePackageType": "APPL",
+                    "CFBundleShortVersionString": "1.2.0",
+                    "CFBundleVersion": "1"
+                ]
+                let plistData = try PropertyListSerialization.data(
+                    fromPropertyList: plist,
+                    format: .xml,
+                    options: 0
+                )
+                try plistData.write(to: plistURL)
+                guard runProcess(
+                    "/usr/bin/codesign",
+                    arguments: ["--force", "--deep", "--sign", "-", appURL.path]
+                ), runProcess(
+                    "/usr/bin/ditto",
+                    arguments: [
+                        "-c", "-k", "--sequesterRsrc", "--keepParent",
+                        appURL.path, archiveURL.path
+                    ]
+                ) else {
+                    return false
+                }
+                let attributes = try FileManager.default.attributesOfItem(
+                    atPath: archiveURL.path
+                )
+                guard let size = attributes[.size] as? NSNumber else {
+                    return false
+                }
+                let digest = try sha256(at: archiveURL)
+                let assetFixture: [String: Any] = [
+                    "name": "Codex.Quota-arm64.zip",
+                    "browser_download_url": "https://github.com/huangs9121/codex-assistant/releases/download/v1.2.0/Codex.Quota-arm64.zip",
+                    "content_type": "application/zip",
+                    "size": size.intValue,
+                    "digest": "sha256:\(digest)"
+                ]
+                let asset = try JSONDecoder().decode(
+                    GitHubReleaseAsset.self,
+                    from: jsonData(assetFixture)
+                )
+                let workURL = root.appendingPathComponent("work", isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: workURL,
+                    withIntermediateDirectories: false
+                )
+                let prepared = try AutomaticUpdatePackage.prepare(
+                    archiveURL: archiveURL,
+                    asset: asset,
+                    version: SemanticVersion("1.2.0")!,
+                    workingDirectory: workURL
+                )
+                guard
+                    prepared.appURL.lastPathComponent == "Codex Quota.app",
+                    Bundle(url: prepared.appURL)?.bundleIdentifier
+                        == "local.openclaw.codexquota"
+                else {
+                    return false
+                }
+
+                let handle = try FileHandle(forWritingTo: archiveURL)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data([0]))
+                try handle.close()
+                let tamperedWork = root.appendingPathComponent(
+                    "tampered-work",
+                    isDirectory: true
+                )
+                try FileManager.default.createDirectory(
+                    at: tamperedWork,
+                    withIntermediateDirectories: false
+                )
+                do {
+                    _ = try AutomaticUpdatePackage.prepare(
+                        archiveURL: archiveURL,
+                        asset: asset,
+                        version: SemanticVersion("1.2.0")!,
+                        workingDirectory: tamperedWork
+                    )
+                    return false
+                } catch {
+                    return true
+                }
+            } catch {
+                return diagnostic("automatic update fixture failed: \(error)")
+            }
+        }
     }
 
     private static func testUpdateCheckPolicy() -> Bool {
@@ -1227,6 +1460,47 @@ enum QuotaParserTests {
             && expect(signal.expectedAt, equals: expectedAt)
     }
 
+    private static func testVagueTiboResetSignal() -> Bool {
+        let data = Data(
+            """
+            {
+              "sourceErrors": {},
+              "tiboPosts": [
+                {
+                  "activityType": "post",
+                  "guid": "2081899343091843463",
+                  "pubDate": "2026-07-28T00:27:37.000Z",
+                  "title": "We’re celebrating the fast adoption of ChatGPT Work. I’m feeling like a limit reset. Hold on tight to your ultra and /fast and see you in a few hours when I’m back at the laptop!",
+                  "link": "https://x.com/thsottiaux/status/2081899343091843463",
+                  "tweetAssessment": {
+                    "category": "vague_hint",
+                    "resetSignalStrength": 55
+                  }
+                },
+                {
+                  "activityType": "post",
+                  "guid": "2081900000000000000",
+                  "pubDate": "2026-07-28T00:30:00.000Z",
+                  "title": "Performance and efficiency improvements are coming soon.",
+                  "link": "https://x.com/thsottiaux/status/2081900000000000000"
+                }
+              ]
+            }
+            """.utf8
+        )
+        guard
+            let now = fractionalDate("2026-07-28T01:47:17.000Z"),
+            let expectedAt = fractionalDate("2026-07-28T03:27:37.000Z"),
+            let signal = try? TiboResetSignal.latest(from: data, now: now)
+        else {
+            return false
+        }
+        return expect(signal.id, equals: "2081899343091843463")
+            && expect(signal.kind, equals: .announced)
+            && expect(signal.signalStrength, equals: 75)
+            && expect(signal.expectedAt, equals: expectedAt)
+    }
+
     private static func testTiboResetSignalSourceValidation() -> Bool {
         guard let now = fractionalDate("2026-07-16T06:30:00.000Z") else {
             return false
@@ -1388,37 +1662,105 @@ enum QuotaParserTests {
     }
 
     private static func testQuotaResetDetector() -> Bool {
-        let cycleStart = Date(timeIntervalSince1970: 20_000)
-        let snapshot = QuotaSnapshot(
+        let windowDuration = TimeInterval(7 * 24 * 3_600)
+        let originalCycleStart = Date(timeIntervalSince1970: 10_000)
+        let resetCycleStart = Date(timeIntervalSince1970: 20_000)
+        let initial = QuotaSnapshot(
+            remainingPercent: 17,
+            observedAt: originalCycleStart.addingTimeInterval(60),
+            resetsAt: originalCycleStart.addingTimeInterval(windowDuration),
+            windowDuration: windowDuration,
+            planName: "Pro"
+        )
+        let reset = QuotaSnapshot(
             remainingPercent: 100,
-            observedAt: cycleStart.addingTimeInterval(30),
-            resetsAt: cycleStart.addingTimeInterval(7 * 24 * 3_600),
+            observedAt: resetCycleStart.addingTimeInterval(10),
+            resetsAt: resetCycleStart.addingTimeInterval(windowDuration),
+            windowDuration: windowDuration,
+            planName: "Pro"
+        )
+        let correctedReset = QuotaSnapshot(
+            remainingPercent: 100,
+            observedAt: resetCycleStart.addingTimeInterval(20),
+            resetsAt: resetCycleStart.addingTimeInterval(windowDuration + 8),
+            windowDuration: windowDuration,
+            planName: "Pro"
+        )
+        let usageAfterReset = QuotaSnapshot(
+            remainingPercent: 99,
+            observedAt: resetCycleStart.addingTimeInterval(30),
+            resetsAt: resetCycleStart.addingTimeInterval(windowDuration + 8),
             windowDuration: 7 * 24 * 3_600,
             planName: "Pro"
         )
+        let driftAfterRearming = QuotaSnapshot(
+            remainingPercent: 99,
+            observedAt: resetCycleStart.addingTimeInterval(40),
+            resetsAt: resetCycleStart.addingTimeInterval(windowDuration + 16),
+            windowDuration: windowDuration,
+            planName: "Pro"
+        )
+        let nextCycleStart = resetCycleStart.addingTimeInterval(3_600)
+        let nextReset = QuotaSnapshot(
+            remainingPercent: 100,
+            observedAt: nextCycleStart.addingTimeInterval(10),
+            resetsAt: nextCycleStart.addingTimeInterval(windowDuration),
+            windowDuration: windowDuration,
+            planName: "Pro"
+        )
 
-        return QuotaResetDetector.newCycleStart(
-            in: snapshot,
-            after: nil
-        ) == nil && QuotaResetDetector.newCycleStart(
-            in: snapshot,
-            after: cycleStart.addingTimeInterval(-1)
-        ) == cycleStart && QuotaResetDetector.newCycleStart(
-            in: snapshot,
-            after: cycleStart
-        ) == nil
+        let initialized = QuotaResetDetector.evaluate(
+            initial,
+            state: nil
+        )
+        let detected = QuotaResetDetector.evaluate(
+            reset,
+            state: initialized.state
+        )
+        let suppressed = QuotaResetDetector.evaluate(
+            correctedReset,
+            state: detected.state
+        )
+        let rearmed = QuotaResetDetector.evaluate(
+            usageAfterReset,
+            state: suppressed.state
+        )
+        let driftSuppressed = QuotaResetDetector.evaluate(
+            driftAfterRearming,
+            state: rearmed.state
+        )
+        let nextDetected = QuotaResetDetector.evaluate(
+            nextReset,
+            state: driftSuppressed.state
+        )
+
+        return initialized.cycleStartToNotify == nil
+            && initialized.state.isArmed
+            && detected.cycleStartToNotify == resetCycleStart
+            && !detected.state.isArmed
+            && suppressed.cycleStartToNotify == nil
+            && !suppressed.state.isArmed
+            && rearmed.cycleStartToNotify == nil
+            && rearmed.state.isArmed
+            && driftSuppressed.cycleStartToNotify == nil
+            && driftSuppressed.state.isArmed
+            && nextDetected.cycleStartToNotify == nextCycleStart
+            && !nextDetected.state.isArmed
     }
 
     private static func testQuotaCycleNotificationPreferences() -> Bool {
         withPreferencesSuite { defaults in
-            let cycleStart = Date(timeIntervalSince1970: 20_000)
+            let state = QuotaResetNotificationState(
+                lastObservedCycleStart: Date(timeIntervalSince1970: 20_000),
+                isArmed: false
+            )
             var preferences = DisplayPreferences(defaults: defaults)
-            guard preferences.lastNotifiedQuotaCycleStart == nil else {
+            guard preferences.quotaResetNotificationState == nil else {
                 return false
             }
-            preferences.lastNotifiedQuotaCycleStart = cycleStart
+            preferences.quotaResetNotificationState = state
             return DisplayPreferences(defaults: defaults)
-                .lastNotifiedQuotaCycleStart == cycleStart
+                .quotaResetNotificationState == state
         }
     }
 
@@ -2466,6 +2808,28 @@ enum QuotaParserTests {
         } catch {
             return false
         }
+    }
+
+    private static func runProcess(_ executable: String, arguments: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
+    private static func sha256(at url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        return SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private static func setModificationDate(_ date: Date, for url: URL) -> Bool {

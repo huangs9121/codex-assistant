@@ -26,7 +26,7 @@
 - 信息区显示精确到秒的更新时间、下次重置和当前套餐
 - 识别到真实额度周期已重置后，在首个 15 秒轮询内发送 macOS 系统通知，并按周期去重
 - 自动监控 Tibo reset 预告，发送系统通知并链接到原始 X 帖子；预期时间到达后自动恢复“暂无预告”
-- 支持 GitHub 新版本提醒和开机启动
+- 支持 GitHub 新版本提醒；确认后自动下载、校验、替换并重启
 - 按住 Command（⌘）拖动图标，可调整它在菜单栏中的位置
 - 仅支持 arm64（Apple Silicon）和 macOS 13 及以上
 
@@ -34,13 +34,17 @@
 
 ## 安装
 
-同事可从 [GitHub Releases](https://github.com/huangs9121/codex-assistant/releases) 下载 `Codex Quota-arm64.zip`，解压后将 `Codex Quota.app` 拖入 `/Applications`。首次运行如果被 macOS 拦截，可在 Finder 中右键 App 后选择“打开”。
+同事可从 [GitHub Releases](https://github.com/huangs9121/codex-assistant/releases) 下载 `Codex.Quota-arm64.zip`，解压后将 `Codex Quota.app` 拖入 `/Applications`。首次运行如果被 macOS 拦截，请先尝试打开一次，再进入“系统设置 → 隐私与安全性”点击“仍要打开”。
 
 当前发布使用 ad-hoc 签名且未经 Apple 公证，Gatekeeper 出现安全提醒属于预期情况。请只从本仓库下载。
 
 ## 更新策略
 
-App 启动和持续运行期间按策略检查 GitHub 公开 Release：成功后至少间隔 24 小时，失败后至少间隔 1 小时重试。检查只向 GitHub 公开 API 发出 `GET` 请求；发现新版本时仅提示并打开 Release 页面，不会自动下载或安装。
+App 启动和持续运行期间按策略检查 GitHub 公开 Release：成功后至少间隔 24 小时，失败后至少间隔 1 小时重试。检查只向 GitHub 公开 API 发出 `GET` 请求。
+
+发现新版本后，用户点击“立即更新”即可完成整个流程：下载固定的 arm64 ZIP、核对 GitHub 提供的 SHA-256、验证 Bundle ID、版本、签名和 arm64 架构，然后退出旧版、原位替换并自动重启。任一校验或安装步骤失败都会保留旧版本，并提供 GitHub 手动下载入口。App 位于 `/Applications` 且目录不可写时，macOS 会在安装阶段请求管理员授权。
+
+`v1.1.4` 本身尚未包含自动更新器，因此升级到 `v1.1.5` 仍需手动安装一次；此后的版本可以在 App 内完成更新。
 
 ## 隐私
 

@@ -146,9 +146,10 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
 
         return response.tiboPosts.compactMap { post -> TiboResetSignal? in
             guard
-                let category = post.tweetAssessment?.category,
+                let assessment = assessment(for: post),
+                let category = assessment.category,
                 let kind = TiboResetSignalKind(rawValue: category),
-                let strength = post.tweetAssessment?.resetSignalStrength,
+                let strength = assessment.resetSignalStrength,
                 strength >= 50,
                 !post.guid.isEmpty,
                 !post.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -200,6 +201,7 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
     }
 
     private struct Post: Decodable {
+        let activityType: String?
         let guid: String
         let pubDate: Date
         let title: String
@@ -208,8 +210,49 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
     }
 
     private struct Assessment: Decodable {
-        let category: String
+        let category: String?
         let resetSignalStrength: Double?
+    }
+
+    private static func assessment(for post: Post) -> Assessment? {
+        if
+            let assessment = post.tweetAssessment,
+            let category = assessment.category,
+            TiboResetSignalKind(rawValue: category) != nil
+        {
+            return assessment
+        }
+        guard post.activityType == "post" else {
+            return nil
+        }
+
+        let text = post.title.lowercased()
+        let hasResetPhrase = text.range(
+            of: #"\b(?:limit|limits|usage|quota)\s+reset\b|\breset\s+(?:the\s+)?(?:limit|limits|usage|quota)\b"#,
+            options: .regularExpression
+        ) != nil
+        guard hasResetPhrase else {
+            return nil
+        }
+
+        let hasFutureTiming = text.range(
+            of: #"\b(?:in|within|up to)\s+(?:a\s+)?(?:few|[0-9]+)\s+(?:minutes?|hours?|days?)\b"#,
+            options: .regularExpression
+        ) != nil
+        let hasIntentLanguage = text.range(
+            of: #"\b(?:feel(?:ing)? like|time for|thinking about|might|may|soon|shortly|about to)\b"#,
+            options: .regularExpression
+        ) != nil
+        guard hasFutureTiming || hasIntentLanguage else {
+            return nil
+        }
+
+        return Assessment(
+            category: hasFutureTiming
+                ? TiboResetSignalKind.announced.rawValue
+                : TiboResetSignalKind.proposal.rawValue,
+            resetSignalStrength: hasFutureTiming ? 75 : 60
+        )
     }
 
     private static func validatedTiboURL(_ value: String) -> URL? {
@@ -238,6 +281,12 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
             options: .regularExpression
         ) != nil {
             return (publishedAt.addingTimeInterval(15 * 60), nil)
+        }
+        if lowercased.range(
+            of: #"(?:in|within|up to)\s+(?:a\s+)?few\s+hours"#,
+            options: .regularExpression
+        ) != nil {
+            return (publishedAt.addingTimeInterval(3 * 3_600), nil)
         }
 
         let pattern = #"(?:in|within|up to)\s+([0-9]+)\s*(minutes?|hours?|days?)"#

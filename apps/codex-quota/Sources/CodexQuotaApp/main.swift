@@ -128,8 +128,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var currentResetSignal: TiboResetSignal?
     private var isRefreshing = false
     private var isUpdateCheckInFlight = false
+    private var isUpdateInstallInFlight = false
     private var isResetMonitorInFlight = false
     private let updateController = GitHubUpdateController()
+    private let automaticUpdateInstaller = AutomaticUpdateInstaller()
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
     private let rateLimitController = CodexRateLimitController()
@@ -179,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         updatePolicyTimer?.invalidate()
         resetMonitorTimer?.invalidate()
         updateController.invalidate()
+        automaticUpdateInstaller.invalidate()
         resetMonitorController.invalidate()
         rateLimitController.invalidate()
     }
@@ -188,6 +191,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
         let menu = NSMenu()
         menu.delegate = self
+
+        let moveHintItem = NSMenuItem(
+            title: text.moveHint,
+            action: nil,
+            keyEquivalent: ""
+        )
+        moveHintItem.isEnabled = false
+        menu.addItem(moveHintItem)
+        menu.addItem(.separator())
+
         menu.addItem(makeHeaderItem())
         menu.addItem(.separator())
 
@@ -238,14 +251,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         menu.addItem(loginItem)
 
         menu.addItem(.separator())
-
-        let moveHintItem = NSMenuItem(
-            title: text.moveHint,
-            action: nil,
-            keyEquivalent: ""
-        )
-        moveHintItem.isEnabled = false
-        menu.addItem(moveHintItem)
 
         let updateItem = NSMenuItem(
             title: text.checkForUpdates,
@@ -429,10 +434,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         (launchAtLoginItem?.view as? MenuChoiceRow)?.isSelected = launchSelected
         (launchAtLoginItem?.view as? MenuChoiceRow)?.updateTitle(launchTitle)
 
-        if let version = availableRelease?.eligibleVersion {
+        if isUpdateInstallInFlight {
+            updateMenuItem?.title = text.downloadingUpdate
+            updateMenuItem?.isEnabled = false
+        } else if let version = availableRelease?.eligibleVersion {
             updateMenuItem?.title = text.newVersionAvailable(canonicalVersion(version))
+            updateMenuItem?.isEnabled = true
         } else {
             updateMenuItem?.title = text.checkForUpdates
+            updateMenuItem?.isEnabled = true
         }
     }
 
@@ -568,6 +578,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     @objc private func checkForUpdatesManually() {
+        guard !isUpdateInstallInFlight else {
+            showAlert(message: text.downloadingUpdate)
+            return
+        }
         guard !isUpdateCheckInFlight else {
             showAlert(message: text.checkingUpdates)
             return
@@ -650,12 +664,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         alert.alertStyle = .informational
         alert.messageText = text.foundNewVersion(canonicalVersion(version))
         alert.informativeText = releaseNotes(release.body)
-        alert.addButton(withTitle: text.goToUpdate)
+        let canInstallAutomatically = release.eligibleUpdateAsset != nil
+        alert.addButton(
+            withTitle: canInstallAutomatically ? text.installUpdate : text.goToUpdate
+        )
         alert.addButton(withTitle: text.later)
         if alert.runModal() == .alertFirstButtonReturn {
-            if !NSWorkspace.shared.open(release.htmlURL) {
+            if canInstallAutomatically {
+                beginAutomaticUpdate(release)
+            } else if !NSWorkspace.shared.open(release.htmlURL) {
                 showAlert(message: text.cannotOpenUpdate)
             }
+        }
+    }
+
+    private func beginAutomaticUpdate(_ release: GitHubRelease) {
+        guard
+            !isUpdateInstallInFlight,
+            let currentVersion = currentAppVersion(),
+            release.eligibleUpdateAsset != nil
+        else {
+            showAutomaticUpdateFailure(for: release)
+            return
+        }
+        isUpdateInstallInFlight = true
+        syncMenuState()
+        automaticUpdateInstaller.install(
+            release: release,
+            currentVersion: currentVersion,
+            currentAppURL: Bundle.main.bundleURL
+        ) { [weak self] result in
+            guard let self else {
+                return
+            }
+            isUpdateInstallInFlight = false
+            syncMenuState()
+            switch result {
+            case .restarting:
+                NSApp.terminate(nil)
+            case .failure:
+                showAutomaticUpdateFailure(for: release)
+            }
+        }
+    }
+
+    private func showAutomaticUpdateFailure(for release: GitHubRelease) {
+        statusItem.menu?.cancelTracking()
+        activateApp()
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = text.automaticUpdateFailed
+        alert.informativeText = text.automaticUpdateFailedDetail
+        alert.addButton(withTitle: text.openDownloadPage)
+        alert.addButton(withTitle: text.later)
+        if alert.runModal() == .alertFirstButtonReturn,
+           !NSWorkspace.shared.open(release.htmlURL) {
+            showAlert(message: text.cannotOpenUpdate)
         }
     }
 
@@ -723,17 +787,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func handleQuotaResetNotification(_ snapshot: QuotaSnapshot) {
-        guard let currentCycleStart = snapshot.windowStartedAt else {
-            return
-        }
-        guard let previousCycleStart = preferences.lastNotifiedQuotaCycleStart else {
-            preferences.lastNotifiedQuotaCycleStart = currentCycleStart
-            return
-        }
-        guard let newCycleStart = QuotaResetDetector.newCycleStart(
-            in: snapshot,
-            after: previousCycleStart
-        ) else {
+        let detection = QuotaResetDetector.evaluate(
+            snapshot,
+            state: preferences.quotaResetNotificationState
+        )
+        preferences.quotaResetNotificationState = detection.state
+        guard let newCycleStart = detection.cycleStartToNotify else {
             return
         }
         sendQuotaResetNotification(cycleStart: newCycleStart)
@@ -765,14 +824,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             content: content,
             trigger: nil
         )
-        UNUserNotificationCenter.current().add(request) { [weak self] error in
-            guard error == nil else {
-                return
-            }
-            Task { @MainActor [weak self] in
-                self?.preferences.lastNotifiedQuotaCycleStart = cycleStart
-            }
-        }
+        UNUserNotificationCenter.current().add(request)
     }
 
     private func updateHeaderLabels(now: Date = Date()) {
@@ -866,6 +918,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                     ),
                     signal.id != preferences.lastNotifiedResetSignalID
                 {
+                    preferences.lastNotifiedResetSignalID = signal.id
                     sendResetNotification(for: signal)
                 }
             case .failure:
@@ -903,14 +956,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             content: content,
             trigger: nil
         )
-        UNUserNotificationCenter.current().add(request) { [weak self] error in
-            guard error == nil else {
-                return
-            }
-            Task { @MainActor [weak self] in
-                self?.preferences.lastNotifiedResetSignalID = signal.id
-            }
-        }
+        UNUserNotificationCenter.current().add(request)
     }
 
     func userNotificationCenter(

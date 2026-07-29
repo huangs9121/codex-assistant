@@ -12,7 +12,7 @@ public struct DisplayPreferences {
     public static let lastUpdateCheckFailureKey = "lastUpdateCheckFailure"
     public static let lastPromptedVersionKey = "lastPromptedVersion"
     public static let lastNotifiedResetSignalIDKey = "lastNotifiedResetSignalID"
-    public static let lastNotifiedQuotaCycleStartKey = "lastNotifiedQuotaCycleStart"
+    public static let quotaResetNotificationStateKey = "quotaResetNotificationState"
     public static let latestResetSignalKey = "latestResetSignal"
 
     private let defaults: UserDefaults
@@ -151,15 +151,31 @@ public struct DisplayPreferences {
         }
     }
 
-    public var lastNotifiedQuotaCycleStart: Date? {
+    public var quotaResetNotificationState: QuotaResetNotificationState? {
         get {
-            defaults.object(forKey: Self.lastNotifiedQuotaCycleStartKey) as? Date
+            guard
+                let data = defaults.data(
+                    forKey: Self.quotaResetNotificationStateKey
+                ),
+                let state = try? JSONDecoder().decode(
+                    QuotaResetNotificationState.self,
+                    from: data
+                )
+            else {
+                return nil
+            }
+            return state
         }
         set {
-            if let newValue {
-                defaults.set(newValue, forKey: Self.lastNotifiedQuotaCycleStartKey)
+            if
+                let newValue,
+                let data = try? JSONEncoder().encode(newValue)
+            {
+                defaults.set(data, forKey: Self.quotaResetNotificationStateKey)
             } else {
-                defaults.removeObject(forKey: Self.lastNotifiedQuotaCycleStartKey)
+                defaults.removeObject(
+                    forKey: Self.quotaResetNotificationStateKey
+                )
             }
         }
     }

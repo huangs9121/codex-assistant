@@ -49,6 +49,7 @@ public struct GitHubRelease: Decodable, Sendable {
     public let htmlURL: URL
     public let draft: Bool
     public let prerelease: Bool
+    public let assets: [GitHubReleaseAsset]
 
     private enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
@@ -57,6 +58,21 @@ public struct GitHubRelease: Decodable, Sendable {
         case htmlURL = "html_url"
         case draft
         case prerelease
+        case assets
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tagName = try container.decode(String.self, forKey: .tagName)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        body = try container.decodeIfPresent(String.self, forKey: .body)
+        htmlURL = try container.decode(URL.self, forKey: .htmlURL)
+        draft = try container.decode(Bool.self, forKey: .draft)
+        prerelease = try container.decode(Bool.self, forKey: .prerelease)
+        assets = try container.decodeIfPresent(
+            [GitHubReleaseAsset].self,
+            forKey: .assets
+        ) ?? []
     }
 
     public var eligibleVersion: SemanticVersion? {
@@ -85,6 +101,17 @@ public struct GitHubRelease: Decodable, Sendable {
         return version
     }
 
+    public var eligibleUpdateAsset: GitHubReleaseAsset? {
+        guard eligibleVersion != nil else {
+            return nil
+        }
+        let eligibleAssets = assets.filter { $0.isEligible(for: tagName) }
+        guard eligibleAssets.count == 1 else {
+            return nil
+        }
+        return eligibleAssets[0]
+    }
+
     public static func latestRequest(appVersion: SemanticVersion) -> URLRequest? {
         guard let url = URL(
             string: "https://api.github.com/repos/huangs9121/codex-assistant/releases/latest"
@@ -94,6 +121,77 @@ public struct GitHubRelease: Decodable, Sendable {
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "GET"
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let canonicalVersion = "\(appVersion.major).\(appVersion.minor).\(appVersion.patch)"
+        request.setValue("Codex-Quota/\(canonicalVersion)", forHTTPHeaderField: "User-Agent")
+        return request
+    }
+}
+
+public struct GitHubReleaseAsset: Decodable, Sendable {
+    public let name: String
+    public let browserDownloadURL: URL
+    public let contentType: String
+    public let size: Int
+    public let digest: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case browserDownloadURL = "browser_download_url"
+        case contentType = "content_type"
+        case size
+        case digest
+    }
+
+    public var expectedSHA256: String? {
+        guard let digest, digest.hasPrefix("sha256:") else {
+            return nil
+        }
+        let value = String(digest.dropFirst("sha256:".count))
+        guard
+            value.count == 64,
+            value.utf8.allSatisfy({
+                (48...57).contains($0) || (97...102).contains($0)
+            })
+        else {
+            return nil
+        }
+        return value
+    }
+
+    fileprivate func isEligible(for tagName: String) -> Bool {
+        let expectedName = "Codex.Quota-arm64.zip"
+        let expectedPath = "/huangs9121/codex-assistant/releases/download/\(tagName)/\(expectedName)"
+        guard
+            name == expectedName,
+            contentType == "application/zip",
+            size > 0,
+            size <= 100 * 1024 * 1024,
+            expectedSHA256 != nil,
+            browserDownloadURL.scheme?.lowercased() == "https",
+            browserDownloadURL.host?.lowercased() == "github.com",
+            browserDownloadURL.port == nil,
+            browserDownloadURL.user == nil,
+            browserDownloadURL.password == nil,
+            browserDownloadURL.query == nil,
+            browserDownloadURL.path == expectedPath,
+            URLComponents(
+                url: browserDownloadURL,
+                resolvingAgainstBaseURL: false
+            )?.percentEncodedPath == expectedPath,
+            browserDownloadURL.fragment == nil
+        else {
+            return false
+        }
+        return true
+    }
+
+    public func downloadRequest(appVersion: SemanticVersion) -> URLRequest? {
+        guard expectedSHA256 != nil else {
+            return nil
+        }
+        var request = URLRequest(url: browserDownloadURL, timeoutInterval: 60)
+        request.httpMethod = "GET"
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
         let canonicalVersion = "\(appVersion.major).\(appVersion.minor).\(appVersion.patch)"
         request.setValue("Codex-Quota/\(canonicalVersion)", forHTTPHeaderField: "User-Agent")
         return request

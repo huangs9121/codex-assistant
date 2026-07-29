@@ -40,6 +40,14 @@ struct AppText {
     var updateFailed: String { choose("检查更新失败，请稍后重试。", "The update check failed. Try again later.") }
     var upToDate: String { choose("当前已是最新版本", "Codex Quota Is Up to Date") }
     var goToUpdate: String { choose("前往更新", "View Update") }
+    var installUpdate: String { choose("立即更新", "Update Now") }
+    var downloadingUpdate: String { choose("正在下载并校验更新…", "Downloading and verifying update…") }
+    var automaticUpdateFailed: String { choose("自动更新失败", "Automatic Update Failed") }
+    var automaticUpdateFailedDetail: String { choose(
+        "旧版本没有被更改。你可以稍后重试，或前往 GitHub 手动下载安装。",
+        "The installed version was not changed. Try again later or download the update manually from GitHub."
+    ) }
+    var openDownloadPage: String { choose("打开下载页", "Open Download Page") }
     var later: String { choose("稍后", "Later") }
     var cannotOpenUpdate: String { choose("无法打开更新页面，请稍后重试。", "Could not open the update page. Try again later.") }
     var githubReleaseNotes: String { choose("前往 GitHub 查看更新说明。", "View the release notes on GitHub.") }
