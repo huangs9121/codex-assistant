@@ -217,7 +217,8 @@ NEW_APP_INSTALLED=1
 mv "$STAGING_ZIP" "$ZIP"
 NEW_ZIP_INSTALLED=1
 
-"$LSREGISTER" -f -R "$APP"
+# 不在 LaunchServices 注册构建产物，避免 Launchpad 出现重复图标；注销历史残留
+"$LSREGISTER" -u "$APP" 2>/dev/null || true
 touch "$APP"
 
 if [[ "$APP_BACKED_UP" == "1" ]]; then

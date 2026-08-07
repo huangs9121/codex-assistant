@@ -13,6 +13,9 @@ enum QuotaParserTests {
         let tests: [TestCase] = [
             ("primary used 40 leaves 60", testPrimaryUsedPercent),
             ("highest used percent wins", testHighestUsedPercent),
+            ("account response preserves both quota windows", testAccountDualWindowParsing),
+            ("account response with one window has no secondary window", testAccountSingleWindowParsing),
+            ("secondary quota window resets to full remaining", testSecondaryQuotaWindowReset),
             ("known plan names are normalized", testKnownPlanNames),
             ("unknown and missing plan names are nil", testUnknownAndMissingPlanNames),
             ("prolite snapshot carries Pro plan", testProliteSnapshotPlan),
@@ -45,6 +48,7 @@ enum QuotaParserTests {
             ("invalid timestamp returns nil", testInvalidTimestamp),
             ("standard internet date is accepted", testStandardInternetDate),
             ("newest observed snapshot wins across nested files", testNewestObservedSnapshotWins),
+            ("quota store preserves both windows from JSONL", testQuotaStoreDualWindowParsing),
             ("newer model-specific pools cannot override Codex quota", testModelPoolCannotOverrideCodexQuota),
             ("live multi-bucket response uses the primary Codex quota", testLiveAccountQuotaAfterReset),
             ("empty root returns nil", testEmptyRoot),
@@ -134,6 +138,8 @@ enum QuotaParserTests {
             ("segmented battery cell centers match filled segment counts", testSegmentedCellCenters),
             ("battery artwork maintains reasonable alpha coverage", testBatteryAlphaCoverage)
         ]
+            + TaskStatusParserTests.all.map { ($0.name, $0.run) }
+            + StatusPanelPresentationTests.all.map { ($0.name, $0.run) }
 
         var failureCount = 0
         for test in tests {
@@ -165,6 +171,76 @@ enum QuotaParserTests {
             from: tokenCountLine(primary: 20, secondary: 75)
         )
         return expect(snapshot?.remainingPercent, equals: 25)
+    }
+
+    private static func testAccountDualWindowParsing() -> Bool {
+        let primaryReset = Date(timeIntervalSince1970: 1_800_000_000)
+        let secondaryReset = Date(timeIntervalSince1970: 1_900_000_000)
+        let response = jsonData([
+            "result": [
+                "rateLimitsByLimitId": [
+                    "codex": [
+                        "limitId": "codex",
+                        "primary": [
+                            "usedPercent": 25,
+                            "windowDurationMins": 300,
+                            "resetsAt": primaryReset.timeIntervalSince1970
+                        ],
+                        "secondary": [
+                            "usedPercent": 70,
+                            "windowDurationMins": 10_080,
+                            "resetsAt": secondaryReset.timeIntervalSince1970
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let snapshot = AccountRateLimitsParser.snapshot(from: response)
+        return expect(snapshot?.remainingPercent, equals: 30)
+            && expect(snapshot?.resetsAt, equals: secondaryReset)
+            && expect(snapshot?.windowDuration, equals: 10_080 * 60)
+            && expect(snapshot?.secondaryWindow?.usedPercent, equals: 25)
+            && expect(snapshot?.secondaryWindow?.resetsAt, equals: primaryReset)
+            && expect(snapshot?.secondaryWindow?.windowDuration, equals: 300 * 60)
+    }
+
+    private static func testAccountSingleWindowParsing() -> Bool {
+        let response = jsonData([
+            "result": [
+                "rateLimits": [
+                    "limitId": "codex",
+                    "primary": [
+                        "usedPercent": 40,
+                        "windowDurationMins": 300
+                    ]
+                ]
+            ]
+        ])
+
+        let snapshot = AccountRateLimitsParser.snapshot(from: response)
+        return expect(snapshot?.remainingPercent, equals: 60)
+            && expect(snapshot?.secondaryWindow, equals: nil)
+    }
+
+    private static func testSecondaryQuotaWindowReset() -> Bool {
+        let reset = Date(timeIntervalSince1970: 1_800_000_000)
+        let snapshot = QuotaSnapshot(
+            remainingPercent: 20,
+            observedAt: reset.addingTimeInterval(-60),
+            secondaryWindow: QuotaWindow(
+                usedPercent: 25,
+                resetsAt: reset,
+                windowDuration: 7 * 24 * 60 * 60
+            )
+        )
+        return expect(
+            snapshot.secondaryWindow?.remainingPercent(at: reset.addingTimeInterval(-1)),
+            equals: 75
+        ) && expect(
+            snapshot.secondaryWindow?.remainingPercent(at: reset),
+            equals: 100
+        )
     }
 
     private static func testKnownPlanNames() -> Bool {
@@ -495,6 +571,34 @@ enum QuotaParserTests {
             let snapshot = QuotaStore().latestSnapshot(in: root)
             return expect(snapshot?.remainingPercent, equals: 20)
                 && expect(snapshot?.observedAt, equals: standardDate("2026-07-14T09:00:00Z"))
+        }
+    }
+
+    private static func testQuotaStoreDualWindowParsing() -> Bool {
+        withTemporaryDirectory { root in
+            guard write(
+                tokenCountLine(
+                    primary: 85,
+                    primaryReset: 1_800_000_000,
+                    primaryWindowMinutes: 300,
+                    secondary: 45,
+                    secondaryReset: 1_900_000_000,
+                    secondaryWindowMinutes: 10_080
+                ),
+                to: root.appendingPathComponent("dual-window.jsonl")
+            ) else {
+                return false
+            }
+
+            let snapshot = QuotaStore().latestSnapshot(in: root)
+            return expect(snapshot?.remainingPercent, equals: 15)
+                && expect(snapshot?.windowDuration, equals: 300 * 60)
+                && expect(snapshot?.secondaryWindow?.usedPercent, equals: 45)
+                && expect(snapshot?.secondaryWindow?.windowDuration, equals: 10_080 * 60)
+                && expect(
+                    snapshot?.secondaryWindow?.resetsAt,
+                    equals: Date(timeIntervalSince1970: 1_900_000_000)
+                )
         }
     }
 
@@ -2740,14 +2844,19 @@ enum QuotaParserTests {
         primary: Double,
         limitID: String = "codex",
         primaryReset: Any? = nil,
+        primaryWindowMinutes: Double? = nil,
         secondary: Double? = nil,
         secondaryReset: Any? = nil,
+        secondaryWindowMinutes: Double? = nil,
         planType: String? = nil,
         timestamp: String = "2026-07-14T08:30:00.123Z"
     ) -> String {
         var primaryWindow: [String: Any] = ["used_percent": primary]
         if let primaryReset {
             primaryWindow["resets_at"] = primaryReset
+        }
+        if let primaryWindowMinutes {
+            primaryWindow["window_minutes"] = primaryWindowMinutes
         }
         var rateLimits: [String: Any] = [
             "limit_id": limitID,
@@ -2757,6 +2866,9 @@ enum QuotaParserTests {
             var secondaryWindow: [String: Any] = ["used_percent": secondary]
             if let secondaryReset {
                 secondaryWindow["resets_at"] = secondaryReset
+            }
+            if let secondaryWindowMinutes {
+                secondaryWindow["window_minutes"] = secondaryWindowMinutes
             }
             rateLimits["secondary"] = secondaryWindow
         }

@@ -13,7 +13,7 @@ struct AppText {
     var updatedPlaceholder: String { choose("更新时间：--:--:--", "Updated: --:--:--") }
     var nextResetPlaceholder: String { choose("下次重置：--", "Next reset: --") }
     var planPlaceholder: String { choose("当前套餐：--", "Plan: --") }
-    var resetForecastNone: String { choose("重置预告：暂无", "Reset forecast: None") }
+    var resetForecastNone: String { choose("重置预告 · 暂无动静", "Reset forecast · quiet") }
     var expectedTimePlaceholder: String { choose("预期时间：--", "Expected: --") }
     var displayStyle: String { choose("展示形式", "Display Style") }
     var identityStyle: String { choose("标识形式", "Identity") }
@@ -63,6 +63,82 @@ struct AppText {
     var quotaResetNotificationBody: String {
         choose("新周期额度已经生效。", "Your new quota cycle is now active.")
     }
+    var scheduledTasks: String { choose("调度任务", "Scheduled Tasks") }
+    var quotaTitle: String { choose("Codex 配额", "Codex Quota") }
+    var fiveHourWindow: String { choose("5 小时窗口", "5-hour window") }
+    var weeklyWindow: String { choose("每周窗口", "Weekly window") }
+    var quotaWindow: String { choose("额度窗口", "Quota window") }
+    var waitingForData: String { choose("等待数据", "Waiting for data") }
+    var resetMonitoringSource: String {
+        choose("来自 Tibo X 动态监测", "From Tibo X monitoring")
+    }
+    var resetCompletedTitle: String {
+        choose("重置已发起 · 额度即将恢复", "Reset started · Quota returning soon")
+    }
+    var resetAnnouncedBadge: String { choose("已预告", "Announced") }
+    var resetCountdownText: ResetForecastCountdownText {
+        ResetForecastCountdownText(
+            hoursMinutesFormat: choose(
+                "还剩 {hours} 小时 {minutes} 分 · 点击查看 X 原帖",
+                "{hours}h {minutes}m left · View on X"
+            ),
+            minutesFormat: choose(
+                "还剩 {minutes} 分 · 点击查看 X 原帖",
+                "{minutes}m left · View on X"
+            ),
+            imminent: choose(
+                "即将重置 · 点击查看 X 原帖",
+                "Reset imminent · View on X"
+            )
+        )
+    }
+    var noScheduledTasks: String { choose("暂无调度任务", "No scheduled tasks") }
+    var scheduledTasksEmptyDetail: String {
+        choose(
+            "在 Kimi 会话中派发任务后，可在这里跟踪进度",
+            "Tasks dispatched from Kimi sessions will appear here"
+        )
+    }
+    var backgroundTask: String { choose("后台任务", "Background task") }
+    var unknownTask: String { choose("未知任务", "Unknown task") }
+    var settings: String { choose("设置", "Settings") }
+    var justNow: String { choose("刚刚", "Just now") }
+    var taskRunningSubtitleFormat: String {
+        choose(
+            "已运行 {duration} · {relative}开始",
+            "Running {duration} · started {relative}"
+        )
+    }
+    var taskCompletedSubtitleFormat: String {
+        choose(
+            "{relative} · 耗时 {duration}",
+            "{relative} · Duration {duration}"
+        )
+    }
+    var taskFailedSubtitleFormat: String {
+        choose(
+            "{relative} · 退出码 {exitCode}",
+            "{relative} · Exit code {exitCode}"
+        )
+    }
+    var resumeSessionHelp: String {
+        choose(
+            "点击在终端恢复会话，Option+点击复制命令",
+            "Click to resume in Terminal, Option+click to copy"
+        )
+    }
+    var resumeCommandCopiedFallback: String {
+        choose(
+            "无法打开终端，恢复命令已复制",
+            "Could not open Terminal; resume command copied"
+        )
+    }
+    var taskCompletedNotificationTitle: String {
+        choose("Codex 任务完成", "Codex Task Completed")
+    }
+    var taskFailedNotificationTitle: String {
+        choose("Codex 任务失败", "Codex Task Failed")
+    }
 
     func newVersionAvailable(_ version: String) -> String {
         choose("新版本 \(version) 可用…", "Version \(version) Available…")
@@ -84,12 +160,59 @@ struct AppText {
         choose("重置预告：\(value)", "Reset forecast: \(value)") + (linked ? "  ↗" : "")
     }
 
+    func resetProposalTitle(_ expectedTime: String) -> String {
+        choose(
+            "可能重置 · \(expectedTime)",
+            "Possible reset · \(expectedTime)"
+        )
+    }
+
+    func resetAnnouncedTitle(_ expectedTime: String) -> String {
+        choose(
+            "已预告 · 预计\(expectedTime)重置",
+            "Announced · Reset expected \(expectedTime)"
+        )
+    }
+
     func expectedTime(_ value: String) -> String {
         choose("预期时间：\(value)", "Expected: \(value)")
     }
 
     func accessibilityStyle(_ value: String) -> String {
         choose("，\(value)", ", \(value)")
+    }
+
+    func taskExitCode(_ value: Int) -> String {
+        choose("退出码 \(value)", "exit \(value)")
+    }
+
+    func resetsIn(_ value: String) -> String {
+        choose("\(value)后重置", "resets in \(value)")
+    }
+
+    func weeklyReset(_ value: String) -> String {
+        choose("\(value) 重置", "Resets \(value)")
+    }
+
+    func runningTaskCount(_ value: Int) -> String {
+        choose("\(value) 运行中", "\(value) running")
+    }
+
+    func updatedAt(_ value: String) -> String {
+        choose("更新于 \(value)", "Updated \(value)")
+    }
+
+    var taskStatusPresentationText: TaskStatusPresentationText {
+        TaskStatusPresentationText(
+            justNow: justNow,
+            runningFormat: taskRunningSubtitleFormat,
+            completedWithDurationFormat: taskCompletedSubtitleFormat,
+            failedWithExitCodeFormat: taskFailedSubtitleFormat
+        )
+    }
+
+    func taskNotificationBody(name: String, time: String) -> String {
+        "\(name) · \(time)"
     }
 
     func resetNotificationTitle(kind: TiboResetSignalKind) -> String {
@@ -100,6 +223,26 @@ struct AppText {
             choose("Tibo 已预告 Codex 额度重置", "Tibo Announced a Codex Quota Reset")
         case .completed:
             choose("Codex 额度重置已发起", "Codex Quota Reset Started")
+        }
+    }
+
+    func resetNotificationBody(for signal: TiboResetSignal) -> String {
+        switch signal.kind {
+        case .proposal:
+            return choose(
+                "重置预告更新：可能重置，预计\(signal.expectedTimeText(language: language))",
+                "Reset forecast update: possible reset, \(signal.expectedTimeText(language: language))"
+            )
+        case .announced:
+            return choose(
+                "重置预告升级：已预告，预计\(signal.expectedTimeText(language: language))",
+                "Reset forecast upgraded: announced, \(signal.expectedTimeText(language: language))"
+            )
+        case .completed:
+            return choose(
+                "重置预告升级：重置已发起，额度即将恢复",
+                "Reset forecast upgraded: reset started; quota should return soon"
+            )
         }
     }
 }

@@ -2,6 +2,47 @@ import CodexQuotaCore
 import Foundation
 
 public enum ResetCountdownFormatter {
+    public static func panelCountdownValue(
+        resetsAt: Date?,
+        now: Date = Date(),
+        language: AppLanguage = .simplifiedChinese
+    ) -> String? {
+        guard let resetsAt else {
+            return nil
+        }
+        let interval = resetsAt.timeIntervalSince(now)
+        guard interval.isFinite else {
+            return nil
+        }
+        let totalMinutes = Int(max(0, interval) / 60)
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 {
+            return language == .simplifiedChinese
+                ? "\(hours) 小时 \(minutes) 分钟"
+                : "\(hours)h \(minutes)m"
+        }
+        return language == .simplifiedChinese
+            ? "\(minutes) 分钟"
+            : "\(minutes)m"
+    }
+
+    public static func weeklyResetValue(
+        resetsAt: Date?,
+        timeZone: TimeZone = .current,
+        language: AppLanguage = .simplifiedChinese
+    ) -> String? {
+        guard let resetsAt else {
+            return nil
+        }
+        let formatter = DateFormatter()
+        formatter.locale = language.locale
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "EEE HH:mm"
+        return formatter.string(from: resetsAt)
+    }
+
     public static func string(
         resetsAt: Date?,
         now: Date = Date(),

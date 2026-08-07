@@ -3,6 +3,28 @@ import CodexQuotaCore
 import CodexQuotaUI
 import UserNotifications
 
+private extension DisplayPreferences {
+    var lastNotifiedResetSignalKey: TiboResetNotificationKey? {
+        get {
+            UserDefaults.standard.string(
+                forKey: TiboResetNotificationKey.defaultsKey
+            ).flatMap(TiboResetNotificationKey.init(storageValue:))
+        }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(
+                    newValue.storageValue,
+                    forKey: TiboResetNotificationKey.defaultsKey
+                )
+            } else {
+                UserDefaults.standard.removeObject(
+                    forKey: TiboResetNotificationKey.defaultsKey
+                )
+            }
+        }
+    }
+}
+
 @MainActor
 private final class MenuChoiceRow: NSView {
     private let checkmarkLabel = NSTextField(labelWithString: "✓")
@@ -103,12 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     )
     private var preferences = DisplayPreferences(defaults: .standard)
     private let renderer = BatteryStatusRenderer()
-    private let updateTimeLabel = NSTextField(labelWithString: "")
-    private let resetTimeLabel = NSTextField(labelWithString: "")
-    private let planNameLabel = NSTextField(labelWithString: "")
-    private let resetSignalLabel = NSTextField(labelWithString: "")
-    private let expectedResetLabel = NSTextField(labelWithString: "")
-    private let resetSignalButton = NSButton()
+    private let settingsMenu = NSMenu()
+    private let panelModel = StatusPanelModel()
     private let sessionsRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".codex/sessions", isDirectory: true)
     private let refreshQueue = DispatchQueue(
@@ -135,11 +153,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
     private let rateLimitController = CodexRateLimitController()
+    private let taskStatusController = TaskStatusController()
+    private lazy var panelController = StatusPanelController(
+        model: panelModel,
+        text: text,
+        onSettingsMenu: { [weak self] view in
+            self?.showSettingsMenu(relativeTo: view)
+        },
+        onOpenResetAnnouncement: { [weak self] in
+            self?.openCurrentResetAnnouncement()
+        },
+        onResumeSession: { [weak self] sessionUUID, copyOnly in
+            self?.resumeTaskSession(
+                sessionUUID: sessionUUID,
+                copyOnly: copyOnly
+            ) ?? .copiedAfterLaunchFailure
+        }
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         currentResetSignal = preferences.latestResetSignal
-        updateHeaderLabels()
+        panelModel.update(resetSignal: currentResetSignal)
         configureStatusItem()
         refresh()
         let timer = Timer(
@@ -184,13 +219,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         automaticUpdateInstaller.invalidate()
         resetMonitorController.invalidate()
         rateLimitController.invalidate()
+        taskStatusController.invalidate()
     }
 
     private func configureStatusItem() {
         updateStatusPresentation()
+        configureSettingsMenu()
+        guard let button = statusItem.button else {
+            return
+        }
+        button.target = self
+        button.action = #selector(handleStatusItemClick(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
 
-        let menu = NSMenu()
-        menu.delegate = self
+    private func configureSettingsMenu() {
+        settingsMenu.removeAllItems()
+        settingsMenu.delegate = self
+        styleItems.removeAll()
+        identityItems.removeAll()
 
         let moveHintItem = NSMenuItem(
             title: text.moveHint,
@@ -198,11 +245,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             keyEquivalent: ""
         )
         moveHintItem.isEnabled = false
-        menu.addItem(moveHintItem)
-        menu.addItem(.separator())
-
-        menu.addItem(makeHeaderItem())
-        menu.addItem(.separator())
+        settingsMenu.addItem(moveHintItem)
+        settingsMenu.addItem(.separator())
 
         let styleItem = NSMenuItem(
             title: text.displayStyle,
@@ -216,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             styleMenu.addItem(item)
         }
         styleItem.submenu = styleMenu
-        menu.addItem(styleItem)
+        settingsMenu.addItem(styleItem)
 
         let identityItem = NSMenuItem(
             title: text.identityStyle,
@@ -230,9 +274,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             identityMenu.addItem(item)
         }
         identityItem.submenu = identityMenu
-        menu.addItem(identityItem)
+        settingsMenu.addItem(identityItem)
 
-        menu.addItem(.separator())
+        settingsMenu.addItem(.separator())
 
         let resetItem = makeChoiceItem(
             title: text.showResetTime,
@@ -240,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             action: #selector(toggleResetCountdown(_:))
         )
         resetToggleItem = resetItem
-        menu.addItem(resetItem)
+        settingsMenu.addItem(resetItem)
 
         let loginItem = makeChoiceItem(
             title: text.launchAtLogin,
@@ -248,9 +292,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             action: #selector(toggleLaunchAtLogin(_:))
         )
         launchAtLoginItem = loginItem
-        menu.addItem(loginItem)
+        settingsMenu.addItem(loginItem)
 
-        menu.addItem(.separator())
+        settingsMenu.addItem(.separator())
 
         let updateItem = NSMenuItem(
             title: text.checkForUpdates,
@@ -259,7 +303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         updateItem.target = self
         updateMenuItem = updateItem
-        menu.addItem(updateItem)
+        settingsMenu.addItem(updateItem)
 
         let quitItem = NSMenuItem(
             title: text.quit,
@@ -267,60 +311,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             keyEquivalent: ""
         )
         quitItem.target = self
-        menu.addItem(quitItem)
+        settingsMenu.addItem(quitItem)
 
         syncMenuState()
-        statusItem.menu = menu
     }
 
-    private func makeHeaderItem() -> NSMenuItem {
-        let row = NSView(frame: NSRect(x: 0, y: 0, width: menuWidth, height: 112))
-        let labels = [
-            updateTimeLabel,
-            resetTimeLabel,
-            planNameLabel,
-            resetSignalLabel,
-            expectedResetLabel
-        ]
-        for label in labels {
-            label.translatesAutoresizingMaskIntoConstraints = false
-            label.font = .menuFont(ofSize: 13)
-            label.lineBreakMode = .byClipping
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            row.addSubview(label)
-            NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
-                label.trailingAnchor.constraint(lessThanOrEqualTo: row.trailingAnchor, constant: -12)
-            ])
+    @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            panelController.close()
+            syncMenuState()
+            if let event = NSApp.currentEvent {
+                NSMenu.popUpContextMenu(
+                    settingsMenu,
+                    with: event,
+                    for: sender
+                )
+            }
+            return
         }
-        NSLayoutConstraint.activate([
-            updateTimeLabel.topAnchor.constraint(equalTo: row.topAnchor, constant: 8),
-            resetTimeLabel.topAnchor.constraint(equalTo: updateTimeLabel.bottomAnchor, constant: 3),
-            planNameLabel.topAnchor.constraint(equalTo: resetTimeLabel.bottomAnchor, constant: 3),
-            resetSignalLabel.topAnchor.constraint(equalTo: planNameLabel.bottomAnchor, constant: 7),
-            expectedResetLabel.topAnchor.constraint(equalTo: resetSignalLabel.bottomAnchor, constant: 3)
-        ])
+        panelController.toggle(relativeTo: sender)
+    }
 
-        resetSignalButton.translatesAutoresizingMaskIntoConstraints = false
-        resetSignalButton.title = ""
-        resetSignalButton.isBordered = false
-        resetSignalButton.focusRingType = .none
-        resetSignalButton.target = self
-        resetSignalButton.action = #selector(openCurrentResetAnnouncement)
-        resetSignalButton.toolTip = text.resetAnnouncementTooltip
-        resetSignalButton.setAccessibilityLabel(text.resetAnnouncementAccessibility)
-        resetSignalButton.isHidden = true
-        row.addSubview(resetSignalButton)
-        NSLayoutConstraint.activate([
-            resetSignalButton.leadingAnchor.constraint(equalTo: row.leadingAnchor),
-            resetSignalButton.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-            resetSignalButton.topAnchor.constraint(equalTo: resetSignalLabel.topAnchor, constant: -2),
-            resetSignalButton.bottomAnchor.constraint(equalTo: expectedResetLabel.bottomAnchor, constant: 2)
-        ])
-
-        let item = NSMenuItem()
-        item.view = row
-        return item
+    private func showSettingsMenu(relativeTo view: NSView) {
+        syncMenuState()
+        settingsMenu.popUp(
+            positioning: nil,
+            at: NSPoint(x: view.bounds.minX, y: view.bounds.maxY + 4),
+            in: view
+        )
     }
 
     private func makeStyleItem(_ style: BatteryStyle) -> NSMenuItem {
@@ -338,6 +356,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             tag: BatteryStyle.allCases.firstIndex(of: style) ?? 0,
             action: #selector(selectBatteryStyle(_:))
         )
+    }
+
+    private func taskDisplayName(_ task: TaskStatusSnapshot) -> String {
+        task.taskName
+            ?? (task.isBackgroundTask ? text.backgroundTask : text.unknownTask)
+    }
+
+    private func taskTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
     }
 
     private func makeIdentityItem(_ mode: StatusIdentityMode) -> NSMenuItem {
@@ -555,7 +587,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func closeMenuForLaunchAtLoginInteraction() {
-        statusItem.menu?.cancelTracking()
+        settingsMenu.cancelTracking()
+        panelController.close()
     }
 
     @objc private func refreshFromTimer() {
@@ -658,7 +691,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             return
         }
         preferences.lastPromptedVersion = canonicalVersion(version)
-        statusItem.menu?.cancelTracking()
+        settingsMenu.cancelTracking()
+        panelController.close()
         activateApp()
         let alert = NSAlert()
         alert.alertStyle = .informational
@@ -709,7 +743,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func showAutomaticUpdateFailure(for release: GitHubRelease) {
-        statusItem.menu?.cancelTracking()
+        settingsMenu.cancelTracking()
+        panelController.close()
         activateApp()
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -749,6 +784,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func refresh() {
+        panelModel.tick()
+        refreshTaskStatuses()
         guard !isRefreshing else {
             return
         }
@@ -777,12 +814,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
     }
 
+    private func refreshTaskStatuses() {
+        taskStatusController.check { [weak self] result in
+            guard let self else {
+                return
+            }
+            panelModel.update(tasks: result.tasks)
+            for task in result.completedTasks {
+                sendTaskCompletionNotification(for: task)
+            }
+        }
+    }
+
     private func apply(_ snapshot: QuotaSnapshot?) {
         if let snapshot {
             handleQuotaResetNotification(snapshot)
         }
         currentSnapshot = snapshot
-        updateHeaderLabels()
+        panelModel.update(snapshot: snapshot)
         updateStatusPresentation()
     }
 
@@ -827,62 +876,92 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         UNUserNotificationCenter.current().add(request)
     }
 
-    private func updateHeaderLabels(now: Date = Date()) {
-        updateResetSignalLabels(now: now)
-        guard let snapshot = currentSnapshot else {
-            updateTimeLabel.stringValue = text.updatedPlaceholder
-            resetTimeLabel.stringValue = text.nextResetPlaceholder
-            planNameLabel.stringValue = text.planPlaceholder
-            return
+    private func sendTaskCompletionNotification(
+        for task: TaskStatusSnapshot
+    ) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [weak self] settings in
+            guard
+                settings.authorizationStatus == .authorized
+                    || settings.authorizationStatus == .provisional
+            else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                self?.deliverTaskCompletionNotification(for: task)
+            }
         }
-        updateTimeLabel.stringValue = UpdateTimeFormatter.label(
-            lastRefreshAt: now,
-            language: language
-        )
-        resetTimeLabel.stringValue = text.nextReset(
-            ResetCountdownFormatter.string(
-                resetsAt: snapshot.resetDate(at: now),
-                now: now,
-                language: language
-            )
-        )
-        planNameLabel.stringValue = text.plan(snapshot.planName ?? "--")
     }
 
-    private func updateResetSignalLabels(now: Date) {
-        guard
-            let signal = currentResetSignal,
-            signal.shouldDisplay(at: now, quotaSnapshot: currentSnapshot)
-        else {
-            resetSignalLabel.stringValue = text.resetForecastNone
-            expectedResetLabel.stringValue = text.expectedTimePlaceholder
-            resetSignalLabel.textColor = .labelColor
-            resetSignalButton.isHidden = true
+    private func deliverTaskCompletionNotification(
+        for task: TaskStatusSnapshot
+    ) {
+        guard let sessionUUID = task.sessionUUID else {
             return
         }
-        let isClickableAnnouncement = signal.kind == .announced
-        resetSignalLabel.stringValue = text.resetForecast(
-            signal.kind.statusText(language: language),
-            linked: isClickableAnnouncement
+        let content = UNMutableNotificationContent()
+        content.title = task.status == .done
+            ? text.taskCompletedNotificationTitle
+            : text.taskFailedNotificationTitle
+        content.body = text.taskNotificationBody(
+            name: taskDisplayName(task),
+            time: taskTime(task.startedAt)
         )
-        expectedResetLabel.stringValue = text.expectedTime(
-            signal.expectedTimeText(now: now, language: language)
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "task-completion-\(sessionUUID)",
+            content: content,
+            trigger: nil
         )
-        resetSignalLabel.textColor = isClickableAnnouncement ? .linkColor : .labelColor
-        resetSignalButton.isHidden = !isClickableAnnouncement
+        UNUserNotificationCenter.current().add(request)
     }
 
     @objc private func openCurrentResetAnnouncement() {
         let now = Date()
         guard
             let signal = currentResetSignal,
-            signal.kind == .announced,
             signal.shouldDisplay(at: now, quotaSnapshot: currentSnapshot)
         else {
             return
         }
-        statusItem.menu?.cancelTracking()
+        settingsMenu.cancelTracking()
+        panelController.close()
         NSWorkspace.shared.open(signal.url)
+    }
+
+    private func resumeTaskSession(
+        sessionUUID: String,
+        copyOnly: Bool
+    ) -> TaskResumeActionResult {
+        guard !copyOnly else {
+            copyTaskResumeCommand(sessionUUID: sessionUUID)
+            return .copied
+        }
+        let source = """
+        tell application "Terminal"
+            activate
+            do script "codex resume \(sessionUUID)"
+        end tell
+        """
+        if let script = NSAppleScript(source: source) {
+            var error: NSDictionary?
+            _ = script.executeAndReturnError(&error)
+            if error == nil {
+                return .openedTerminal
+            }
+        }
+        copyTaskResumeCommand(sessionUUID: sessionUUID)
+        return .copiedAfterLaunchFailure
+    }
+
+    private func copyTaskResumeCommand(sessionUUID: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(
+            "codex resume \(sessionUUID)",
+            forType: .string
+        )
     }
 
     private func configureResetNotifications() {
@@ -909,16 +988,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             case let .signal(signal):
                 currentResetSignal = signal
                 preferences.latestResetSignal = signal
-                updateResetSignalLabels(now: Date())
+                panelModel.update(resetSignal: signal)
                 if
                     let signal,
                     signal.shouldDisplay(
                         at: Date(),
                         quotaSnapshot: currentSnapshot
                     ),
-                    signal.id != preferences.lastNotifiedResetSignalID
+                    TiboResetNotificationKey(signal: signal).shouldNotify(
+                        after: preferences.lastNotifiedResetSignalKey
+                    )
                 {
-                    preferences.lastNotifiedResetSignalID = signal.id
+                    preferences.lastNotifiedResetSignalKey = TiboResetNotificationKey(
+                        signal: signal
+                    )
                     sendResetNotification(for: signal)
                 }
             case .failure:
@@ -945,14 +1028,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private func deliverResetNotification(for signal: TiboResetSignal) {
         let content = UNMutableNotificationContent()
         content.title = text.resetNotificationTitle(kind: signal.kind)
-        content.body = text.expectedTime(
-            signal.expectedTimeText(language: language)
-        )
+        content.body = text.resetNotificationBody(for: signal)
         content.sound = .default
         content.userInfo = ["url": signal.url.absoluteString]
 
         let request = UNNotificationRequest(
-            identifier: "tibo-reset-\(signal.id)",
+            identifier: "tibo-reset-\(signal.id)-\(signal.kind.rawValue)",
             content: content,
             trigger: nil
         )
@@ -1021,7 +1102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        updateHeaderLabels()
         syncMenuState()
     }
 

@@ -15,7 +15,7 @@ public enum QuotaParser {
             return nil
         }
 
-        let windows = ["primary", "secondary"].compactMap { name -> Window? in
+        let windows = ["primary", "secondary"].compactMap { name -> QuotaWindow? in
             guard
                 let limit = rateLimits[name] as? [String: Any],
                 let usedPercent = limit["used_percent"] as? Double,
@@ -23,19 +23,26 @@ public enum QuotaParser {
             else {
                 return nil
             }
-            return Window(
+            return QuotaWindow(
                 usedPercent: usedPercent,
                 resetsAt: resetDate(from: limit["resets_at"]),
-                duration: duration(fromMinutes: limit["window_minutes"])
+                windowDuration: duration(fromMinutes: limit["window_minutes"])
             )
         }
 
-        guard var selectedWindow = windows.first else {
+        guard !windows.isEmpty else {
             return nil
         }
-        for window in windows.dropFirst() where window.usedPercent > selectedWindow.usedPercent {
-            selectedWindow = window
+        var selectedIndex = 0
+        for index in windows.indices.dropFirst()
+            where windows[index].usedPercent > windows[selectedIndex].usedPercent
+        {
+            selectedIndex = index
         }
+        let selectedWindow = windows[selectedIndex]
+        let secondaryWindow = windows.indices
+            .first { $0 != selectedIndex }
+            .map { windows[$0] }
 
         let roundedRemaining = (100 - selectedWindow.usedPercent).rounded()
         let remainingPercent = Int(min(max(roundedRemaining, 0), 100))
@@ -44,15 +51,10 @@ public enum QuotaParser {
             remainingPercent: remainingPercent,
             observedAt: observedAt,
             resetsAt: selectedWindow.resetsAt,
-            windowDuration: selectedWindow.duration,
-            planName: planName
+            windowDuration: selectedWindow.windowDuration,
+            planName: planName,
+            secondaryWindow: secondaryWindow
         )
-    }
-
-    private struct Window {
-        let usedPercent: Double
-        let resetsAt: Date?
-        let duration: TimeInterval?
     }
 
     private static func resetDate(from value: Any?) -> Date? {

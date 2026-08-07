@@ -13,7 +13,7 @@ public enum AccountRateLimitsParser {
             return nil
         }
 
-        let windows = ["primary", "secondary"].compactMap { name -> Window? in
+        let windows = ["primary", "secondary"].compactMap { name -> QuotaWindow? in
             guard
                 let window = rateLimits[name] as? [String: Any],
                 let number = window["usedPercent"] as? NSNumber,
@@ -22,19 +22,26 @@ public enum AccountRateLimitsParser {
             else {
                 return nil
             }
-            return Window(
+            return QuotaWindow(
                 usedPercent: number.doubleValue,
                 resetsAt: resetDate(from: window["resetsAt"]),
-                duration: duration(fromMinutes: window["windowDurationMins"])
+                windowDuration: duration(fromMinutes: window["windowDurationMins"])
             )
         }
 
-        guard var selectedWindow = windows.first else {
+        guard !windows.isEmpty else {
             return nil
         }
-        for window in windows.dropFirst() where window.usedPercent > selectedWindow.usedPercent {
-            selectedWindow = window
+        var selectedIndex = 0
+        for index in windows.indices.dropFirst()
+            where windows[index].usedPercent > windows[selectedIndex].usedPercent
+        {
+            selectedIndex = index
         }
+        let selectedWindow = windows[selectedIndex]
+        let secondaryWindow = windows.indices
+            .first { $0 != selectedIndex }
+            .map { windows[$0] }
 
         let remaining = Int(min(
             max((100 - selectedWindow.usedPercent).rounded(), 0),
@@ -44,15 +51,10 @@ public enum AccountRateLimitsParser {
             remainingPercent: remaining,
             observedAt: observedAt,
             resetsAt: selectedWindow.resetsAt,
-            windowDuration: selectedWindow.duration,
-            planName: PlanInfo.normalizedName(rateLimits["planType"] as? String)
+            windowDuration: selectedWindow.windowDuration,
+            planName: PlanInfo.normalizedName(rateLimits["planType"] as? String),
+            secondaryWindow: secondaryWindow
         )
-    }
-
-    private struct Window {
-        let usedPercent: Double
-        let resetsAt: Date?
-        let duration: TimeInterval?
     }
 
     private static func codexRateLimits(

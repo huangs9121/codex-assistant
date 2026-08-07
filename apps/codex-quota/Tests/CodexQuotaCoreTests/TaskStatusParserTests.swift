@@ -1,0 +1,520 @@
+import CodexQuotaCore
+import Foundation
+
+struct TaskStatusParserTestCase: Sendable {
+    let name: String
+    let run: @Sendable () -> Bool
+}
+
+enum TaskStatusParserTests {
+    static let all: [TaskStatusParserTestCase] = [
+        TaskStatusParserTestCase(
+            name: "task sessions log parses paths and status mode",
+            run: testSessionsLogParsing
+        ),
+        TaskStatusParserTestCase(
+            name: "task events log extracts EXIT_CODE",
+            run: testEventsExitCode
+        ),
+        TaskStatusParserTestCase(
+            name: "task events log without EXIT_CODE stays unfinished",
+            run: testEventsWithoutExitCode
+        ),
+        TaskStatusParserTestCase(
+            name: "task run log extracts the final exit code",
+            run: testRunLogExitCode
+        ),
+        TaskStatusParserTestCase(
+            name: "task rollout filename restores UUID",
+            run: testRolloutFilenameUUID
+        ),
+        TaskStatusParserTestCase(
+            name: "task tmux name hashes workdir with newline",
+            run: testTmuxSessionName
+        ),
+        TaskStatusParserTestCase(
+            name: "task archive snapshot joins session and last message",
+            run: testArchiveSnapshot
+        ),
+        TaskStatusParserTestCase(
+            name: "task sidecar name takes priority and cleans dashed date",
+            run: testSidecarNameWithDashedDate
+        ),
+        TaskStatusParserTestCase(
+            name: "task sidecar name cleans compact date and keeps Chinese",
+            run: testSidecarNameWithCompactDateAndChinese
+        ),
+        TaskStatusParserTestCase(
+            name: "task name falls back from sidecar to session then nil",
+            run: testTaskNameFallbackChain
+        ),
+        TaskStatusParserTestCase(
+            name: "task unmatched status session does not create snapshot",
+            run: testUnmatchedStatusEntryIsHidden
+        ),
+        TaskStatusParserTestCase(
+            name: "task unfinished events require the matching tmux session",
+            run: testRunningTmuxSession
+        ),
+        TaskStatusParserTestCase(
+            name: "task orphan events recover nearest rollout UUID",
+            run: testRolloutRecovery
+        ),
+        TaskStatusParserTestCase(
+            name: "task completion notifications baseline and deduplicate",
+            run: testCompletionDetection
+        ),
+        TaskStatusParserTestCase(
+            name: "task notification state persists",
+            run: testNotificationStatePersistence
+        )
+    ]
+
+    private static let shanghai = TimeZone(secondsFromGMT: 8 * 60 * 60)!
+    private static let sessionUUID =
+        "019fb5f6-40d1-7383-ac0d-48b797170e07"
+
+    private static func testSessionsLogParsing() -> Bool {
+        let contents = """
+        2026-07-31 10:17:47 \(sessionUUID) sync /tmp/My Brief.md
+        invalid line
+        2026-07-31 10:18:00 019fb5f6-40d1-7383-ac0d-48b797170e08 status status
+        """
+        let entries = TaskStatusParser.sessionEntries(
+            from: contents,
+            timeZone: shanghai
+        )
+        return entries.count == 2
+            && entries[0].sessionUUID == sessionUUID
+            && entries[0].mode == .sync
+            && entries[0].briefPath == "/tmp/My Brief.md"
+            && entries[1].mode == .status
+            && entries[1].briefPath == "status"
+    }
+
+    private static func testEventsExitCode() -> Bool {
+        let contents = """
+        {"type":"turn.started"}
+        EXIT_CODE=7
+        """
+        return TaskStatusParser.exitCode(
+            fromEventsContents: contents
+        ) == 7
+    }
+
+    private static func testEventsWithoutExitCode() -> Bool {
+        let contents = """
+        {"type":"turn.started"}
+        {"type":"item.completed","exit_code":0}
+        """
+        return TaskStatusParser.exitCode(
+            fromEventsContents: contents
+        ) == nil
+    }
+
+    private static func testRunLogExitCode() -> Bool {
+        let contents = """
+        exit code: 9
+        more output
+        exit code: -2
+        """
+        return TaskStatusParser.exitCode(
+            fromRunLogContents: contents
+        ) == -2
+    }
+
+    private static func testRolloutFilenameUUID() -> Bool {
+        let filename =
+            "rollout-2026-07-31T10-17-47-\(sessionUUID).jsonl"
+        return TaskStatusParser.sessionUUID(
+            fromRolloutFilename: filename
+        ) == sessionUUID
+            && TaskStatusParser.sessionUUID(
+                fromRolloutFilename: "not-a-rollout.jsonl"
+            ) == nil
+    }
+
+    private static func testTmuxSessionName() -> Bool {
+        TaskStatusParser.tmuxSessionName(
+            forWorkingDirectoryPath:
+                "/Users/openclaw/Projects/codex助手"
+        ) == "codex-task-cc6493e5"
+    }
+
+    private static func testArchiveSnapshot() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let stamp = "20260731-101747"
+            guard
+                write(
+                    "2026-07-31 10:17:47 \(sessionUUID) sync /tmp/My Brief.md\n",
+                    to: tasks.appendingPathComponent("sessions.log")
+                ),
+                write(
+                    "{\"type\":\"turn.completed\"}\nEXIT_CODE=0\n",
+                    to: tasks.appendingPathComponent(
+                        "\(stamp)-events.jsonl"
+                    )
+                ),
+                write(
+                    "Finished successfully.",
+                    to: tasks.appendingPathComponent(
+                        "\(stamp)-last-message.md"
+                    )
+                )
+            else {
+                return false
+            }
+            let parser = TaskStatusParser(
+                tasksDirectory: tasks,
+                workingDirectory: tasks.deletingLastPathComponent(),
+                codexSessionsDirectory: sessions,
+                timeZone: shanghai,
+                tmuxStatusProvider: { _ in false }
+            )
+            guard let task = parser.snapshots().first else {
+                return false
+            }
+            return task.sessionUUID == sessionUUID
+                && task.taskName == "My Brief"
+                && task.status == .done
+                && task.exitCode == 0
+                && task.endedAt != nil
+                && task.lastMessage == "Finished successfully."
+        }
+    }
+
+    private static func testSidecarNameWithDashedDate() -> Bool {
+        sidecarTaskName(
+            briefPath: "/tmp/2026-08-01-popover-panel.md",
+            expected: "popover-panel"
+        )
+    }
+
+    private static func testSidecarNameWithCompactDateAndChinese() -> Bool {
+        sidecarTaskName(
+            briefPath: "/tmp/20260731-菜单栏任务监控.md",
+            expected: "菜单栏任务监控"
+        )
+    }
+
+    private static func testTaskNameFallbackChain() -> Bool {
+        let fallbackWorked = withTemporaryDirectories { tasks, sessions in
+            let stamp = "20260731-101747"
+            guard
+                write(
+                    "2026-07-31 10:17:47 \(sessionUUID) sync /tmp/2026-08-01-session-fallback.md\n",
+                    to: tasks.appendingPathComponent("sessions.log")
+                ),
+                write(
+                    "EXIT_CODE=0\n",
+                    to: tasks.appendingPathComponent("\(stamp)-events.jsonl")
+                )
+            else {
+                return false
+            }
+            return makeParser(tasks: tasks, sessions: sessions)
+                .snapshots().first?.taskName == "session-fallback"
+        }
+        let nilFallbackWorked = withTemporaryDirectories { tasks, sessions in
+            guard write(
+                "EXIT_CODE=0\n",
+                to: tasks.appendingPathComponent(
+                    "20260731-101747-events.jsonl"
+                )
+            ) else {
+                return false
+            }
+            return makeParser(tasks: tasks, sessions: sessions)
+                .snapshots().first?.taskName == nil
+        }
+        return fallbackWorked && nilFallbackWorked
+    }
+
+    private static func testUnmatchedStatusEntryIsHidden() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            guard write(
+                "2026-07-31 10:18:00 \(sessionUUID) status status\n",
+                to: tasks.appendingPathComponent("sessions.log")
+            ) else {
+                return false
+            }
+            let parser = TaskStatusParser(
+                tasksDirectory: tasks,
+                workingDirectory: tasks.deletingLastPathComponent(),
+                codexSessionsDirectory: sessions,
+                timeZone: shanghai,
+                tmuxStatusProvider: { _ in true }
+            )
+            return parser.snapshots().isEmpty
+        }
+    }
+
+    private static func sidecarTaskName(
+        briefPath: String,
+        expected: String
+    ) -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let stamp = "20260731-101747"
+            guard
+                write(
+                    "2026-07-31 10:17:47 \(sessionUUID) sync /tmp/wrong-name.md\n",
+                    to: tasks.appendingPathComponent("sessions.log")
+                ),
+                write(
+                    "EXIT_CODE=0\n",
+                    to: tasks.appendingPathComponent("\(stamp)-events.jsonl")
+                ),
+                write(
+                    "\(briefPath)\n",
+                    to: tasks.appendingPathComponent("\(stamp)-events.brief")
+                )
+            else {
+                return false
+            }
+            return makeParser(tasks: tasks, sessions: sessions)
+                .snapshots().first?.taskName == expected
+        }
+    }
+
+    private static func makeParser(
+        tasks: URL,
+        sessions: URL
+    ) -> TaskStatusParser {
+        TaskStatusParser(
+            tasksDirectory: tasks,
+            workingDirectory: tasks.deletingLastPathComponent(),
+            codexSessionsDirectory: sessions,
+            timeZone: shanghai,
+            tmuxStatusProvider: { _ in false }
+        )
+    }
+
+    private static func testRolloutRecovery() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let stamp = "20260731-113832"
+            let events = tasks.appendingPathComponent(
+                "\(stamp)-events.jsonl"
+            )
+            let rolloutDirectory = sessions.appendingPathComponent(
+                "2026/07/31",
+                isDirectory: true
+            )
+            let rollout = rolloutDirectory.appendingPathComponent(
+                "rollout-2026-07-31T11-38-32-\(sessionUUID).jsonl"
+            )
+            guard
+                (try? FileManager.default.createDirectory(
+                    at: rolloutDirectory,
+                    withIntermediateDirectories: true
+                )) != nil,
+                write("EXIT_CODE=0\n", to: events),
+                write("{}\n", to: rollout)
+            else {
+                return false
+            }
+            let modificationDate = date(
+                "2026-07-31 11:39:00"
+            )
+            guard
+                setModificationDate(modificationDate, for: events),
+                setModificationDate(
+                    modificationDate.addingTimeInterval(30),
+                    for: rollout
+                )
+            else {
+                return false
+            }
+            let parser = TaskStatusParser(
+                tasksDirectory: tasks,
+                workingDirectory: tasks.deletingLastPathComponent(),
+                codexSessionsDirectory: sessions,
+                timeZone: shanghai,
+                tmuxStatusProvider: { _ in false }
+            )
+            return parser.snapshots().first?.sessionUUID == sessionUUID
+        }
+    }
+
+    private static func testRunningTmuxSession() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            guard write(
+                "{\"type\":\"turn.started\"}\n",
+                to: tasks.appendingPathComponent(
+                    "20260731-113832-events.jsonl"
+                )
+            ) else {
+                return false
+            }
+            let expectedName = TaskStatusParser.tmuxSessionName(
+                forWorkingDirectoryPath:
+                    tasks.deletingLastPathComponent().path
+            )
+            let parser = TaskStatusParser(
+                tasksDirectory: tasks,
+                workingDirectory: tasks.deletingLastPathComponent(),
+                codexSessionsDirectory: sessions,
+                timeZone: shanghai,
+                tmuxStatusProvider: { $0 == expectedName }
+            )
+            return parser.snapshots().first?.status == .running
+        }
+    }
+
+    private static func testCompletionDetection() -> Bool {
+        let startedAt = date("2026-07-31 10:17:47")
+        let running = snapshot(
+            startedAt: startedAt,
+            status: .running
+        )
+        let initial = TaskCompletionDetector.evaluate(
+            [running],
+            state: nil,
+            now: startedAt.addingTimeInterval(10)
+        )
+        guard initial.completedTasks.isEmpty else {
+            return false
+        }
+
+        let done = snapshot(startedAt: startedAt, status: .done)
+        let completed = TaskCompletionDetector.evaluate(
+            [done],
+            state: initial.state,
+            now: startedAt.addingTimeInterval(20)
+        )
+        let repeated = TaskCompletionDetector.evaluate(
+            [done],
+            state: completed.state,
+            now: startedAt.addingTimeInterval(30)
+        )
+        let fastSessionUUID =
+            "019fb5f6-40d1-7383-ac0d-48b797170e08"
+        let fastTask = TaskStatusSnapshot(
+            id: "fast",
+            startedAt: startedAt.addingTimeInterval(35),
+            sessionUUID: fastSessionUUID,
+            mode: .sync,
+            taskName: "Fast",
+            isBackgroundTask: false,
+            status: .done,
+            exitCode: 0,
+            lastMessage: nil
+        )
+        let fastCompletion = TaskCompletionDetector.evaluate(
+            [fastTask],
+            state: repeated.state,
+            now: startedAt.addingTimeInterval(40)
+        )
+        return completed.completedTasks.map(\.sessionUUID) == [
+            sessionUUID
+        ] && repeated.completedTasks.isEmpty
+            && fastCompletion.completedTasks.map(\.sessionUUID) == [
+                fastSessionUUID
+            ]
+    }
+
+    private static func testNotificationStatePersistence() -> Bool {
+        let suiteName = "TaskStatusParserTests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return false
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        let expected = TaskNotificationState(
+            lastScannedAt: date("2026-07-31 10:17:47"),
+            unfinishedSessionUUIDs: [sessionUUID],
+            notifiedSessionUUIDs: [
+                "019fb5f6-40d1-7383-ac0d-48b797170e08"
+            ]
+        )
+        let store = TaskStatusStore(defaults: defaults)
+        store.notificationState = expected
+        return TaskStatusStore(
+            defaults: defaults
+        ).notificationState == expected
+    }
+
+    private static func snapshot(
+        startedAt: Date,
+        status: TaskExecutionStatus
+    ) -> TaskStatusSnapshot {
+        TaskStatusSnapshot(
+            id: "test",
+            startedAt: startedAt,
+            sessionUUID: sessionUUID,
+            mode: .sync,
+            taskName: "Test",
+            isBackgroundTask: false,
+            status: status,
+            exitCode: status == .done ? 0 : nil,
+            lastMessage: nil
+        )
+    }
+
+    private static func date(_ value: String) -> Date {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = shanghai
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.date(from: value)!
+    }
+
+    private static func withTemporaryDirectories(
+        _ body: (URL, URL) -> Bool
+    ) -> Bool {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "CodexQuotaTaskTests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        let tasks = root.appendingPathComponent(
+            ".codex-tasks",
+            isDirectory: true
+        )
+        let sessions = root.appendingPathComponent(
+            "sessions",
+            isDirectory: true
+        )
+        do {
+            try FileManager.default.createDirectory(
+                at: tasks,
+                withIntermediateDirectories: true
+            )
+            try FileManager.default.createDirectory(
+                at: sessions,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            return false
+        }
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+        return body(tasks, sessions)
+    }
+
+    private static func write(_ contents: String, to url: URL) -> Bool {
+        do {
+            try Data(contents.utf8).write(to: url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func setModificationDate(
+        _ date: Date,
+        for url: URL
+    ) -> Bool {
+        do {
+            try FileManager.default.setAttributes(
+                [.modificationDate: date],
+                ofItemAtPath: url.path
+            )
+            return true
+        } catch {
+            return false
+        }
+    }
+}
