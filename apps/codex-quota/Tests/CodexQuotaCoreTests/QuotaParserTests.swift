@@ -108,7 +108,10 @@ enum QuotaParserTests {
             ("update prompt policy normalizes semantic versions", testUpdatePromptPolicy),
             ("update preferences persist typed optional values", testUpdatePreferences),
             ("Tibo feed selects the latest explicit reset signal", testLatestTiboResetSignal),
-            ("Tibo feed upgrades a vague timed reset announcement", testVagueTiboResetSignal),
+            ("Tibo feed keeps a cross-sentence timed reset as a proposal", testVagueTiboResetSignal),
+            ("Tibo fallback recognizes the August reset promise", testTiboResetPromiseFallback),
+            ("Tibo fallback recognizes expanded timing and intent language", testTiboResetFallbackVocabulary),
+            ("Tibo fallback rejects unrelated reset and timing chatter", testTiboResetFallbackFalsePositives),
             ("Tibo feed ignores failed and unsafe sources", testTiboResetSignalSourceValidation),
             ("Tibo reset expectations render in Chinese", testTiboResetExpectationFormatting),
             ("Tibo reset expectations render in English", testEnglishTiboResetExpectationFormatting),
@@ -1600,9 +1603,106 @@ enum QuotaParserTests {
             return false
         }
         return expect(signal.id, equals: "2081899343091843463")
-            && expect(signal.kind, equals: .announced)
-            && expect(signal.signalStrength, equals: 75)
+            && expect(signal.kind, equals: .proposal)
+            && expect(signal.signalStrength, equals: 60)
             && expect(signal.expectedAt, equals: expectedAt)
+    }
+
+    private static func testTiboResetPromiseFallback() -> Bool {
+        let data = Data(
+            """
+            {
+              "sourceErrors": {},
+              "tiboPosts": [{
+                "activityType": "post",
+                "guid": "2087423996115681767",
+                "pubDate": "2026-08-12T06:20:37Z",
+                "title": "I previously promised a reset for every 1M in additional active users for Codex, until 10M. We blew past that and have been silent since 10M. Little surprise for you tomorrow.",
+                "link": "https://x.com/thsottiaux/status/2087423996115681767"
+              }]
+            }
+            """.utf8
+        )
+        guard
+            let now = standardDate("2026-08-12T07:00:00Z"),
+            let signal = try? TiboResetSignal.latest(from: data, now: now)
+        else {
+            return false
+        }
+        return signal.kind == .proposal && signal.signalStrength >= 50
+    }
+
+    private static func testTiboResetFallbackVocabulary() -> Bool {
+        func signal(for title: String, id: Int) -> TiboResetSignal? {
+            let payload: [String: Any] = [
+                "sourceErrors": [:],
+                "tiboPosts": [[
+                    "activityType": "post",
+                    "guid": String(id),
+                    "pubDate": "2026-08-12T06:20:37Z",
+                    "title": title,
+                    "link": "https://x.com/thsottiaux/status/\(id)"
+                ]]
+            ]
+            guard
+                let data = try? JSONSerialization.data(withJSONObject: payload),
+                let now = standardDate("2026-08-12T07:00:00Z")
+            else {
+                return nil
+            }
+            return try? TiboResetSignal.latest(from: data, now: now)
+        }
+
+        let timingPhrases = ["tomorrow", "tonight", "this week", "this weekend", "next week"]
+        for (index, phrase) in timingPhrases.enumerated() {
+            guard
+                let result = signal(for: "A Codex quota reset is planned \(phrase).", id: 400 + index),
+                result.kind == .announced,
+                result.signalStrength == 75
+            else {
+                return false
+            }
+        }
+
+        let intentPhrases = ["a surprise", "stay tuned", "coming"]
+        for (index, phrase) in intentPhrases.enumerated() {
+            guard
+                let result = signal(for: "A Codex quota reset is \(phrase).", id: 500 + index),
+                result.kind == .proposal,
+                result.signalStrength == 60
+            else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func testTiboResetFallbackFalsePositives() -> Bool {
+        let titles = [
+            "Just catching up over coffee.",
+            "See you tomorrow.",
+            "Reset my settings tomorrow.",
+            "Reset your password for Codex tomorrow."
+        ]
+        let posts: [[String: Any]] = titles.enumerated().map { index, title in
+            [
+                "activityType": "post",
+                "guid": String(600 + index),
+                "pubDate": "2026-08-12T06:20:37Z",
+                "title": title,
+                "link": "https://x.com/thsottiaux/status/\(600 + index)"
+            ]
+        }
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: [
+                "sourceErrors": [:],
+                "tiboPosts": posts
+            ]),
+            let now = standardDate("2026-08-12T07:00:00Z")
+        else {
+            return false
+        }
+        return (try? TiboResetSignal.latest(from: data, now: now)) == nil
     }
 
     private static func testTiboResetSignalSourceValidation() -> Bool {

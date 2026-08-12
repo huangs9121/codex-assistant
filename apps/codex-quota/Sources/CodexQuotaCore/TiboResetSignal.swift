@@ -227,31 +227,51 @@ public struct TiboResetSignal: Codable, Equatable, Sendable {
         }
 
         let text = post.title.lowercased()
-        let hasResetPhrase = text.range(
-            of: #"\b(?:limit|limits|usage|quota)\s+reset\b|\breset\s+(?:the\s+)?(?:limit|limits|usage|quota)\b"#,
-            options: .regularExpression
-        ) != nil
-        guard hasResetPhrase else {
+        let futureTimingPattern = #"\b(?:(?:in|within|up to)\s+(?:a\s+)?(?:few|[0-9]+)\s+(?:minutes?|hours?|days?)|tomorrow|tonight|this\s+week|this\s+weekend|next\s+week)\b"#
+        let intentLanguagePattern = #"\b(?:feel(?:ing)? like|time for|thinking about|might|may|soon|shortly|about to|surprise|stay tuned|coming)\b"#
+        let resetPairPattern = #"\b(?:codex|quotas?|limits?|usage)\s+resets?\b|\bresets?\s+(?:the\s+)?(?:codex|quotas?|limits?|usage)\b"#
+        let resetPattern = #"\bresets?\b"#
+        let resetContextPattern = #"\b(?:codex|quotas?|limits?|usage)\b"#
+        let unrelatedResetPattern = #"\bresets?\s+(?:(?:my|your|our|the)\s+)?(?:passwords?|settings?|preferences?|devices?|accounts?)\b|\b(?:passwords?|settings?|preferences?|devices?|accounts?)\s+resets?\b"#
+
+        let assertions = text.split(whereSeparator: { ".!?\n".contains($0) }).map(String.init)
+        let resetAssertions = assertions.filter { assertion in
+            guard assertion.range(
+                of: unrelatedResetPattern,
+                options: .regularExpression
+            ) == nil else {
+                return false
+            }
+            if assertion.range(of: resetPairPattern, options: .regularExpression) != nil {
+                return true
+            }
+            return assertion.range(of: resetPattern, options: .regularExpression) != nil
+                && assertion.range(of: resetContextPattern, options: .regularExpression) != nil
+        }
+        guard !resetAssertions.isEmpty else {
             return nil
         }
 
         let hasFutureTiming = text.range(
-            of: #"\b(?:in|within|up to)\s+(?:a\s+)?(?:few|[0-9]+)\s+(?:minutes?|hours?|days?)\b"#,
+            of: futureTimingPattern,
             options: .regularExpression
         ) != nil
         let hasIntentLanguage = text.range(
-            of: #"\b(?:feel(?:ing)? like|time for|thinking about|might|may|soon|shortly|about to)\b"#,
+            of: intentLanguagePattern,
             options: .regularExpression
         ) != nil
         guard hasFutureTiming || hasIntentLanguage else {
             return nil
         }
+        let hasFutureTimingWithReset = resetAssertions.contains { assertion in
+            assertion.range(of: futureTimingPattern, options: .regularExpression) != nil
+        }
 
         return Assessment(
-            category: hasFutureTiming
+            category: hasFutureTimingWithReset
                 ? TiboResetSignalKind.announced.rawValue
                 : TiboResetSignalKind.proposal.rawValue,
-            resetSignalStrength: hasFutureTiming ? 75 : 60
+            resetSignalStrength: hasFutureTimingWithReset ? 75 : 60
         )
     }
 
