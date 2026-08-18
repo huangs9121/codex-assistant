@@ -427,12 +427,15 @@ enum QuotaParserTests {
     private static func testCompactResetCountdownBoundaries() -> Bool {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let cases: [(TimeInterval, String)] = [
-            (51 * 60 * 60, "2天"),
-            (24 * 60 * 60, "1天"),
-            (23 * 60 * 60 + 59 * 60, "23小时"),
+            (0, "0分钟"),
+            (59 * 60 + 30, "59分钟"),
             (60 * 60, "1小时"),
-            (59 * 60, "0小时"),
-            (-1, "0小时")
+            (23.5 * 60 * 60, "23小时"),
+            (24 * 60 * 60, "24小时"),
+            (24 * 60 * 60 + 1, "2天"),
+            (47.9 * 60 * 60, "2天"),
+            (48 * 60 * 60 + 1, "3天"),
+            (-1, "0分钟")
         ]
         return cases.allSatisfy { interval, expected in
             expect(
@@ -474,6 +477,24 @@ enum QuotaParserTests {
 
     private static func testEnglishResetCountdown() -> Bool {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let compactCases: [(TimeInterval, String)] = [
+            (59 * 60 + 30, "59m"),
+            (60 * 60, "1h"),
+            (24 * 60 * 60, "24h"),
+            (24 * 60 * 60 + 1, "2d"),
+            (47.9 * 60 * 60, "2d"),
+            (48 * 60 * 60 + 1, "3d")
+        ]
+        let compactCasesMatch = compactCases.allSatisfy { interval, expected in
+            expect(
+                ResetCountdownFormatter.compactString(
+                    resetsAt: now.addingTimeInterval(interval),
+                    now: now,
+                    language: .english
+                ),
+                equals: expected
+            )
+        }
         return expect(
             ResetCountdownFormatter.string(
                 resetsAt: now.addingTimeInterval((2 * 24 + 3) * 60 * 60),
@@ -481,14 +502,7 @@ enum QuotaParserTests {
                 language: .english
             ),
             equals: "2 days 3 hours"
-        ) && expect(
-            ResetCountdownFormatter.compactString(
-                resetsAt: now.addingTimeInterval(51 * 60 * 60),
-                now: now,
-                language: .english
-            ),
-            equals: "2d"
-        ) && expect(
+        ) && compactCasesMatch && expect(
             ResetCountdownFormatter.string(
                 resetsAt: now.addingTimeInterval(25 * 60 * 60),
                 now: now,

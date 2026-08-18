@@ -84,14 +84,20 @@ public enum ResetCountdownFormatter {
         guard interval.isFinite else {
             return "--"
         }
-        let hours = floor(max(0, interval) / 3_600)
+        let clampedInterval = max(0, interval)
+        let hours = floor(clampedInterval / 3_600)
         guard hours.isFinite, hours < Double(Int.max) else {
             return "--"
         }
         let totalHours = Int(hours)
-        if totalHours < 24 {
+        if clampedInterval < 3_600 {
+            let totalMinutes = Int(floor(clampedInterval / 60))
+            return language == .simplifiedChinese ? "\(totalMinutes)分钟" : "\(totalMinutes)m"
+        }
+        if clampedInterval <= 24 * 3_600 {
             return language == .simplifiedChinese ? "\(totalHours)小时" : "\(totalHours)h"
         }
-        return language == .simplifiedChinese ? "\(totalHours / 24)天" : "\(totalHours / 24)d"
+        let totalDays = Int(ceil(clampedInterval / 86_400))
+        return language == .simplifiedChinese ? "\(totalDays)天" : "\(totalDays)d"
     }
 }
