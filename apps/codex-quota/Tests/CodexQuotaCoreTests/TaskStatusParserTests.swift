@@ -67,6 +67,14 @@ enum TaskStatusParserTests {
         TaskStatusParserTestCase(
             name: "task notification state persists",
             run: testNotificationStatePersistence
+        ),
+        TaskStatusParserTestCase(
+            name: "task snapshots merge by newest start time and limit archives",
+            run: testSnapshotMerge
+        ),
+        TaskStatusParserTestCase(
+            name: "task snapshots merge archives from multiple task directories",
+            run: testMultiDirectorySnapshots
         )
     ]
 
@@ -434,12 +442,100 @@ enum TaskStatusParserTests {
         ).notificationState == expected
     }
 
+    private static func testSnapshotMerge() -> Bool {
+        let july31 = date("2026-07-31 10:17:47")
+        let august12 = date("2026-08-12 16:28:53")
+        let august18 = date("2026-08-18 11:07:36")
+        let snapshots = TaskStatusSnapshotMerger.merge([
+            [
+                snapshot(id: "20260731-101747", startedAt: july31),
+                snapshot(id: "20260812-162853", startedAt: august12)
+            ],
+            [
+                snapshot(id: "20260818-110736", startedAt: august18),
+                snapshot(id: "20260812-162853", startedAt: august12),
+                snapshot(id: "duplicate", startedAt: july31),
+                snapshot(id: "duplicate", startedAt: august18)
+            ]
+        ])
+        return snapshots.map(\.id) == [
+            "20260818-110736",
+            "duplicate",
+            "20260812-162853",
+            "20260731-101747"
+        ] && TaskStatusSnapshotMerger.merge(
+            [snapshots],
+            limit: 2
+        ).map(\.id) == ["20260818-110736", "duplicate"]
+    }
+
+    private static func testMultiDirectorySnapshots() -> Bool {
+        withTemporaryDirectories { rootTasks, sessions in
+            let appTasks = rootTasks.deletingLastPathComponent()
+                .appendingPathComponent("app/.codex-tasks", isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(
+                    at: appTasks,
+                    withIntermediateDirectories: true
+                )
+            } catch {
+                return false
+            }
+            let archives: [(URL, String, String, String)] = [
+                (rootTasks, "20260731-101747", "2026-07-31", "old-root-one"),
+                (rootTasks, "20260801-003850", "2026-08-01", "old-root-two"),
+                (appTasks, "20260812-162853", "2026-08-12", "reset-signal-fallback"),
+                (appTasks, "20260818-110736", "2026-08-18", "countdown-ceil-days")
+            ]
+            guard archives.allSatisfy({ directory, id, date, name in
+                write(
+                    "EXIT_CODE=0\n",
+                    to: directory.appendingPathComponent("\(id)-events.jsonl")
+                ) && write(
+                    "/tmp/\(date)-\(name).md\n",
+                    to: directory.appendingPathComponent("\(id)-events.brief")
+                )
+            }) else {
+                return false
+            }
+
+            let snapshots = TaskStatusSnapshotMerger.merge([
+                TaskStatusParser(
+                    tasksDirectory: rootTasks,
+                    workingDirectory: rootTasks.deletingLastPathComponent(),
+                    codexSessionsDirectory: sessions,
+                    timeZone: shanghai,
+                    tmuxStatusProvider: { _ in false }
+                ).snapshots(),
+                TaskStatusParser(
+                    tasksDirectory: appTasks,
+                    workingDirectory: appTasks.deletingLastPathComponent(),
+                    codexSessionsDirectory: sessions,
+                    timeZone: shanghai,
+                    tmuxStatusProvider: { _ in false }
+                ).snapshots()
+            ])
+            return snapshots.map(\.id) == [
+                "20260818-110736",
+                "20260812-162853",
+                "20260801-003850",
+                "20260731-101747"
+            ] && snapshots.map(\.taskName) == [
+                "countdown-ceil-days",
+                "reset-signal-fallback",
+                "old-root-two",
+                "old-root-one"
+            ]
+        }
+    }
+
     private static func snapshot(
+        id: String = "test",
         startedAt: Date,
-        status: TaskExecutionStatus
+        status: TaskExecutionStatus = .done
     ) -> TaskStatusSnapshot {
         TaskStatusSnapshot(
-            id: "test",
+            id: id,
             startedAt: startedAt,
             sessionUUID: sessionUUID,
             mode: .sync,

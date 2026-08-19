@@ -8,7 +8,7 @@ final class TaskStatusController {
         let completedTasks: [TaskStatusSnapshot]
     }
 
-    private let parser: TaskStatusParser
+    private let parsers: [TaskStatusParser]
     private let store: TaskStatusStore
     private let queue = DispatchQueue(
         label: "CodexQuota.taskStatus",
@@ -22,29 +22,61 @@ final class TaskStatusController {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         defaults: UserDefaults = .standard
     ) {
-        let tasksDirectory: URL
+        let tasksDirectories: [URL]
         if
             let override = environment["CODEX_QUOTA_TASKS_DIR"]?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
             !override.isEmpty
         {
-            tasksDirectory = URL(fileURLWithPath: override, isDirectory: true)
-                .standardizedFileURL
+            tasksDirectories = [
+                URL(fileURLWithPath: override, isDirectory: true)
+                    .standardizedFileURL
+            ]
         } else {
-            tasksDirectory = URL(
+            let workspaceDirectory = URL(
                 fileURLWithPath:
-                    "/Users/openclaw/Projects/codex助手/.codex-tasks",
+                    "/Users/openclaw/Projects/codex助手",
                 isDirectory: true
+            )
+            let appsDirectory = workspaceDirectory.appendingPathComponent(
+                "apps",
+                isDirectory: true
+            )
+            let appTasksDirectories = (try? FileManager.default
+                .contentsOfDirectory(
+                    at: appsDirectory,
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles]
+                ))?
+                .filter {
+                    (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?
+                        .isDirectory == true
+                }
+                .map {
+                    $0.appendingPathComponent(
+                        ".codex-tasks",
+                        isDirectory: true
+                    )
+                }
+                .filter { Self.directoryExists(at: $0) }
+                ?? []
+            tasksDirectories = [
+                workspaceDirectory.appendingPathComponent(
+                    ".codex-tasks",
+                    isDirectory: true
+                )
+            ].filter(Self.directoryExists(at:)) + appTasksDirectories
+        }
+        parsers = tasksDirectories.map { tasksDirectory in
+            TaskStatusParser(
+                tasksDirectory: tasksDirectory,
+                workingDirectory: tasksDirectory.deletingLastPathComponent(),
+                codexSessionsDirectory: homeDirectory.appendingPathComponent(
+                    ".codex/sessions",
+                    isDirectory: true
+                )
             )
         }
-        parser = TaskStatusParser(
-            tasksDirectory: tasksDirectory,
-            workingDirectory: tasksDirectory.deletingLastPathComponent(),
-            codexSessionsDirectory: homeDirectory.appendingPathComponent(
-                ".codex/sessions",
-                isDirectory: true
-            )
-        )
         store = TaskStatusStore(defaults: defaults)
     }
 
@@ -53,9 +85,11 @@ final class TaskStatusController {
             return
         }
         isChecking = true
-        let parser = parser
+        let parsers = parsers
         queue.async { [weak self] in
-            let tasks = parser.snapshots()
+            let tasks = TaskStatusSnapshotMerger.merge(
+                parsers.map { $0.snapshots() }
+            )
             DispatchQueue.main.async { [weak self] in
                 guard let self, !invalidated else {
                     return
@@ -78,5 +112,13 @@ final class TaskStatusController {
 
     func invalidate() {
         invalidated = true
+    }
+
+    private static func directoryExists(at url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: url.path,
+            isDirectory: &isDirectory
+        ) && isDirectory.boolValue
     }
 }
