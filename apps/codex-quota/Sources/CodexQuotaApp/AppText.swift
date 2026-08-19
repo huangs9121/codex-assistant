@@ -24,8 +24,12 @@ struct AppText {
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
     var mouseScrollReversalDetail: String { choose("仅影响外接鼠标，触控板保持不变；需要辅助功能权限。", "Only affects external mice; trackpad scrolling stays unchanged. Accessibility permission is required.") }
     var mouseScrollReversalConflictHint: String { choose("使用前请退出 MOS、Scroll Reverser 等同类软件，避免双重反转。", "Quit MOS, Scroll Reverser, or similar apps first to avoid double reversal.") }
+    var doubleCommandTap: String { choose("双击 ⌘ 呼出 Codex", "Double-tap ⌘ to Open Codex") }
+    var doubleCommandTapDetail: String { choose("纯双击 ⌘ 会发送 ⌃⌘C；⌘+C 等组合键不受影响。", "A pure double-tap ⌘ sends ⌃⌘C; combinations such as ⌘+C are unaffected.") }
     var accessibilityPermissionRequired: String { choose("辅助功能权限未授权", "Accessibility Permission Required") }
     var accessibilityPermissionGranted: String { choose("辅助功能权限已授权", "Accessibility Permission Granted") }
+    var accessibilityPermissionRunning: String { choose("辅助功能已授权（运行中）", "Accessibility Authorized (Running)") }
+    var accessibilityEnableFailed: String { choose("辅助功能启用失败", "Accessibility Enable Failed") }
     var openAccessibilitySettings: String { choose("打开“辅助功能”设置", "Open Accessibility Settings") }
     var moveHint: String { choose("按住 ⌘ 可自由拖动位置", "Hold ⌘ and drag to reposition") }
     var checkForUpdates: String { choose("检查更新…", "Check for Updates…") }

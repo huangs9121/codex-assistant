@@ -22,6 +22,10 @@ final class MouseScrollReversalController {
         AXIsProcessTrusted()
     }
 
+    var isRunning: Bool {
+        eventTap != nil
+    }
+
     @discardableResult
     func startIfPermitted() -> Bool {
         guard isAccessibilityTrusted else {

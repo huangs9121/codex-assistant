@@ -77,9 +77,9 @@ trap cleanup EXIT
 rm -rf "$TEMP_DIR"
 mkdir -p "$STAGING_APP/Contents/MacOS" "$STAGING_APP/Contents/Resources" "$ICONSET"
 
-swift run --package-path "$PACKAGE_ROOT" CodexQuotaCoreTests
-swift build --package-path "$PACKAGE_ROOT" -c release --arch arm64
-BIN_DIR="$(swift build --package-path "$PACKAGE_ROOT" -c release --arch arm64 --show-bin-path)"
+swift run --disable-sandbox --package-path "$PACKAGE_ROOT" CodexQuotaCoreTests
+swift build --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64
+BIN_DIR="$(swift build --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64 --show-bin-path)"
 cp "$BIN_DIR/CodexQuotaApp" "$STAGING_APP/Contents/MacOS/CodexQuotaApp"
 
 swift "$SCRIPT_DIR/generate_icon.swift" "$SOURCE_ICON"
@@ -161,7 +161,17 @@ printf '%s\n' \
 find "$VERIFY_ICONSET" -maxdepth 1 -type f -exec basename {} \; | sort > "$ACTUAL_ICONS"
 diff -u "$EXPECTED_ICONS" "$ACTUAL_ICONS"
 
-codesign --force --deep --sign - "$STAGING_APP"
+SIGNING_IDENTITY="-"
+SIGNING_LABEL="ad-hoc"
+LOCAL_IDENTITY_SHA="$(security find-identity -v -p codesigning | awk '$0 ~ /"Codex Quota Local"$/ { print $2; exit }')"
+if [[ -n "$LOCAL_IDENTITY_SHA" ]]; then
+    # The keychain currently has two items with this display name. The SHA-1
+    # identity from security avoids codesign's ambiguous-name resolution.
+    SIGNING_IDENTITY="$LOCAL_IDENTITY_SHA"
+    SIGNING_LABEL="Codex Quota Local ($LOCAL_IDENTITY_SHA)"
+fi
+echo "Signing Codex Quota with: $SIGNING_LABEL"
+codesign --force --deep --sign "$SIGNING_IDENTITY" "$STAGING_APP"
 chmod -R u=rwX,go=rX "$STAGING_APP"
 chmod 755 "$STAGING_APP/Contents/MacOS/CodexQuotaApp"
 if find "$STAGING_APP" \( -perm -002 -o -perm -020 \) -print -quit | grep -q .; then

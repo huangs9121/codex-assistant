@@ -67,6 +67,11 @@ enum QuotaParserTests {
             ("renderer shows full bar at one hundred", testRendererOneHundred),
             ("mouse wheel scroll should reverse", testMouseWheelScrollReversal),
             ("continuous trackpad scroll should not reverse", testContinuousScrollDoesNotReverse),
+            ("first command tap waits for another tap", testDoubleCommandFirstTap),
+            ("late command tap does not trigger", testDoubleCommandTimeout),
+            ("non-pure command tap cancels the sequence", testDoubleCommandCancel),
+            ("double command tap triggers once", testDoubleCommandTrigger),
+            ("double command tap cooldown suppresses repeats", testDoubleCommandCooldown),
             ("battery style defaults to native", testDefaultBatteryStyle),
             ("battery styles have stable order and raw values", testBatteryStyleCases),
             ("battery styles have exact menu titles", testBatteryStyleMenuTitles),
@@ -912,6 +917,41 @@ enum QuotaParserTests {
 
     private static func testContinuousScrollDoesNotReverse() -> Bool {
         !MouseScrollReversal.shouldReverseVerticalAxis(isContinuous: 1)
+    }
+
+    private static func testDoubleCommandFirstTap() -> Bool {
+        var sequence = DoubleCommandTapSequence()
+        return !sequence.registerPureCommandTap(at: 10)
+    }
+
+    private static func testDoubleCommandTimeout() -> Bool {
+        var sequence = DoubleCommandTapSequence()
+        return !sequence.registerPureCommandTap(at: 10)
+            && !sequence.registerPureCommandTap(at: 10.31)
+    }
+
+    private static func testDoubleCommandCancel() -> Bool {
+        var sequence = DoubleCommandTapSequence()
+        _ = sequence.registerPureCommandTap(at: 10)
+        sequence.cancel()
+        return !sequence.registerPureCommandTap(at: 10.1)
+    }
+
+    private static func testDoubleCommandTrigger() -> Bool {
+        var sequence = DoubleCommandTapSequence()
+        return !sequence.registerPureCommandTap(at: 10)
+            && sequence.registerPureCommandTap(at: 10.25)
+    }
+
+    private static func testDoubleCommandCooldown() -> Bool {
+        var sequence = DoubleCommandTapSequence()
+        guard !sequence.registerPureCommandTap(at: 10),
+              sequence.registerPureCommandTap(at: 10.2) else {
+            return false
+        }
+        return !sequence.registerPureCommandTap(at: 10.3)
+            && !sequence.registerPureCommandTap(at: 10.4)
+            && !sequence.registerPureCommandTap(at: 10.6)
     }
 
     private static func testDefaultBatteryStyle() -> Bool {
