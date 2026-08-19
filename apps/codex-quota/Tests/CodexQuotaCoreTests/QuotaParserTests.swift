@@ -65,6 +65,8 @@ enum QuotaParserTests {
             ("renderer shows six filled segments at sixty", testRendererSixty),
             ("renderer rounds sixty-five to seven segments", testRendererSixtyFive),
             ("renderer shows full bar at one hundred", testRendererOneHundred),
+            ("mouse wheel scroll should reverse", testMouseWheelScrollReversal),
+            ("continuous trackpad scroll should not reverse", testContinuousScrollDoesNotReverse),
             ("battery style defaults to native", testDefaultBatteryStyle),
             ("battery styles have stable order and raw values", testBatteryStyleCases),
             ("battery styles have exact menu titles", testBatteryStyleMenuTitles),
@@ -902,6 +904,14 @@ enum QuotaParserTests {
 
     private static func testRendererOneHundred() -> Bool {
         expect(QuotaRenderer.title(remainingPercent: 100), equals: "Codex [██████████] 100%")
+    }
+
+    private static func testMouseWheelScrollReversal() -> Bool {
+        MouseScrollReversal.shouldReverseVerticalAxis(isContinuous: 0)
+    }
+
+    private static func testContinuousScrollDoesNotReverse() -> Bool {
+        !MouseScrollReversal.shouldReverseVerticalAxis(isContinuous: 1)
     }
 
     private static func testDefaultBatteryStyle() -> Bool {

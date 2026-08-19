@@ -137,6 +137,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var identityItems: [StatusIdentityMode: NSMenuItem] = [:]
     private var resetToggleItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
+    private var mouseScrollReversalItem: NSMenuItem?
+    private var mouseScrollPermissionItem: NSMenuItem?
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
     private var refreshTimer: Timer?
@@ -152,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let automaticUpdateInstaller = AutomaticUpdateInstaller()
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
+    private let mouseScrollReversalController = MouseScrollReversalController()
     private let rateLimitController = CodexRateLimitController()
     private let taskStatusController = TaskStatusController()
     private lazy var panelController = StatusPanelController(
@@ -176,6 +179,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         currentResetSignal = preferences.latestResetSignal
         panelModel.update(resetSignal: currentResetSignal)
         configureStatusItem()
+        if mouseScrollReversalController.isEnabled {
+            _ = mouseScrollReversalController.startIfPermitted()
+        }
         refresh()
         let timer = Timer(
             timeInterval: 15,
@@ -220,6 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         resetMonitorController.invalidate()
         rateLimitController.invalidate()
         taskStatusController.invalidate()
+        mouseScrollReversalController.stop()
     }
 
     private func configureStatusItem() {
@@ -293,6 +300,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         launchAtLoginItem = loginItem
         settingsMenu.addItem(loginItem)
+
+        settingsMenu.addItem(.separator())
+
+        let mouseScrollItem = makeChoiceItem(
+            title: text.mouseScrollReversal,
+            tag: 0,
+            action: #selector(toggleMouseScrollReversal(_:))
+        )
+        mouseScrollReversalItem = mouseScrollItem
+        settingsMenu.addItem(mouseScrollItem)
+
+        let mouseScrollDetailItem = NSMenuItem(
+            title: text.mouseScrollReversalDetail,
+            action: nil,
+            keyEquivalent: ""
+        )
+        mouseScrollDetailItem.isEnabled = false
+        settingsMenu.addItem(mouseScrollDetailItem)
+
+        let mouseScrollConflictItem = NSMenuItem(
+            title: text.mouseScrollReversalConflictHint,
+            action: nil,
+            keyEquivalent: ""
+        )
+        mouseScrollConflictItem.isEnabled = false
+        settingsMenu.addItem(mouseScrollConflictItem)
+
+        let mouseScrollPermissionItem = NSMenuItem(
+            title: text.openAccessibilitySettings,
+            action: #selector(openAccessibilitySettings),
+            keyEquivalent: ""
+        )
+        mouseScrollPermissionItem.target = self
+        self.mouseScrollPermissionItem = mouseScrollPermissionItem
+        settingsMenu.addItem(mouseScrollPermissionItem)
 
         settingsMenu.addItem(.separator())
 
@@ -466,6 +508,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         (launchAtLoginItem?.view as? MenuChoiceRow)?.isSelected = launchSelected
         (launchAtLoginItem?.view as? MenuChoiceRow)?.updateTitle(launchTitle)
 
+        let mouseScrollEnabled = mouseScrollReversalController.isEnabled
+        mouseScrollReversalItem?.state = mouseScrollEnabled ? .on : .off
+        (mouseScrollReversalItem?.view as? MenuChoiceRow)?.isSelected = mouseScrollEnabled
+        mouseScrollPermissionItem?.title = mouseScrollReversalController.isAccessibilityTrusted
+            ? text.accessibilityPermissionGranted
+            : text.openAccessibilitySettings + "（" + text.accessibilityPermissionRequired + "）"
+
         if isUpdateInstallInFlight {
             updateMenuItem?.title = text.downloadingUpdate
             updateMenuItem?.isEnabled = false
@@ -552,6 +601,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             )
             syncMenuState()
         }
+    }
+
+    @objc private func toggleMouseScrollReversal(_ sender: NSButton) {
+        mouseScrollReversalController.isEnabled.toggle()
+        if mouseScrollReversalController.isEnabled,
+           !mouseScrollReversalController.startIfPermitted() {
+            mouseScrollReversalController.requestAccessibilityPermission()
+        } else if !mouseScrollReversalController.isEnabled {
+            mouseScrollReversalController.stop()
+        }
+        syncMenuState()
+    }
+
+    @objc private func openAccessibilitySettings() {
+        mouseScrollReversalController.openAccessibilitySettings()
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
