@@ -72,6 +72,7 @@ enum QuotaParserTests {
             ("non-pure command tap cancels the sequence", testDoubleCommandCancel),
             ("double command tap triggers once", testDoubleCommandTrigger),
             ("double command tap cooldown suppresses repeats", testDoubleCommandCooldown),
+            ("double command tap permission status identifies missing permissions", testDoubleCommandTapPermissionStatus),
             ("keyboard shortcut formats modifiers in stable order", testKeyboardShortcutDisplay),
             ("keyboard shortcut names special keys", testKeyboardShortcutSpecialKeys),
             ("keyboard shortcut requires a modifier", testKeyboardShortcutValidation),
@@ -955,6 +956,25 @@ enum QuotaParserTests {
         return !sequence.registerPureCommandTap(at: 10.3)
             && !sequence.registerPureCommandTap(at: 10.4)
             && !sequence.registerPureCommandTap(at: 10.6)
+    }
+
+    private static func testDoubleCommandTapPermissionStatus() -> Bool {
+        DoubleCommandTapPermissionStatus(
+            inputMonitoringAuthorized: true,
+            accessibilityAuthorized: true
+        ) == .running
+            && DoubleCommandTapPermissionStatus(
+                inputMonitoringAuthorized: false,
+                accessibilityAuthorized: true
+            ) == .inputMonitoringRequired
+            && DoubleCommandTapPermissionStatus(
+                inputMonitoringAuthorized: true,
+                accessibilityAuthorized: false
+            ) == .accessibilityRequired
+            && DoubleCommandTapPermissionStatus(
+                inputMonitoringAuthorized: false,
+                accessibilityAuthorized: false
+            ) == .inputMonitoringAndAccessibilityRequired
     }
 
     private static func testKeyboardShortcutDisplay() -> Bool {

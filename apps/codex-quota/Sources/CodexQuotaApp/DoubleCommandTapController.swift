@@ -25,13 +25,27 @@ final class DoubleCommandTapController {
         AXIsProcessTrusted()
     }
 
+    var isInputMonitoringTrusted: Bool {
+        if #available(macOS 14.4, *) {
+            return CGPreflightListenEventAccess()
+        }
+        return canCreateKeyboardEventTap()
+    }
+
+    var permissionStatus: DoubleCommandTapPermissionStatus {
+        DoubleCommandTapPermissionStatus(
+            inputMonitoringAuthorized: isInputMonitoringTrusted,
+            accessibilityAuthorized: isAccessibilityTrusted
+        )
+    }
+
     var isRunning: Bool {
         eventTap != nil
     }
 
     @discardableResult
     func startIfPermitted() -> Bool {
-        guard isAccessibilityTrusted else {
+        guard isAccessibilityTrusted, isInputMonitoringTrusted else {
             stop()
             return false
         }
@@ -76,6 +90,43 @@ final class DoubleCommandTapController {
     func requestAccessibilityPermission() {
         let options = ["AXTrustedCheckOptionPrompt": true]
         _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
+    }
+
+    func requestInputMonitoringPermission() {
+        if #available(macOS 14.4, *) {
+            _ = CGRequestListenEventAccess()
+        }
+    }
+
+    func openInputMonitoringSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func canCreateKeyboardEventTap() -> Bool {
+        let mask = (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
+            | (CGEventMask(1) << CGEventType.keyDown.rawValue)
+        guard let eventTap = CGEvent.tapCreate(
+            tap: .cghidEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: Self.probeEvent,
+            userInfo: nil
+        ) else {
+            return false
+        }
+        CGEvent.tapEnable(tap: eventTap, enable: false)
+        return true
     }
 
     private func handle(type: CGEventType, event: CGEvent) {
@@ -134,5 +185,9 @@ final class DoubleCommandTapController {
             .takeUnretainedValue()
             .handle(type: type, event: event)
         return Unmanaged.passUnretained(event)
+    }
+
+    private static let probeEvent: CGEventTapCallBack = { _, _, event, _ in
+        Unmanaged.passUnretained(event)
     }
 }

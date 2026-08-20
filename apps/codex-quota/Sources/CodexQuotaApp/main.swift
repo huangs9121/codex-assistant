@@ -140,6 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var mouseScrollReversalItem: NSMenuItem?
     private var doubleCommandTapItem: NSMenuItem?
     private var mouseScrollPermissionItem: NSMenuItem?
+    private var doubleCommandTapPermissionStatusItem: NSMenuItem?
+    private var inputMonitoringSettingsItem: NSMenuItem?
+    private var doubleCommandAccessibilitySettingsItem: NSMenuItem?
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
     private var refreshTimer: Timer?
@@ -364,6 +367,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         doubleCommandTapDetailItem.isEnabled = false
         settingsMenu.addItem(doubleCommandTapDetailItem)
 
+        let doubleCommandTapPermissionStatusItem = NSMenuItem(
+            title: text.doubleCommandTapRunning,
+            action: nil,
+            keyEquivalent: ""
+        )
+        doubleCommandTapPermissionStatusItem.isEnabled = false
+        self.doubleCommandTapPermissionStatusItem = doubleCommandTapPermissionStatusItem
+        settingsMenu.addItem(doubleCommandTapPermissionStatusItem)
+
+        let inputMonitoringSettingsItem = NSMenuItem(
+            title: text.openInputMonitoringSettings,
+            action: #selector(openInputMonitoringSettings),
+            keyEquivalent: ""
+        )
+        inputMonitoringSettingsItem.target = self
+        self.inputMonitoringSettingsItem = inputMonitoringSettingsItem
+        settingsMenu.addItem(inputMonitoringSettingsItem)
+
+        let doubleCommandAccessibilitySettingsItem = NSMenuItem(
+            title: text.openAccessibilitySettings,
+            action: #selector(openDoubleCommandAccessibilitySettings),
+            keyEquivalent: ""
+        )
+        doubleCommandAccessibilitySettingsItem.target = self
+        self.doubleCommandAccessibilitySettingsItem = doubleCommandAccessibilitySettingsItem
+        settingsMenu.addItem(doubleCommandAccessibilitySettingsItem)
+
         let mouseScrollPermissionItem = NSMenuItem(
             title: text.openAccessibilitySettings,
             action: #selector(openAccessibilitySettings),
@@ -552,6 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         doubleCommandTapItem?.state = doubleCommandTapEnabled ? .on : .off
         (doubleCommandTapItem?.view as? MenuChoiceRow)?.isSelected = doubleCommandTapEnabled
         mouseScrollPermissionItem?.title = accessibilityPermissionTitle()
+        syncDoubleCommandTapPermissionItems()
 
         if isUpdateInstallInFlight {
             updateMenuItem?.title = text.downloadingUpdate
@@ -656,6 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         doubleCommandTapController.isEnabled.toggle()
         if doubleCommandTapController.isEnabled,
            !doubleCommandTapController.startIfPermitted() {
+            doubleCommandTapController.requestInputMonitoringPermission()
             doubleCommandTapController.requestAccessibilityPermission()
         } else if !doubleCommandTapController.isEnabled {
             doubleCommandTapController.stop()
@@ -669,6 +701,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     @objc private func openAccessibilitySettings() {
         mouseScrollReversalController.openAccessibilitySettings()
+    }
+
+    @objc private func openInputMonitoringSettings() {
+        doubleCommandTapController.openInputMonitoringSettings()
+    }
+
+    @objc private func openDoubleCommandAccessibilitySettings() {
+        doubleCommandTapController.openAccessibilitySettings()
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
@@ -709,9 +749,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func refreshAccessibilityControllers() {
-        guard AXIsProcessTrusted() else {
-            return
-        }
         if mouseScrollReversalController.isEnabled,
            !mouseScrollReversalController.isRunning {
             _ = mouseScrollReversalController.startIfPermitted()
@@ -727,15 +764,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             return text.openAccessibilitySettings + "（" + text.accessibilityPermissionRequired + "）"
         }
         let hasEnabledController = mouseScrollReversalController.isEnabled
-            || doubleCommandTapController.isEnabled
-        let hasFailedController = (mouseScrollReversalController.isEnabled
-            && !mouseScrollReversalController.isRunning)
-            || (doubleCommandTapController.isEnabled
-                && !doubleCommandTapController.isRunning)
+        let hasFailedController = mouseScrollReversalController.isEnabled
+            && !mouseScrollReversalController.isRunning
         if hasFailedController {
             return text.accessibilityEnableFailed
         }
         return hasEnabledController ? text.accessibilityPermissionRunning : text.accessibilityPermissionGranted
+    }
+
+    private func syncDoubleCommandTapPermissionItems() {
+        let isEnabled = doubleCommandTapController.isEnabled
+        let status = doubleCommandTapController.permissionStatus
+        doubleCommandTapPermissionStatusItem?.isHidden = !isEnabled
+        inputMonitoringSettingsItem?.isHidden = !isEnabled || status == .running || status == .accessibilityRequired
+        doubleCommandAccessibilitySettingsItem?.isHidden = !isEnabled || status == .running || status == .inputMonitoringRequired
+        switch status {
+        case .running:
+            doubleCommandTapPermissionStatusItem?.title = text.doubleCommandTapRunning
+        case .inputMonitoringRequired:
+            doubleCommandTapPermissionStatusItem?.title = text.inputMonitoringPermissionRequired
+        case .accessibilityRequired:
+            doubleCommandTapPermissionStatusItem?.title = text.accessibilityPermissionRequired
+        case .inputMonitoringAndAccessibilityRequired:
+            doubleCommandTapPermissionStatusItem?.title = text.doubleCommandTapPermissionsRequired
+        }
     }
 
     @objc private func refreshFromTimer() {
