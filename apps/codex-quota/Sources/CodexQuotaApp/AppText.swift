@@ -25,7 +25,13 @@ struct AppText {
     var mouseScrollReversalDetail: String { choose("仅影响外接鼠标，触控板保持不变；需要辅助功能权限。", "Only affects external mice; trackpad scrolling stays unchanged. Accessibility permission is required.") }
     var mouseScrollReversalConflictHint: String { choose("使用前请退出 MOS、Scroll Reverser 等同类软件，避免双重反转。", "Quit MOS, Scroll Reverser, or similar apps first to avoid double reversal.") }
     var doubleCommandTap: String { choose("双击 ⌘ 呼出 Codex", "Double-tap ⌘ to Open Codex") }
-    var doubleCommandTapDetail: String { choose("纯双击 ⌘ 会发送 ⌃⌘C；⌘+C 等组合键不受影响。", "A pure double-tap ⌘ sends ⌃⌘C; combinations such as ⌘+C are unaffected.") }
+    var doubleCommandTapDetail: String { choose("纯双击 ⌘ 会发送已设置的快捷键；⌘+C 等组合键不受影响。", "A pure double-tap ⌘ sends the configured shortcut; combinations such as ⌘+C are unaffected.") }
+    var setCodexShortcut: String { choose("设置呼出快捷键…", "Set Open Shortcut…") }
+    var codexShortcutMatchHint: String { choose("此快捷键必须与 Codex 设置中的「弹出窗口快捷键」保持一致", "Must match Codex → Settings → 'Pop-out window shortcut'") }
+    var currentCodexShortcut: String { choose("当前快捷键", "Current shortcut") }
+    var recordCodexShortcut: String { choose("录制快捷键", "Record shortcut") }
+    var recordingCodexShortcut: String { choose("请按下快捷键…", "Press a shortcut…") }
+    var escapeCancelsRecording: String { choose("按 Esc 取消录制", "Press Esc to cancel recording") }
     var accessibilityPermissionRequired: String { choose("辅助功能权限未授权", "Accessibility Permission Required") }
     var accessibilityPermissionGranted: String { choose("辅助功能权限已授权", "Accessibility Permission Granted") }
     var accessibilityPermissionRunning: String { choose("辅助功能已授权（运行中）", "Accessibility Authorized (Running)") }

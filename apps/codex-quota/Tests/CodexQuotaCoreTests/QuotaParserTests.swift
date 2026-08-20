@@ -72,6 +72,9 @@ enum QuotaParserTests {
             ("non-pure command tap cancels the sequence", testDoubleCommandCancel),
             ("double command tap triggers once", testDoubleCommandTrigger),
             ("double command tap cooldown suppresses repeats", testDoubleCommandCooldown),
+            ("keyboard shortcut formats modifiers in stable order", testKeyboardShortcutDisplay),
+            ("keyboard shortcut names special keys", testKeyboardShortcutSpecialKeys),
+            ("keyboard shortcut requires a modifier", testKeyboardShortcutValidation),
             ("battery style defaults to native", testDefaultBatteryStyle),
             ("battery styles have stable order and raw values", testBatteryStyleCases),
             ("battery styles have exact menu titles", testBatteryStyleMenuTitles),
@@ -952,6 +955,44 @@ enum QuotaParserTests {
         return !sequence.registerPureCommandTap(at: 10.3)
             && !sequence.registerPureCommandTap(at: 10.4)
             && !sequence.registerPureCommandTap(at: 10.6)
+    }
+
+    private static func testKeyboardShortcutDisplay() -> Bool {
+        expect(
+            KeyboardShortcut.displayString(
+                keyCode: 8,
+                flags: KeyboardShortcut.commandFlag | KeyboardShortcut.controlFlag
+            ),
+            equals: "⌃⌘C"
+        ) && expect(
+            KeyboardShortcut.displayString(keyCode: 49, flags: KeyboardShortcut.optionFlag),
+            equals: "⌥Space"
+        ) && expect(
+            KeyboardShortcut.displayString(
+                keyCode: 8,
+                flags: KeyboardShortcut.commandFlag | KeyboardShortcut.shiftFlag
+                    | KeyboardShortcut.optionFlag | KeyboardShortcut.controlFlag
+            ),
+            equals: "⌃⌥⇧⌘C"
+        )
+    }
+
+    private static func testKeyboardShortcutSpecialKeys() -> Bool {
+        expect(
+            KeyboardShortcut.displayString(keyCode: 36, flags: KeyboardShortcut.shiftFlag),
+            equals: "⇧Return"
+        ) && expect(
+            KeyboardShortcut.displayString(keyCode: 123, flags: KeyboardShortcut.commandFlag),
+            equals: "⌘←"
+        ) && expect(
+            KeyboardShortcut.displayString(keyCode: 122, flags: KeyboardShortcut.controlFlag),
+            equals: "⌃F1"
+        )
+    }
+
+    private static func testKeyboardShortcutValidation() -> Bool {
+        !KeyboardShortcut.isValid(keyCode: 8, flags: 0)
+            && KeyboardShortcut.isValid(keyCode: 8, flags: KeyboardShortcut.commandFlag)
     }
 
     private static func testDefaultBatteryStyle() -> Bool {

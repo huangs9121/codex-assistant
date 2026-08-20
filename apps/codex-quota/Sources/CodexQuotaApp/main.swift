@@ -158,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let launchAtLoginController = LaunchAtLoginController()
     private let mouseScrollReversalController = MouseScrollReversalController()
     private let doubleCommandTapController = DoubleCommandTapController()
+    private lazy var doubleCommandTapShortcutPanelController = DoubleCommandTapShortcutPanelController(text: text)
     private let rateLimitController = CodexRateLimitController()
     private let taskStatusController = TaskStatusController()
     private lazy var panelController = StatusPanelController(
@@ -330,6 +331,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         self.doubleCommandTapItem = doubleCommandTapItem
         settingsMenu.addItem(doubleCommandTapItem)
+
+        let setDoubleCommandTapShortcutItem = NSMenuItem(
+            title: text.setCodexShortcut,
+            action: #selector(showDoubleCommandTapShortcutPanel),
+            keyEquivalent: ""
+        )
+        setDoubleCommandTapShortcutItem.target = self
+        settingsMenu.addItem(setDoubleCommandTapShortcutItem)
 
         let mouseScrollDetailItem = NSMenuItem(
             title: text.mouseScrollReversalDetail,
@@ -652,6 +661,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             doubleCommandTapController.stop()
         }
         syncMenuState()
+    }
+
+    @objc private func showDoubleCommandTapShortcutPanel() {
+        doubleCommandTapShortcutPanelController.show()
     }
 
     @objc private func openAccessibilitySettings() {

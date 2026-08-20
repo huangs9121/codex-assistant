@@ -4,8 +4,6 @@ import CodexQuotaCore
 
 final class DoubleCommandTapController {
     static let isEnabledDefaultsKey = "doubleCommandTapEnabled"
-    private static let targetKeyCode: CGKeyCode = 8 // C
-    private static let targetFlags: CGEventFlags = [.maskControl, .maskCommand]
 
     private let defaults: UserDefaults
     private var eventTap: CFMachPort?
@@ -116,12 +114,13 @@ final class DoubleCommandTapController {
 
     private func triggerCodexShortcut() {
         isSynthesizing = true
+        let shortcut = DoubleCommandTapShortcut(defaults: defaults)
         let source = CGEventSource(stateID: .hidSystemState)
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: Self.targetKeyCode, keyDown: true)
-        keyDown?.flags = Self.targetFlags
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: shortcut.keyCode, keyDown: true)
+        keyDown?.flags = shortcut.flags
         keyDown?.post(tap: .cghidEventTap)
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: Self.targetKeyCode, keyDown: false)
-        keyUp?.flags = Self.targetFlags
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: shortcut.keyCode, keyDown: false)
+        keyUp?.flags = shortcut.flags
         keyUp?.post(tap: .cghidEventTap)
         isSynthesizing = false
     }
