@@ -24,14 +24,19 @@ struct AppText {
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
     var mouseScrollReversalDetail: String { choose("仅影响外接鼠标，触控板保持不变；需要辅助功能权限。", "Only affects external mice; trackpad scrolling stays unchanged. Accessibility permission is required.") }
     var mouseScrollReversalConflictHint: String { choose("使用前请退出 MOS、Scroll Reverser 等同类软件，避免双重反转。", "Quit MOS, Scroll Reverser, or similar apps first to avoid double reversal.") }
-    var doubleCommandTap: String { choose("双击 ⌘ 呼出 Codex", "Double-tap ⌘ to Open Codex") }
+    var doubleCommandTap: String { choose("修饰键手势呼出 Codex", "Modifier Gesture Opens Codex") }
     var testCodexShortcut: String { choose("测试触发 Codex 快捷键", "Test Codex Shortcut") }
-    var doubleCommandTapDetail: String { choose("纯双击 ⌘ 会发送已设置的快捷键；⌘+C 等组合键不受影响。", "A pure double-tap ⌘ sends the configured shortcut; combinations such as ⌘+C are unaffected.") }
+    var doubleCommandTapDetail: String { choose("纯修饰键手势会发送已设置的快捷键；⌘+C 等组合键不受影响。", "A pure modifier gesture sends the configured shortcut; combinations such as ⌘+C are unaffected.") }
     var doubleCommandTapRunning: String { choose("运行中", "Running") }
     var inputMonitoringPermissionRequired: String { choose("输入监听权限未授权", "Input Monitoring Permission Required") }
     var doubleCommandTapPermissionsRequired: String { choose("输入监听和辅助功能权限未授权", "Input Monitoring and Accessibility Permissions Required") }
     var openInputMonitoringSettings: String { choose("打开“输入监听”设置", "Open Input Monitoring Settings") }
     var setCodexShortcut: String { choose("设置呼出快捷键…", "Set Open Shortcut…") }
+    var recordTriggerGesture: String { choose("录制触发手势…", "Record Trigger Gesture…") }
+    var currentTriggerGesture: String { choose("当前触发手势", "Current Trigger Gesture") }
+    var triggerGestureRecordingHint: String { choose("按下你想用的修饰键（单击或双击）", "Press the modifier key you want to use once or twice.") }
+    var recordingTriggerGesture: String { choose("请按下修饰键…", "Press a modifier key…") }
+    var triggerGestureRecordingCancelled: String { choose("已取消，保留原手势", "Cancelled; kept the previous gesture") }
     var codexShortcutMatchHint: String { choose("此快捷键必须与 Codex 设置中的「弹出窗口快捷键」保持一致", "Must match Codex → Settings → 'Pop-out window shortcut'") }
     var currentCodexShortcut: String { choose("当前快捷键", "Current shortcut") }
     var recordCodexShortcut: String { choose("录制快捷键", "Record shortcut") }
@@ -203,6 +208,28 @@ struct AppText {
         choose("，\(value)", ", \(value)")
     }
 
+    func triggerGesture(_ gesture: String) -> String {
+        choose("触发手势：\(gesture)", "Trigger Gesture: \(gesture)")
+    }
+
+    func triggerGestureSaved(_ gesture: String) -> String {
+        choose("已设置为：\(gesture)", "Set to: \(gesture)")
+    }
+
+    func modifierTapGestureDisplay(keyCodes: Set<UInt16>, tapCount: Int) -> String {
+        let keyName: String
+        if keyCodes == Set([UInt16(54), 55]) {
+            keyName = choose("任意 ⌘", "Any ⌘")
+        } else {
+            let names = keyCodes.sorted().map(modifierGestureKeyName)
+            keyName = names.joined(separator: choose("、", " + "))
+        }
+        let tapName = tapCount == 1
+            ? choose("单击", "Single Tap")
+            : choose("双击", "Double Tap")
+        return "\(keyName) \(tapName)"
+    }
+
     func taskExitCode(_ value: Int) -> String {
         choose("退出码 \(value)", "exit \(value)")
     }
@@ -264,6 +291,25 @@ struct AppText {
                 "重置预告升级：重置已发起，额度即将恢复",
                 "Reset forecast upgraded: reset started; quota should return soon"
             )
+        }
+    }
+
+    private func modifierGestureKeyName(_ keyCode: UInt16) -> String {
+        switch keyCode {
+        case 54:
+            choose("右 ⌘", "Right ⌘")
+        case 55:
+            choose("左 ⌘", "Left ⌘")
+        case 56:
+            choose("左 ⇧", "Left ⇧")
+        case 58:
+            choose("左 ⌥", "Left ⌥")
+        case 60:
+            choose("右 ⇧", "Right ⇧")
+        case 61:
+            choose("右 ⌥", "Right ⌥")
+        default:
+            choose("修饰键", "Modifier Key")
         }
     }
 }

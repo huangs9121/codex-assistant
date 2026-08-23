@@ -139,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var launchAtLoginItem: NSMenuItem?
     private var mouseScrollReversalItem: NSMenuItem?
     private var doubleCommandTapItem: NSMenuItem?
+    private var modifierTapGestureItem: NSMenuItem?
     private var mouseScrollPermissionItem: NSMenuItem?
     private var doubleCommandTapPermissionStatusItem: NSMenuItem?
     private var inputMonitoringSettingsItem: NSMenuItem?
@@ -162,6 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let mouseScrollReversalController = MouseScrollReversalController()
     private let doubleCommandTapController = DoubleCommandTapController()
     private lazy var doubleCommandTapShortcutPanelController = DoubleCommandTapShortcutPanelController(text: text)
+    private lazy var modifierTapGesturePanelController = ModifierTapGesturePanelController(text: text) { [weak self] in
+        self?.doubleCommandTapController.reloadGesture()
+        self?.syncMenuState()
+    }
     private let rateLimitController = CodexRateLimitController()
     private let taskStatusController = TaskStatusController()
     private lazy var panelController = StatusPanelController(
@@ -350,6 +355,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         setDoubleCommandTapShortcutItem.target = self
         settingsMenu.addItem(setDoubleCommandTapShortcutItem)
+
+        let recordModifierTapGestureItem = NSMenuItem(
+            title: text.recordTriggerGesture,
+            action: #selector(showModifierTapGesturePanel),
+            keyEquivalent: ""
+        )
+        recordModifierTapGestureItem.target = self
+        settingsMenu.addItem(recordModifierTapGestureItem)
+
+        let modifierTapGestureItem = NSMenuItem(
+            title: text.triggerGesture(
+                ModifierTapGesture(defaults: .standard).displayString(text: text)
+            ),
+            action: nil,
+            keyEquivalent: ""
+        )
+        modifierTapGestureItem.isEnabled = false
+        self.modifierTapGestureItem = modifierTapGestureItem
+        settingsMenu.addItem(modifierTapGestureItem)
 
         let mouseScrollDetailItem = NSMenuItem(
             title: text.mouseScrollReversalDetail,
@@ -589,6 +613,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         let doubleCommandTapEnabled = doubleCommandTapController.isEnabled
         doubleCommandTapItem?.state = doubleCommandTapEnabled ? .on : .off
         (doubleCommandTapItem?.view as? MenuChoiceRow)?.isSelected = doubleCommandTapEnabled
+        modifierTapGestureItem?.title = text.triggerGesture(
+            ModifierTapGesture(defaults: .standard).displayString(text: text)
+        )
         mouseScrollPermissionItem?.title = accessibilityPermissionTitle()
         syncDoubleCommandTapPermissionItems()
 
@@ -705,6 +732,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     @objc private func showDoubleCommandTapShortcutPanel() {
         doubleCommandTapShortcutPanelController.show()
+    }
+
+    @objc private func showModifierTapGesturePanel() {
+        modifierTapGesturePanelController.show()
     }
 
     @objc private func testCodexShortcut() {

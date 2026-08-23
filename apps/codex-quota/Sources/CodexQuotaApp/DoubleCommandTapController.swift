@@ -9,12 +9,11 @@ final class DoubleCommandTapController {
     private let defaults: UserDefaults
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var sequence = DoubleCommandTapSequence()
-    private var commandIsDown = false
+    private var sequence: ModifierTapSequence
+    private var pressedModifierKeyCodes = Set<CGKeyCode>()
     private var isSynthesizing = false
     private var lastLoggedPermissionStatus: DoubleCommandTapPermissionStatus?
-    private var diagnosticFirstTapAt: TimeInterval?
-    private var diagnosticCooldownEndsAt: TimeInterval?
+    private var lastLoggedTapCreationFailure: String?
 
     private static let logURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/CodexQuota-doublecmd.log")
@@ -22,11 +21,20 @@ final class DoubleCommandTapController {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        sequence = ModifierTapSequence(
+            configuration: ModifierTapGesture(defaults: defaults).sequenceConfiguration
+        )
     }
 
     var isEnabled: Bool {
         get { defaults.bool(forKey: Self.isEnabledDefaultsKey) }
-        set { defaults.set(newValue, forKey: Self.isEnabledDefaultsKey) }
+        set {
+            defaults.set(newValue, forKey: Self.isEnabledDefaultsKey)
+            if !newValue {
+                lastLoggedPermissionStatus = nil
+                lastLoggedTapCreationFailure = nil
+            }
+        }
     }
 
     var isAccessibilityTrusted: Bool {
@@ -53,10 +61,11 @@ final class DoubleCommandTapController {
 
     @discardableResult
     func startIfPermitted() -> Bool {
+        reloadGestureIfNeeded()
         let status = permissionStatus
         logPermissionStatusIfChanged(status)
         guard status == .running else {
-            log("tap creation failed (inputMonitoring=\(isInputMonitoringTrusted), accessibility=\(isAccessibilityTrusted))")
+            logTapCreationFailureIfChanged(status)
             stop()
             return false
         }
@@ -76,36 +85,41 @@ final class DoubleCommandTapController {
             callback: Self.handleEvent,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            log("tap creation failed (inputMonitoring=\(isInputMonitoringTrusted), accessibility=\(isAccessibilityTrusted))")
+            logTapCreationFailureIfChanged(status)
             return false
         }
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         self.eventTap = eventTap
         runLoopSource = source
+        lastLoggedTapCreationFailure = nil
         log("tap created successfully")
         return true
     }
 
     func stop() {
-        log("tap stopped")
-        guard let eventTap else {
-            return
+        let hadEventTap = eventTap != nil
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
         }
-        CGEvent.tapEnable(tap: eventTap, enable: false)
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
-        self.eventTap = nil
+        eventTap = nil
         runLoopSource = nil
         sequence.cancel()
-        diagnosticFirstTapAt = nil
-        commandIsDown = false
+        pressedModifierKeyCodes.removeAll()
+        if hadEventTap {
+            log("tap stopped")
+        }
+    }
+
+    func reloadGesture() {
+        reloadGestureIfNeeded()
     }
 
     func observePermissionStatus() {
         guard isEnabled else {
-            lastLoggedPermissionStatus = nil
             return
         }
         logPermissionStatusIfChanged(permissionStatus)
@@ -170,38 +184,77 @@ final class DoubleCommandTapController {
             }
             return
         }
+
+        let time = ProcessInfo.processInfo.systemUptime
         if type == .keyDown {
-            log("keyDown cancelled sequence (keyCode=\(event.getIntegerValueField(.keyboardEventKeycode)))")
-            sequence.cancel()
-            diagnosticFirstTapAt = nil
+            if sequence.isTracking {
+                log("keyDown cancelled modifier gesture (keyCode=\(event.getIntegerValueField(.keyboardEventKeycode)))")
+            }
+            _ = sequence.register(.keyDown, at: time)
             return
         }
         guard type == .flagsChanged else {
             return
         }
 
-        let flags = event.flags
-        let commandIsNowDown = flags.contains(.maskCommand)
-        let otherModifiers: CGEventFlags = [
-            .maskShift, .maskControl, .maskAlternate, .maskSecondaryFn, .maskAlphaShift
-        ]
-        if commandIsNowDown || commandIsDown {
-            log("flagsChanged command=\(commandIsNowDown ? "down" : "up") otherModifiers=\(!flags.intersection(otherModifiers).isEmpty)")
+        reloadGestureIfNeeded()
+        registerModifierChange(event, at: time)
+    }
+
+    private func registerModifierChange(_ event: CGEvent, at time: TimeInterval) {
+        let rawKeyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        guard let keyCode = UInt16(exactly: rawKeyCode),
+              let modifierFlag = ModifierTapGesture.modifierFlag(for: keyCode) else {
+            _ = sequence.register(.otherModifier, at: time)
+            return
         }
-        if commandIsNowDown, !flags.intersection(otherModifiers).isEmpty {
-            sequence.cancel()
-            diagnosticFirstTapAt = nil
+
+        let isDown: Bool
+        if pressedModifierKeyCodes.contains(keyCode) {
+            pressedModifierKeyCodes.remove(keyCode)
+            isDown = false
+        } else if event.flags.contains(modifierFlag) {
+            pressedModifierKeyCodes.insert(keyCode)
+            isDown = true
+        } else {
+            _ = sequence.register(.otherModifier, at: time)
+            return
         }
-        if commandIsNowDown, !commandIsDown, flags.intersection(otherModifiers).isEmpty {
-            let time = ProcessInfo.processInfo.systemUptime
-            let resultDescription = diagnosticTapResultDescription(at: time)
-            let result = sequence.registerPureCommandTap(at: time)
-            log("pure command tap result=\(resultDescription) triggered=\(result)")
-            if result {
-                triggerCodexShortcut()
-            }
+
+        let gestureEvent: ModifierTapSequence.Event
+        if hasOtherModifier(flags: event.flags, currentKeyCode: keyCode) {
+            gestureEvent = .otherModifier
+        } else if sequence.configuration.keyCodes.contains(keyCode) {
+            gestureEvent = isDown ? .modifierDown(keyCode) : .modifierUp(keyCode)
+        } else {
+            gestureEvent = .otherModifier
         }
-        commandIsDown = commandIsNowDown
+
+        if sequence.register(gestureEvent, at: time) {
+            log("modifier gesture triggered")
+            triggerCodexShortcut()
+        }
+    }
+
+    private func hasOtherModifier(flags: CGEventFlags, currentKeyCode: CGKeyCode) -> Bool {
+        if pressedModifierKeyCodes.contains(where: { $0 != currentKeyCode }) {
+            return true
+        }
+        guard let currentModifierFlag = ModifierTapGesture.modifierFlag(for: currentKeyCode) else {
+            return true
+        }
+        var otherModifierFlags = ModifierTapGesture.allModifierFlags()
+        otherModifierFlags.remove(currentModifierFlag)
+        return !flags.intersection(otherModifierFlags).isEmpty
+    }
+
+    private func reloadGestureIfNeeded() {
+        let configuration = ModifierTapGesture(defaults: defaults).sequenceConfiguration
+        guard sequence.configuration != configuration else {
+            return
+        }
+        sequence = ModifierTapSequence(configuration: configuration)
+        pressedModifierKeyCodes.removeAll()
     }
 
     private func triggerCodexShortcut() {
@@ -231,25 +284,14 @@ final class DoubleCommandTapController {
     private func logPermissionStatusIfChanged(_ status: DoubleCommandTapPermissionStatus) {
         guard lastLoggedPermissionStatus != status else { return }
         lastLoggedPermissionStatus = status
-        log("permissions changed inputMonitoring=\(isInputMonitoringTrusted) accessibility=\(isAccessibilityTrusted)")
+        log("permissions changed status=\(status)")
     }
 
-    private func diagnosticTapResultDescription(at time: TimeInterval) -> String {
-        if let diagnosticCooldownEndsAt, time < diagnosticCooldownEndsAt {
-            diagnosticFirstTapAt = nil
-            return "cooling down"
-        }
-        guard let diagnosticFirstTapAt else {
-            self.diagnosticFirstTapAt = time
-            return "first tap"
-        }
-        if time - diagnosticFirstTapAt <= DoubleCommandTapSequence.maximumInterval {
-            self.diagnosticFirstTapAt = nil
-            diagnosticCooldownEndsAt = time + DoubleCommandTapSequence.cooldownDuration
-            return "triggered"
-        }
-        self.diagnosticFirstTapAt = time
-        return "interval timeout reset"
+    private func logTapCreationFailureIfChanged(_ status: DoubleCommandTapPermissionStatus) {
+        let message = "tap creation failed (status=\(status))"
+        guard lastLoggedTapCreationFailure != message else { return }
+        lastLoggedTapCreationFailure = message
+        log(message)
     }
 
     private func log(_ message: String) {

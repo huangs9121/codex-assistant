@@ -72,6 +72,11 @@ enum QuotaParserTests {
             ("non-pure command tap cancels the sequence", testDoubleCommandCancel),
             ("double command tap triggers once", testDoubleCommandTrigger),
             ("double command tap cooldown suppresses repeats", testDoubleCommandCooldown),
+            ("right option single tap triggers on release", testRightOptionSingleTap),
+            ("left option does not trigger a right option gesture", testLeftOptionDoesNotTrigger),
+            ("held modifier cancels a single tap", testModifierHoldTimeout),
+            ("modifier combination cancels a single tap", testModifierCombinationCancels),
+            ("default double command accepts either command key", testDefaultDoubleCommandCompatibility),
             ("double command tap permission status identifies missing permissions", testDoubleCommandTapPermissionStatus),
             ("keyboard shortcut formats modifiers in stable order", testKeyboardShortcutDisplay),
             ("keyboard shortcut names special keys", testKeyboardShortcutSpecialKeys),
@@ -924,38 +929,84 @@ enum QuotaParserTests {
     }
 
     private static func testDoubleCommandFirstTap() -> Bool {
-        var sequence = DoubleCommandTapSequence()
-        return !sequence.registerPureCommandTap(at: 10)
+        var sequence = ModifierTapSequence()
+        return !sequence.register(.modifierDown(55), at: 10)
     }
 
     private static func testDoubleCommandTimeout() -> Bool {
-        var sequence = DoubleCommandTapSequence()
-        return !sequence.registerPureCommandTap(at: 10)
-            && !sequence.registerPureCommandTap(at: 10.31)
+        var sequence = ModifierTapSequence()
+        return !sequence.register(.modifierDown(55), at: 10)
+            && !sequence.register(.modifierUp(55), at: 10.05)
+            && !sequence.register(.modifierDown(55), at: 10.31)
     }
 
     private static func testDoubleCommandCancel() -> Bool {
-        var sequence = DoubleCommandTapSequence()
-        _ = sequence.registerPureCommandTap(at: 10)
-        sequence.cancel()
-        return !sequence.registerPureCommandTap(at: 10.1)
+        var sequence = ModifierTapSequence()
+        _ = sequence.register(.modifierDown(55), at: 10)
+        _ = sequence.register(.keyDown, at: 10.02)
+        _ = sequence.register(.modifierUp(55), at: 10.03)
+        return !sequence.register(.modifierDown(55), at: 10.1)
     }
 
     private static func testDoubleCommandTrigger() -> Bool {
-        var sequence = DoubleCommandTapSequence()
-        return !sequence.registerPureCommandTap(at: 10)
-            && sequence.registerPureCommandTap(at: 10.25)
+        var sequence = ModifierTapSequence()
+        return !sequence.register(.modifierDown(55), at: 10)
+            && !sequence.register(.modifierUp(55), at: 10.04)
+            && sequence.register(.modifierDown(55), at: 10.25)
     }
 
     private static func testDoubleCommandCooldown() -> Bool {
-        var sequence = DoubleCommandTapSequence()
-        guard !sequence.registerPureCommandTap(at: 10),
-              sequence.registerPureCommandTap(at: 10.2) else {
+        var sequence = ModifierTapSequence()
+        guard !sequence.register(.modifierDown(55), at: 10),
+              !sequence.register(.modifierUp(55), at: 10.04),
+              sequence.register(.modifierDown(55), at: 10.2) else {
             return false
         }
-        return !sequence.registerPureCommandTap(at: 10.3)
-            && !sequence.registerPureCommandTap(at: 10.4)
-            && !sequence.registerPureCommandTap(at: 10.6)
+        return !sequence.register(.modifierUp(55), at: 10.24)
+            && !sequence.register(.modifierDown(55), at: 10.3)
+            && !sequence.register(.modifierDown(55), at: 10.6)
+    }
+
+    private static func testRightOptionSingleTap() -> Bool {
+        var sequence = ModifierTapSequence(
+            configuration: .init(keyCodes: [61], requiredTapCount: 1)
+        )
+        return !sequence.register(.modifierDown(61), at: 10)
+            && sequence.register(.modifierUp(61), at: 10.12)
+    }
+
+    private static func testLeftOptionDoesNotTrigger() -> Bool {
+        var sequence = ModifierTapSequence(
+            configuration: .init(keyCodes: [61], requiredTapCount: 1)
+        )
+        return !sequence.register(.modifierDown(58), at: 10)
+            && !sequence.register(.modifierUp(58), at: 10.1)
+    }
+
+    private static func testModifierHoldTimeout() -> Bool {
+        var sequence = ModifierTapSequence(
+            configuration: .init(keyCodes: [61], requiredTapCount: 1)
+        )
+        return !sequence.register(.modifierDown(61), at: 10)
+            && !sequence.register(.modifierUp(61), at: 10.4)
+            && !sequence.register(.modifierDown(61), at: 11)
+            && sequence.register(.modifierUp(61), at: 11.1)
+    }
+
+    private static func testModifierCombinationCancels() -> Bool {
+        var sequence = ModifierTapSequence(
+            configuration: .init(keyCodes: [61], requiredTapCount: 1)
+        )
+        return !sequence.register(.modifierDown(61), at: 10)
+            && !sequence.register(.otherModifier, at: 10.02)
+            && !sequence.register(.modifierUp(61), at: 10.1)
+    }
+
+    private static func testDefaultDoubleCommandCompatibility() -> Bool {
+        var sequence = ModifierTapSequence()
+        return !sequence.register(.modifierDown(55), at: 10)
+            && !sequence.register(.modifierUp(55), at: 10.04)
+            && sequence.register(.modifierDown(54), at: 10.2)
     }
 
     private static func testDoubleCommandTapPermissionStatus() -> Bool {
