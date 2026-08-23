@@ -25,6 +25,7 @@ struct AppText {
     var mouseScrollReversalDetail: String { choose("仅影响外接鼠标，触控板保持不变；需要辅助功能权限。", "Only affects external mice; trackpad scrolling stays unchanged. Accessibility permission is required.") }
     var mouseScrollReversalConflictHint: String { choose("使用前请退出 MOS、Scroll Reverser 等同类软件，避免双重反转。", "Quit MOS, Scroll Reverser, or similar apps first to avoid double reversal.") }
     var doubleCommandTap: String { choose("双击 ⌘ 呼出 Codex", "Double-tap ⌘ to Open Codex") }
+    var testCodexShortcut: String { choose("测试触发 Codex 快捷键", "Test Codex Shortcut") }
     var doubleCommandTapDetail: String { choose("纯双击 ⌘ 会发送已设置的快捷键；⌘+C 等组合键不受影响。", "A pure double-tap ⌘ sends the configured shortcut; combinations such as ⌘+C are unaffected.") }
     var doubleCommandTapRunning: String { choose("运行中", "Running") }
     var inputMonitoringPermissionRequired: String { choose("输入监听权限未授权", "Input Monitoring Permission Required") }

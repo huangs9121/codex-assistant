@@ -335,6 +335,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         self.doubleCommandTapItem = doubleCommandTapItem
         settingsMenu.addItem(doubleCommandTapItem)
 
+        let testCodexShortcutItem = NSMenuItem(
+            title: text.testCodexShortcut,
+            action: #selector(testCodexShortcut),
+            keyEquivalent: ""
+        )
+        testCodexShortcutItem.target = self
+        settingsMenu.addItem(testCodexShortcutItem)
+
         let setDoubleCommandTapShortcutItem = NSMenuItem(
             title: text.setCodexShortcut,
             action: #selector(showDoubleCommandTapShortcutPanel),
@@ -699,6 +707,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         doubleCommandTapShortcutPanelController.show()
     }
 
+    @objc private func testCodexShortcut() {
+        doubleCommandTapController.testTriggerCodexShortcut()
+    }
+
     @objc private func openAccessibilitySettings() {
         mouseScrollReversalController.openAccessibilitySettings()
     }
@@ -749,6 +761,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func refreshAccessibilityControllers() {
+        doubleCommandTapController.observePermissionStatus()
         if mouseScrollReversalController.isEnabled,
            !mouseScrollReversalController.isRunning {
             _ = mouseScrollReversalController.startIfPermitted()
