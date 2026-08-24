@@ -12,6 +12,7 @@ enum TaskResumeActionResult: Equatable {
 final class StatusPanelModel: ObservableObject {
     @Published private(set) var snapshot: QuotaSnapshot?
     @Published private(set) var tasks: [TaskStatusSnapshot] = []
+    @Published private(set) var hasCompletedTasks = false
     @Published private(set) var currentResetSignal: TiboResetSignal?
     @Published private(set) var now = Date()
 
@@ -22,8 +23,9 @@ final class StatusPanelModel: ObservableObject {
         notifyContentChange()
     }
 
-    func update(tasks: [TaskStatusSnapshot]) {
+    func update(tasks: [TaskStatusSnapshot], hasCompletedTasks: Bool) {
         self.tasks = tasks
+        self.hasCompletedTasks = hasCompletedTasks
         notifyContentChange()
     }
 
@@ -59,7 +61,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         text: AppText,
         onSettingsMenu: @escaping (NSView) -> Void,
         onOpenResetAnnouncement: @escaping () -> Void,
-        onResumeSession: @escaping (String, Bool) -> TaskResumeActionResult
+        onResumeSession: @escaping (String, Bool) -> TaskResumeActionResult,
+        onClearCompletedTasks: @escaping () -> Void
     ) {
         self.model = model
         hostingController = NSHostingController(
@@ -68,7 +71,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 text: text,
                 onSettingsMenu: onSettingsMenu,
                 onOpenResetAnnouncement: onOpenResetAnnouncement,
-                onResumeSession: onResumeSession
+                onResumeSession: onResumeSession,
+                onClearCompletedTasks: onClearCompletedTasks
             )
         )
         super.init()

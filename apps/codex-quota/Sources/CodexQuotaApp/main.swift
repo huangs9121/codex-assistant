@@ -29,6 +29,7 @@ private extension DisplayPreferences {
 private final class MenuChoiceRow: NSView {
     private let checkmarkLabel = NSTextField(labelWithString: "✓")
     private let titleLabel = NSTextField(labelWithString: "")
+    private let preview = NSImageView()
     private let actionButton = NSButton()
     private let selectedAccessibilityValue: String
     private let notSelectedAccessibilityValue: String
@@ -63,8 +64,8 @@ private final class MenuChoiceRow: NSView {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .menuFont(ofSize: 13)
 
-        let preview = NSImageView(image: previewImage ?? NSImage())
         preview.translatesAutoresizingMaskIntoConstraints = false
+        preview.image = previewImage
         preview.imageScaling = .scaleNone
         preview.setAccessibilityElement(false)
 
@@ -105,6 +106,14 @@ private final class MenuChoiceRow: NSView {
         actionButton.setAccessibilityLabel(title)
     }
 
+    func setWarning(_ showsWarning: Bool) {
+        preview.image = showsWarning ? NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: nil
+        ) : nil
+        preview.contentTintColor = showsWarning ? .systemOrange : nil
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -139,7 +148,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var launchAtLoginItem: NSMenuItem?
     private var mouseScrollReversalItem: NSMenuItem?
     private var doubleCommandTapItem: NSMenuItem?
-    private var mouseScrollPermissionItem: NSMenuItem?
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
     private var refreshTimer: Timer?
@@ -188,6 +196,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                 sessionUUID: sessionUUID,
                 copyOnly: copyOnly
             ) ?? .copiedAfterLaunchFailure
+        },
+        onClearCompletedTasks: { [weak self] in
+            self?.archiveCompletedTasks()
         }
     )
 
@@ -336,31 +347,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         mouseScrollReversalItem = mouseScrollItem
         settingsMenu.addItem(mouseScrollItem)
-
-        let mouseScrollDetailItem = NSMenuItem(
-            title: text.mouseScrollReversalDetail,
-            action: nil,
-            keyEquivalent: ""
-        )
-        mouseScrollDetailItem.isEnabled = false
-        settingsMenu.addItem(mouseScrollDetailItem)
-
-        let mouseScrollConflictItem = NSMenuItem(
-            title: text.mouseScrollReversalConflictHint,
-            action: nil,
-            keyEquivalent: ""
-        )
-        mouseScrollConflictItem.isEnabled = false
-        settingsMenu.addItem(mouseScrollConflictItem)
-
-        let mouseScrollPermissionItem = NSMenuItem(
-            title: text.openAccessibilitySettings,
-            action: #selector(openAccessibilitySettings),
-            keyEquivalent: ""
-        )
-        mouseScrollPermissionItem.target = self
-        self.mouseScrollPermissionItem = mouseScrollPermissionItem
-        settingsMenu.addItem(mouseScrollPermissionItem)
 
         let doubleCommandTapItem = makeChoiceItem(
             title: text.enableModifierTapOpenCodex,
@@ -553,10 +539,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         let mouseScrollEnabled = mouseScrollReversalController.isEnabled
         mouseScrollReversalItem?.state = mouseScrollEnabled ? .on : .off
         (mouseScrollReversalItem?.view as? MenuChoiceRow)?.isSelected = mouseScrollEnabled
+        (mouseScrollReversalItem?.view as? MenuChoiceRow)?.setWarning(
+            !AXIsProcessTrusted()
+        )
         let doubleCommandTapEnabled = doubleCommandTapController.isEnabled
         doubleCommandTapItem?.state = doubleCommandTapEnabled ? .on : .off
         (doubleCommandTapItem?.view as? MenuChoiceRow)?.isSelected = doubleCommandTapEnabled
-        mouseScrollPermissionItem?.title = accessibilityPermissionTitle()
+        (doubleCommandTapItem?.view as? MenuChoiceRow)?.setWarning(
+            !doubleCommandTapController.isInputMonitoringTrusted
+                || !doubleCommandTapController.isAccessibilityTrusted
+        )
 
         if isUpdateInstallInFlight {
             updateMenuItem?.title = text.downloadingUpdate
@@ -677,10 +669,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         codexInvocationSettingsPanelController.show()
     }
 
-    @objc private func openAccessibilitySettings() {
-        mouseScrollReversalController.openAccessibilitySettings()
-    }
-
     private func setLaunchAtLogin(_ enabled: Bool) {
         do {
             try launchAtLoginController.setEnabled(enabled)
@@ -727,19 +715,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
            !doubleCommandTapController.isRunning {
             _ = doubleCommandTapController.startIfPermitted()
         }
-    }
-
-    private func accessibilityPermissionTitle() -> String {
-        guard AXIsProcessTrusted() else {
-            return text.openAccessibilitySettings + "（" + text.accessibilityPermissionRequired + "）"
-        }
-        let hasEnabledController = mouseScrollReversalController.isEnabled
-        let hasFailedController = mouseScrollReversalController.isEnabled
-            && !mouseScrollReversalController.isRunning
-        if hasFailedController {
-            return text.accessibilityEnableFailed
-        }
-        return hasEnabledController ? text.accessibilityPermissionRunning : text.accessibilityPermissionGranted
     }
 
     @objc private func refreshFromTimer() {
@@ -975,10 +950,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             guard let self else {
                 return
             }
-            panelModel.update(tasks: result.tasks)
+            panelModel.update(
+                tasks: result.tasks,
+                hasCompletedTasks: result.hasCompletedTasks
+            )
             for task in result.completedTasks {
                 sendTaskCompletionNotification(for: task)
             }
+        }
+    }
+
+    private func archiveCompletedTasks() {
+        taskStatusController.archiveCompletedTasks { [weak self] result in
+            self?.panelModel.update(
+                tasks: result.tasks,
+                hasCompletedTasks: result.hasCompletedTasks
+            )
         }
     }
 

@@ -75,6 +75,10 @@ enum TaskStatusParserTests {
         TaskStatusParserTestCase(
             name: "task snapshots merge archives from multiple task directories",
             run: testMultiDirectorySnapshots
+        ),
+        TaskStatusParserTestCase(
+            name: "task archive moves only completed records and parser skips archived",
+            run: testArchiveCompletedRecords
         )
     ]
 
@@ -526,6 +530,84 @@ enum TaskStatusParserTests {
                 "old-root-two",
                 "old-root-one"
             ]
+        }
+    }
+
+    private static func testArchiveCompletedRecords() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let doneID = "20260818-110736"
+            let failedID = "20260818-110737"
+            let runningID = "20260818-110738"
+            guard [doneID, failedID, runningID].allSatisfy({ id in
+                write(
+                    id == doneID ? "EXIT_CODE=0\n" : "EXIT_CODE=1\n",
+                    to: tasks.appendingPathComponent("\(id)-events.jsonl")
+                ) && write(
+                    "/tmp/\(id).md\n",
+                    to: tasks.appendingPathComponent("\(id)-events.brief")
+                ) && write(
+                    "message",
+                    to: tasks.appendingPathComponent("\(id)-last-message.md")
+                ) && write(
+                    "exit code: \(id == doneID ? 0 : 1)\n",
+                    to: tasks.appendingPathComponent("\(id)-run.log")
+                )
+            }) else {
+                return false
+            }
+
+            let runningEvents = tasks.appendingPathComponent(
+                "\(runningID)-events.jsonl"
+            )
+            guard write("{\"type\":\"turn.started\"}\n", to: runningEvents),
+                  write(
+                    "",
+                    to: tasks.appendingPathComponent("\(runningID)-run.log")
+                  )
+            else {
+                return false
+            }
+            let parser = TaskStatusParser(
+                tasksDirectory: tasks,
+                workingDirectory: tasks.deletingLastPathComponent(),
+                codexSessionsDirectory: sessions,
+                timeZone: shanghai,
+                tmuxStatusProvider: { _ in true }
+            )
+            let snapshots = parser.snapshots()
+            guard snapshots.first(where: { $0.id == doneID })?.status == .done,
+                  snapshots.first(where: { $0.id == failedID })?.status == .failed,
+                  snapshots.first(where: { $0.id == runningID })?.status == .running
+            else {
+                return false
+            }
+
+            let archived = TaskArchive.archiveCompletedRecords(
+                in: tasks,
+                snapshots: snapshots
+            )
+            let archivedDirectory = tasks.appendingPathComponent(
+                "archived",
+                isDirectory: true
+            )
+            let doneFilesArchived = [
+                "-events.jsonl", "-events.brief", "-last-message.md", "-run.log"
+            ].allSatisfy {
+                FileManager.default.fileExists(
+                    atPath: archivedDirectory.appendingPathComponent(doneID + $0).path
+                )
+            }
+            let nonDoneFilesRemain = [failedID, runningID].allSatisfy { id in
+                FileManager.default.fileExists(
+                    atPath: tasks.appendingPathComponent(id + "-events.jsonl").path
+                )
+            }
+            let remainingIDs = parser.snapshots().map(\.id)
+            return archived == Set([doneID])
+                && doneFilesArchived
+                && nonDoneFilesRemain
+                && !remainingIDs.contains(doneID)
+                && Set(remainingIDs) == Set([failedID, runningID])
         }
     }
 

@@ -10,6 +10,7 @@ struct StatusPanelView: View {
     let onSettingsMenu: (NSView) -> Void
     let onOpenResetAnnouncement: () -> Void
     let onResumeSession: (String, Bool) -> TaskResumeActionResult
+    let onClearCompletedTasks: () -> Void
 
     private var quotaData: StatusPanelQuotaData {
         StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
@@ -142,6 +143,12 @@ struct StatusPanelView: View {
                 Text(text.scheduledTasks)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 8)
+                Button(text.clearCompletedTasks) {
+                    onClearCompletedTasks()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!model.hasCompletedTasks)
                 let runningCount = TaskStatusPresentationFormatter.runningCount(
                     in: model.tasks
                 )

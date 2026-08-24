@@ -22,8 +22,6 @@ struct AppText {
     var launchAtLoginApproval: String { choose("开机自动启动（需系统确认）", "Launch at Login (Approval Required)") }
     var launchAtLoginUnavailable: String { choose("开机自动启动（不可用）", "Launch at Login (Unavailable)") }
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
-    var mouseScrollReversalDetail: String { choose("仅影响外接鼠标，触控板保持不变；需要辅助功能权限。", "Only affects external mice; trackpad scrolling stays unchanged. Accessibility permission is required.") }
-    var mouseScrollReversalConflictHint: String { choose("使用前请退出 MOS、Scroll Reverser 等同类软件，避免双重反转。", "Quit MOS, Scroll Reverser, or similar apps first to avoid double reversal.") }
     var enableModifierTapOpenCodex: String { choose("启用修饰键呼出", "Enable Modifier Gesture") }
     var openCodexInvocationSettings: String { choose("呼出 Codex 设置…", "Open Codex Settings…") }
     var codexInvocationSettingsTitle: String { choose("呼出 Codex", "Open Codex") }
@@ -39,11 +37,6 @@ struct AppText {
     var recordingCodexShortcut: String { choose("请按下快捷键…", "Press a shortcut…") }
     var openSettings: String { choose("打开设置", "Open Settings") }
     var codexInvocationShortcutHint: String { choose("触发手势后，App 会模拟发送目标快捷键", "After the gesture, the app simulates the target shortcut") }
-    var accessibilityPermissionRequired: String { choose("辅助功能权限未授权", "Accessibility Permission Required") }
-    var accessibilityPermissionGranted: String { choose("辅助功能权限已授权", "Accessibility Permission Granted") }
-    var accessibilityPermissionRunning: String { choose("辅助功能已授权（运行中）", "Accessibility Authorized (Running)") }
-    var accessibilityEnableFailed: String { choose("辅助功能启用失败", "Accessibility Enable Failed") }
-    var openAccessibilitySettings: String { choose("打开“辅助功能”设置", "Open Accessibility Settings") }
     var moveHint: String { choose("按住 ⌘ 可自由拖动位置", "Hold ⌘ and drag to reposition") }
     var checkForUpdates: String { choose("检查更新…", "Check for Updates…") }
     var quit: String { choose("退出", "Quit") }
@@ -87,6 +80,7 @@ struct AppText {
         choose("新周期额度已经生效。", "Your new quota cycle is now active.")
     }
     var scheduledTasks: String { choose("调度任务", "Scheduled Tasks") }
+    var clearCompletedTasks: String { choose("清理", "Clear") }
     var quotaTitle: String { choose("Codex 配额", "Codex Quota") }
     var fiveHourWindow: String { choose("5 小时窗口", "5-hour window") }
     var weeklyWindow: String { choose("每周窗口", "Weekly window") }

@@ -5,6 +5,7 @@ import Foundation
 final class TaskStatusController {
     struct Result {
         let tasks: [TaskStatusSnapshot]
+        let hasCompletedTasks: Bool
         let completedTasks: [TaskStatusSnapshot]
     }
 
@@ -103,6 +104,46 @@ final class TaskStatusController {
                 completion(
                     Result(
                         tasks: Array(tasks.prefix(5)),
+                        hasCompletedTasks: tasks.contains { $0.status == .done },
+                        completedTasks: detection.completedTasks
+                    )
+                )
+            }
+        }
+    }
+
+    func archiveCompletedTasks(
+        completion: @escaping @MainActor (Result) -> Void
+    ) {
+        guard !invalidated, !isChecking else {
+            return
+        }
+        isChecking = true
+        let parsers = parsers
+        queue.async { [weak self] in
+            for parser in parsers {
+                TaskArchive.archiveCompletedRecords(
+                    in: parser.tasksDirectory,
+                    snapshots: parser.snapshots()
+                )
+            }
+            let tasks = TaskStatusSnapshotMerger.merge(
+                parsers.map { $0.snapshots() }
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !invalidated else {
+                    return
+                }
+                isChecking = false
+                let detection = TaskCompletionDetector.evaluate(
+                    tasks,
+                    state: store.notificationState
+                )
+                store.notificationState = detection.state
+                completion(
+                    Result(
+                        tasks: Array(tasks.prefix(5)),
+                        hasCompletedTasks: tasks.contains { $0.status == .done },
                         completedTasks: detection.completedTasks
                     )
                 )
