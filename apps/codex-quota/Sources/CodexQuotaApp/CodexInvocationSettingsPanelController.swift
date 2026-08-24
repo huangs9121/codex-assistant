@@ -71,7 +71,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        panel.title = text.codexInvocationSettingsTitle
+        panel.title = text.globalShortcutSettings
         panel.isReleasedWhenClosed = false
         panel.delegate = self
 

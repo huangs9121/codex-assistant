@@ -9,7 +9,9 @@ struct StatusPanelView: View {
     let text: AppText
     let onSettingsMenu: (NSView) -> Void
     let onOpenResetAnnouncement: () -> Void
+    let canResumeTaskSessions: Bool
     let onResumeSession: (String, Bool) -> TaskResumeActionResult
+    let onArchiveTask: (TaskStatusSnapshot) -> Void
     let onClearCompletedTasks: () -> Void
 
     private var quotaData: StatusPanelQuotaData {
@@ -175,7 +177,9 @@ struct StatusPanelView: View {
                         task: task,
                         now: model.now,
                         text: text,
-                        onResumeSession: onResumeSession
+                        canResumeTaskSessions: canResumeTaskSessions,
+                        onResumeSession: onResumeSession,
+                        onArchiveTask: onArchiveTask
                     )
                     if index < tasks.count - 1 {
                         Divider()
@@ -415,17 +419,40 @@ private struct TaskStatusRow: View {
     let task: TaskStatusSnapshot
     let now: Date
     let text: AppText
+    let canResumeTaskSessions: Bool
     let onResumeSession: (String, Bool) -> TaskResumeActionResult
+    let onArchiveTask: (TaskStatusSnapshot) -> Void
 
     @State private var isHovered = false
     @State private var isCopied = false
     @State private var showsResumeFallback = false
     @FocusState private var isRowFocused: Bool
-    @FocusState private var isCopyFocused: Bool
+    @FocusState private var isContinueFocused: Bool
+    @FocusState private var isDeleteFocused: Bool
 
-    private var showsCopyButton: Bool {
-        task.sessionUUID != nil
-            && (isHovered || isRowFocused || isCopyFocused || isCopied)
+    private var sessionUUID: String? {
+        guard let value = task.sessionUUID?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private var canContinue: Bool {
+        sessionUUID != nil && canResumeTaskSessions
+    }
+
+    private var canDelete: Bool {
+        task.status.isTerminal
+    }
+
+    private var showsActionButtons: Bool {
+        isHovered
+            || isRowFocused
+            || isContinueFocused
+            || isDeleteFocused
+            || isCopied
     }
 
     var body: some View {
@@ -446,36 +473,54 @@ private struct TaskStatusRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
 
-            if let sessionUUID = task.sessionUUID {
-                Button {
-                    let copyOnly = NSApp.currentEvent?
-                        .modifierFlags.contains(.option) == true
-                    let result = onResumeSession(sessionUUID, copyOnly)
-                    if result != .openedTerminal {
-                        isCopied = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                            isCopied = false
-                        }
-                    }
-                    if result == .copiedAfterLaunchFailure {
-                        showsResumeFallback = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            showsResumeFallback = false
-                        }
-                    }
-                } label: {
-                    Image(systemName: isCopied ? "checkmark" : "terminal")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 20, height: 20)
+            Button {
+                guard let sessionUUID else {
+                    return
                 }
-                .buttonStyle(.plain)
-                .focused($isCopyFocused)
-                .opacity(showsCopyButton ? 1 : 0)
-                .allowsHitTesting(showsCopyButton)
-                .help(text.resumeSessionHelp)
-                .accessibilityLabel(text.resumeSessionHelp)
+                let copyOnly = NSApp.currentEvent?
+                    .modifierFlags.contains(.option) == true
+                let result = onResumeSession(sessionUUID, copyOnly)
+                if result == .copied || result == .copiedAfterLaunchFailure {
+                    isCopied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        isCopied = false
+                    }
+                }
+                if result == .copiedAfterLaunchFailure {
+                    showsResumeFallback = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        showsResumeFallback = false
+                    }
+                }
+            } label: {
+                Image(systemName: isCopied ? "checkmark" : "play.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, height: 20)
             }
+            .buttonStyle(.plain)
+            .disabled(!canContinue)
+            .focused($isContinueFocused)
+            .opacity(showsActionButtons ? (canContinue ? 1 : 0.35) : 0)
+            .allowsHitTesting(showsActionButtons)
+            .help(text.continueTask)
+            .accessibilityLabel(text.continueTask)
+
+            Button {
+                onArchiveTask(task)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canDelete)
+            .focused($isDeleteFocused)
+            .opacity(showsActionButtons ? (canDelete ? 1 : 0.35) : 0)
+            .allowsHitTesting(showsActionButtons)
+            .help(text.deleteTask)
+            .accessibilityLabel(text.deleteTask)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)

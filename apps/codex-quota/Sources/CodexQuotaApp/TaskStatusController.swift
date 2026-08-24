@@ -151,8 +151,94 @@ final class TaskStatusController {
         }
     }
 
+    func archiveTask(
+        _ task: TaskStatusSnapshot,
+        completion: @escaping @MainActor (Result) -> Void
+    ) {
+        guard !invalidated, !isChecking, task.status.isTerminal else {
+            return
+        }
+        isChecking = true
+        let parsers = parsers
+        queue.async { [weak self] in
+            for parser in parsers {
+                guard
+                    let currentTask = parser.snapshots().first(
+                        where: { $0.id == task.id }
+                    ),
+                    currentTask.status.isTerminal
+                else {
+                    continue
+                }
+                _ = TaskArchive.archiveRecord(
+                    id: task.id,
+                    in: parser.tasksDirectory
+                )
+            }
+            let tasks = TaskStatusSnapshotMerger.merge(
+                parsers.map { $0.snapshots() }
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !invalidated else {
+                    return
+                }
+                isChecking = false
+                let detection = TaskCompletionDetector.evaluate(
+                    tasks,
+                    state: store.notificationState
+                )
+                store.notificationState = detection.state
+                completion(
+                    Result(
+                        tasks: Array(tasks.prefix(5)),
+                        hasCompletedTasks: tasks.contains { $0.status == .done },
+                        completedTasks: detection.completedTasks
+                    )
+                )
+            }
+        }
+    }
+
     func invalidate() {
         invalidated = true
+    }
+
+    nonisolated static func codexExecutableURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        let homeDirectory: URL
+        if let home = environment["HOME"], !home.isEmpty {
+            homeDirectory = URL(fileURLWithPath: home, isDirectory: true)
+        } else {
+            homeDirectory = fileManager.homeDirectoryForCurrentUser
+        }
+
+        var candidates: [URL] = []
+        if let override = environment["CODEX_PATH"], !override.isEmpty {
+            candidates.append(URL(fileURLWithPath: override))
+        }
+        candidates += [
+            URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
+            URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex"),
+            homeDirectory.appendingPathComponent(".local/bin/codex"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/codex"),
+            URL(fileURLWithPath: "/usr/local/bin/codex")
+        ]
+        if let path = environment["PATH"] {
+            candidates += path.split(
+                separator: ":",
+                omittingEmptySubsequences: false
+            ).map { directory in
+                URL(
+                    fileURLWithPath: directory.isEmpty ? "." : String(directory),
+                    isDirectory: true
+                ).appendingPathComponent("codex")
+            }
+        }
+        return candidates.first {
+            fileManager.isExecutableFile(atPath: $0.path)
+        }
     }
 
     private static func directoryExists(at url: URL) -> Bool {

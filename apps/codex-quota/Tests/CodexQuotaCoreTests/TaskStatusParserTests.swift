@@ -79,6 +79,10 @@ enum TaskStatusParserTests {
         TaskStatusParserTestCase(
             name: "task archive moves only completed records and parser skips archived",
             run: testArchiveCompletedRecords
+        ),
+        TaskStatusParserTestCase(
+            name: "task archive moves one selected record and keeps peer records",
+            run: testArchiveSingleRecord
         )
     ]
 
@@ -608,6 +612,58 @@ enum TaskStatusParserTests {
                 && nonDoneFilesRemain
                 && !remainingIDs.contains(doneID)
                 && Set(remainingIDs) == Set([failedID, runningID])
+        }
+    }
+
+    private static func testArchiveSingleRecord() -> Bool {
+        withTemporaryDirectories { tasks, _ in
+            let selectedID = "20260818-110736"
+            let peerID = "20260818-110737"
+            let suffixes = [
+                "-events.jsonl",
+                "-events.brief",
+                "-last-message.md",
+                "-run.log"
+            ]
+            guard [selectedID, peerID].allSatisfy({ id in
+                suffixes.allSatisfy { suffix in
+                    write(
+                        "\(id)\(suffix)",
+                        to: tasks.appendingPathComponent(id + suffix)
+                    )
+                }
+            }) else {
+                return false
+            }
+
+            guard TaskArchive.archiveRecord(id: selectedID, in: tasks) else {
+                return false
+            }
+            let archivedDirectory = tasks.appendingPathComponent(
+                "archived",
+                isDirectory: true
+            )
+            let selectedFilesArchived = suffixes.allSatisfy { suffix in
+                FileManager.default.fileExists(
+                    atPath: archivedDirectory.appendingPathComponent(
+                        selectedID + suffix
+                    ).path
+                )
+            }
+            let selectedFilesRemoved = suffixes.allSatisfy { suffix in
+                !FileManager.default.fileExists(
+                    atPath: tasks.appendingPathComponent(selectedID + suffix).path
+                )
+            }
+            let peerFilesRemain = suffixes.allSatisfy { suffix in
+                FileManager.default.fileExists(
+                    atPath: tasks.appendingPathComponent(peerID + suffix).path
+                )
+            }
+            return selectedFilesArchived
+                && selectedFilesRemoved
+                && peerFilesRemain
+                && !TaskArchive.archiveRecord(id: "invalid", in: tasks)
         }
     }
 

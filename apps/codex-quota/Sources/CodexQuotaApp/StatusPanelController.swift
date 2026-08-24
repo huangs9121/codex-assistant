@@ -6,6 +6,7 @@ enum TaskResumeActionResult: Equatable {
     case openedTerminal
     case copied
     case copiedAfterLaunchFailure
+    case unavailable
 }
 
 @MainActor
@@ -61,7 +62,9 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         text: AppText,
         onSettingsMenu: @escaping (NSView) -> Void,
         onOpenResetAnnouncement: @escaping () -> Void,
+        canResumeTaskSessions: Bool,
         onResumeSession: @escaping (String, Bool) -> TaskResumeActionResult,
+        onArchiveTask: @escaping (TaskStatusSnapshot) -> Void,
         onClearCompletedTasks: @escaping () -> Void
     ) {
         self.model = model
@@ -71,7 +74,9 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 text: text,
                 onSettingsMenu: onSettingsMenu,
                 onOpenResetAnnouncement: onOpenResetAnnouncement,
+                canResumeTaskSessions: canResumeTaskSessions,
                 onResumeSession: onResumeSession,
+                onArchiveTask: onArchiveTask,
                 onClearCompletedTasks: onClearCompletedTasks
             )
         )

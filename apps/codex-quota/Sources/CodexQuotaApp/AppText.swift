@@ -23,8 +23,7 @@ struct AppText {
     var launchAtLoginUnavailable: String { choose("开机自动启动（不可用）", "Launch at Login (Unavailable)") }
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
     var enableModifierTapOpenCodex: String { choose("启用修饰键呼出", "Enable Modifier Gesture") }
-    var openCodexInvocationSettings: String { choose("呼出 Codex 设置…", "Open Codex Settings…") }
-    var codexInvocationSettingsTitle: String { choose("呼出 Codex", "Open Codex") }
+    var globalShortcutSettings: String { choose("全局快捷键设置", "Global Shortcut Settings") }
     var triggerGestureSection: String { choose("触发手势", "Trigger Gesture") }
     var targetShortcutSection: String { choose("目标快捷键", "Target Shortcut") }
     var permissionsSection: String { choose("权限", "Permissions") }
@@ -80,7 +79,9 @@ struct AppText {
         choose("新周期额度已经生效。", "Your new quota cycle is now active.")
     }
     var scheduledTasks: String { choose("调度任务", "Scheduled Tasks") }
-    var clearCompletedTasks: String { choose("清理", "Clear") }
+    var clearCompletedTasks: String { choose("清理完成任务", "Clear Completed") }
+    var continueTask: String { choose("继续", "Continue") }
+    var deleteTask: String { choose("删除", "Delete") }
     var quotaTitle: String { choose("Codex 配额", "Codex Quota") }
     var fiveHourWindow: String { choose("5 小时窗口", "5-hour window") }
     var weeklyWindow: String { choose("每周窗口", "Weekly window") }

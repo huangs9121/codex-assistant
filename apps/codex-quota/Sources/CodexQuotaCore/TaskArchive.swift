@@ -14,11 +14,38 @@ public enum TaskArchive {
         snapshots: [TaskStatusSnapshot],
         fileManager: FileManager = .default
     ) -> Set<String> {
-        let completedIDs = snapshots
+        let completedIDs = Set(snapshots
             .filter { $0.status == .done }
             .map(\.id)
-            .filter { $0.count == 15 }
-        guard !completedIDs.isEmpty else {
+            .filter { $0.count == 15 })
+
+        return archiveRecords(
+            withIDs: completedIDs,
+            in: tasksDirectory,
+            fileManager: fileManager
+        )
+    }
+
+    @discardableResult
+    public static func archiveRecord(
+        id: String,
+        in tasksDirectory: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        archiveRecords(
+            withIDs: [id],
+            in: tasksDirectory,
+            fileManager: fileManager
+        ).contains(id)
+    }
+
+    private static func archiveRecords(
+        withIDs ids: Set<String>,
+        in tasksDirectory: URL,
+        fileManager: FileManager
+    ) -> Set<String> {
+        let recordIDs = ids.filter { $0.count == 15 }
+        guard !recordIDs.isEmpty else {
             return []
         }
 
@@ -36,7 +63,7 @@ public enum TaskArchive {
         }
 
         var archivedIDs = Set<String>()
-        for id in completedIDs {
+        for id in recordIDs {
             var movedRecord = false
             for suffix in recordSuffixes {
                 let source = tasksDirectory.appendingPathComponent(id + suffix)

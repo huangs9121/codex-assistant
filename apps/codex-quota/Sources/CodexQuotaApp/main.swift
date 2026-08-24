@@ -31,6 +31,7 @@ private final class MenuChoiceRow: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let preview = NSImageView()
     private let actionButton = NSButton()
+    private let trailingButton: NSButton?
     private let selectedAccessibilityValue: String
     private let notSelectedAccessibilityValue: String
 
@@ -49,12 +50,20 @@ private final class MenuChoiceRow: NSView {
         tag: Int,
         target: AnyObject,
         action: Selector,
+        trailingButtonImage: NSImage? = nil,
+        trailingButtonAccessibilityLabel: String? = nil,
+        trailingButtonAction: Selector? = nil,
         selectedAccessibilityValue: String,
         notSelectedAccessibilityValue: String,
         width: CGFloat
     ) {
         self.selectedAccessibilityValue = selectedAccessibilityValue
         self.notSelectedAccessibilityValue = notSelectedAccessibilityValue
+        if trailingButtonImage != nil, trailingButtonAction != nil {
+            self.trailingButton = NSButton()
+        } else {
+            self.trailingButton = nil
+        }
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 32))
 
         checkmarkLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -83,13 +92,33 @@ private final class MenuChoiceRow: NSView {
         addSubview(titleLabel)
         addSubview(preview)
         addSubview(actionButton)
+        if let trailingButton {
+            trailingButton.translatesAutoresizingMaskIntoConstraints = false
+            trailingButton.title = ""
+            trailingButton.isBordered = false
+            trailingButton.bezelStyle = .shadowlessSquare
+            trailingButton.focusRingType = .exterior
+            trailingButton.image = trailingButtonImage
+            trailingButton.image?.isTemplate = true
+            trailingButton.symbolConfiguration = NSImage.SymbolConfiguration(
+                pointSize: 15,
+                weight: .regular
+            )
+            trailingButton.contentTintColor = .secondaryLabelColor
+            trailingButton.target = target
+            trailingButton.action = trailingButtonAction
+            trailingButton.setAccessibilityRole(.button)
+            trailingButton.setAccessibilityLabel(
+                trailingButtonAccessibilityLabel ?? title
+            )
+            addSubview(trailingButton)
+        }
         NSLayoutConstraint.activate([
             checkmarkLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
             checkmarkLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             checkmarkLabel.widthAnchor.constraint(equalToConstant: 16),
             titleLabel.leadingAnchor.constraint(equalTo: checkmarkLabel.trailingAnchor, constant: 4),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            preview.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             preview.centerYAnchor.constraint(equalTo: centerYAnchor),
             preview.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: 10),
             actionButton.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -97,6 +126,20 @@ private final class MenuChoiceRow: NSView {
             actionButton.topAnchor.constraint(equalTo: topAnchor),
             actionButton.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
+        if let trailingButton {
+            NSLayoutConstraint.activate([
+                trailingButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+                trailingButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+                trailingButton.widthAnchor.constraint(equalToConstant: 26),
+                trailingButton.heightAnchor.constraint(equalToConstant: 26),
+                preview.trailingAnchor.constraint(
+                    equalTo: trailingButton.leadingAnchor,
+                    constant: -4
+                )
+            ])
+        } else {
+            preview.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12).isActive = true
+        }
         updateTitle(title)
         isSelected = false
     }
@@ -191,11 +234,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         onOpenResetAnnouncement: { [weak self] in
             self?.openCurrentResetAnnouncement()
         },
+        canResumeTaskSessions: TaskStatusController.codexExecutableURL() != nil,
         onResumeSession: { [weak self] sessionUUID, copyOnly in
             self?.resumeTaskSession(
                 sessionUUID: sessionUUID,
                 copyOnly: copyOnly
             ) ?? .copiedAfterLaunchFailure
+        },
+        onArchiveTask: { [weak self] task in
+            self?.archiveTask(task)
         },
         onClearCompletedTasks: { [weak self] in
             self?.archiveCompletedTasks()
@@ -349,20 +396,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         settingsMenu.addItem(mouseScrollItem)
 
         let doubleCommandTapItem = makeChoiceItem(
-            title: text.enableModifierTapOpenCodex,
+            title: text.globalShortcutSettings,
             tag: 0,
-            action: #selector(toggleDoubleCommandTap(_:))
+            action: #selector(toggleDoubleCommandTap(_:)),
+            trailingButtonImage: NSImage(
+                systemSymbolName: "gearshape",
+                accessibilityDescription: text.globalShortcutSettings
+            ),
+            trailingButtonAccessibilityLabel: text.globalShortcutSettings,
+            trailingButtonAction: #selector(showCodexInvocationSettings)
         )
         self.doubleCommandTapItem = doubleCommandTapItem
         settingsMenu.addItem(doubleCommandTapItem)
-
-        let codexInvocationSettingsItem = NSMenuItem(
-            title: text.openCodexInvocationSettings,
-            action: #selector(showCodexInvocationSettings),
-            keyEquivalent: ""
-        )
-        codexInvocationSettingsItem.target = self
-        settingsMenu.addItem(codexInvocationSettingsItem)
 
         settingsMenu.addItem(.separator())
 
@@ -464,7 +509,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         title: String,
         previewImage: NSImage? = nil,
         tag: Int,
-        action: Selector
+        action: Selector,
+        trailingButtonImage: NSImage? = nil,
+        trailingButtonAccessibilityLabel: String? = nil,
+        trailingButtonAction: Selector? = nil
     ) -> NSMenuItem {
         let row = MenuChoiceRow(
             title: title,
@@ -472,6 +520,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             tag: tag,
             target: self,
             action: action,
+            trailingButtonImage: trailingButtonImage,
+            trailingButtonAccessibilityLabel: trailingButtonAccessibilityLabel,
+            trailingButtonAction: trailingButtonAction,
             selectedAccessibilityValue: text.selected,
             notSelectedAccessibilityValue: text.notSelected,
             width: menuWidth
@@ -666,6 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     @objc private func showCodexInvocationSettings() {
+        settingsMenu.cancelTracking()
         codexInvocationSettingsPanelController.show()
     }
 
@@ -969,6 +1021,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
     }
 
+    private func archiveTask(_ task: TaskStatusSnapshot) {
+        taskStatusController.archiveTask(task) { [weak self] result in
+            self?.panelModel.update(
+                tasks: result.tasks,
+                hasCompletedTasks: result.hasCompletedTasks
+            )
+        }
+    }
+
     private func apply(_ snapshot: QuotaSnapshot?) {
         if let snapshot {
             handleQuotaResetNotification(snapshot)
@@ -1077,14 +1138,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         sessionUUID: String,
         copyOnly: Bool
     ) -> TaskResumeActionResult {
+        guard
+            UUID(uuidString: sessionUUID) != nil,
+            let executable = TaskStatusController.codexExecutableURL()
+        else {
+            return .unavailable
+        }
+        let command = "\(shellQuoted(executable.path)) resume \(shellQuoted(sessionUUID))"
         guard !copyOnly else {
-            copyTaskResumeCommand(sessionUUID: sessionUUID)
+            copyTaskResumeCommand(command)
             return .copied
         }
         let source = """
         tell application "Terminal"
             activate
-            do script "codex resume \(sessionUUID)"
+            do script "\(appleScriptEscaped(command))"
         end tell
         """
         if let script = NSAppleScript(source: source) {
@@ -1094,17 +1162,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                 return .openedTerminal
             }
         }
-        copyTaskResumeCommand(sessionUUID: sessionUUID)
+        copyTaskResumeCommand(command)
         return .copiedAfterLaunchFailure
     }
 
-    private func copyTaskResumeCommand(sessionUUID: String) {
+    private func copyTaskResumeCommand(_ command: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(
-            "codex resume \(sessionUUID)",
-            forType: .string
-        )
+        pasteboard.setString(command, forType: .string)
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func appleScriptEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     private func configureResetNotifications() {
