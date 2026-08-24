@@ -73,6 +73,7 @@ enum QuotaParserTests {
             ("double command tap triggers once", testDoubleCommandTrigger),
             ("double command tap cooldown suppresses repeats", testDoubleCommandCooldown),
             ("right option single tap triggers on release", testRightOptionSingleTap),
+            ("left and right control single taps trigger on release", testControlSingleTaps),
             ("left option does not trigger a right option gesture", testLeftOptionDoesNotTrigger),
             ("held modifier cancels a single tap", testModifierHoldTimeout),
             ("modifier combination cancels a single tap", testModifierCombinationCancels),
@@ -973,6 +974,22 @@ enum QuotaParserTests {
         )
         return !sequence.register(.modifierDown(61), at: 10)
             && sequence.register(.modifierUp(61), at: 10.12)
+    }
+
+    private static func testControlSingleTaps() -> Bool {
+        var leftControl = ModifierTapSequence(
+            configuration: .init(keyCodes: [59], requiredTapCount: 1)
+        )
+        guard !leftControl.register(.modifierDown(59), at: 10),
+              leftControl.register(.modifierUp(59), at: 10.12) else {
+            return false
+        }
+
+        var rightControl = ModifierTapSequence(
+            configuration: .init(keyCodes: [62], requiredTapCount: 1)
+        )
+        return !rightControl.register(.modifierDown(62), at: 20)
+            && rightControl.register(.modifierUp(62), at: 20.12)
     }
 
     private static func testLeftOptionDoesNotTrigger() -> Bool {

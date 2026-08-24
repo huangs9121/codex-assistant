@@ -139,11 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var launchAtLoginItem: NSMenuItem?
     private var mouseScrollReversalItem: NSMenuItem?
     private var doubleCommandTapItem: NSMenuItem?
-    private var modifierTapGestureItem: NSMenuItem?
     private var mouseScrollPermissionItem: NSMenuItem?
-    private var doubleCommandTapPermissionStatusItem: NSMenuItem?
-    private var inputMonitoringSettingsItem: NSMenuItem?
-    private var doubleCommandAccessibilitySettingsItem: NSMenuItem?
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
     private var refreshTimer: Timer?
@@ -162,11 +158,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let launchAtLoginController = LaunchAtLoginController()
     private let mouseScrollReversalController = MouseScrollReversalController()
     private let doubleCommandTapController = DoubleCommandTapController()
-    private lazy var doubleCommandTapShortcutPanelController = DoubleCommandTapShortcutPanelController(text: text)
-    private lazy var modifierTapGesturePanelController = ModifierTapGesturePanelController(text: text) { [weak self] in
-        self?.doubleCommandTapController.reloadGesture()
-        self?.syncMenuState()
-    }
+    private lazy var codexInvocationSettingsPanelController = CodexInvocationSettingsPanelController(
+        text: text,
+        doubleCommandTapController: doubleCommandTapController,
+        onEnabledChanged: { [weak self] isEnabled in
+            self?.setDoubleCommandTapEnabled(isEnabled)
+        },
+        onGestureSaved: { [weak self] in
+            self?.doubleCommandTapController.reloadGesture()
+            self?.syncMenuState()
+        },
+        onPermissionRefresh: { [weak self] in
+            self?.refreshAccessibilityControllers()
+        }
+    )
     private let rateLimitController = CodexRateLimitController()
     private let taskStatusController = TaskStatusController()
     private lazy var panelController = StatusPanelController(
@@ -332,49 +337,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         mouseScrollReversalItem = mouseScrollItem
         settingsMenu.addItem(mouseScrollItem)
 
-        let doubleCommandTapItem = makeChoiceItem(
-            title: text.doubleCommandTap,
-            tag: 0,
-            action: #selector(toggleDoubleCommandTap(_:))
-        )
-        self.doubleCommandTapItem = doubleCommandTapItem
-        settingsMenu.addItem(doubleCommandTapItem)
-
-        let testCodexShortcutItem = NSMenuItem(
-            title: text.testCodexShortcut,
-            action: #selector(testCodexShortcut),
-            keyEquivalent: ""
-        )
-        testCodexShortcutItem.target = self
-        settingsMenu.addItem(testCodexShortcutItem)
-
-        let setDoubleCommandTapShortcutItem = NSMenuItem(
-            title: text.setCodexShortcut,
-            action: #selector(showDoubleCommandTapShortcutPanel),
-            keyEquivalent: ""
-        )
-        setDoubleCommandTapShortcutItem.target = self
-        settingsMenu.addItem(setDoubleCommandTapShortcutItem)
-
-        let recordModifierTapGestureItem = NSMenuItem(
-            title: text.recordTriggerGesture,
-            action: #selector(showModifierTapGesturePanel),
-            keyEquivalent: ""
-        )
-        recordModifierTapGestureItem.target = self
-        settingsMenu.addItem(recordModifierTapGestureItem)
-
-        let modifierTapGestureItem = NSMenuItem(
-            title: text.triggerGesture(
-                ModifierTapGesture(defaults: .standard).displayString(text: text)
-            ),
-            action: nil,
-            keyEquivalent: ""
-        )
-        modifierTapGestureItem.isEnabled = false
-        self.modifierTapGestureItem = modifierTapGestureItem
-        settingsMenu.addItem(modifierTapGestureItem)
-
         let mouseScrollDetailItem = NSMenuItem(
             title: text.mouseScrollReversalDetail,
             action: nil,
@@ -391,41 +353,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         mouseScrollConflictItem.isEnabled = false
         settingsMenu.addItem(mouseScrollConflictItem)
 
-        let doubleCommandTapDetailItem = NSMenuItem(
-            title: text.doubleCommandTapDetail,
-            action: nil,
-            keyEquivalent: ""
-        )
-        doubleCommandTapDetailItem.isEnabled = false
-        settingsMenu.addItem(doubleCommandTapDetailItem)
-
-        let doubleCommandTapPermissionStatusItem = NSMenuItem(
-            title: text.doubleCommandTapRunning,
-            action: nil,
-            keyEquivalent: ""
-        )
-        doubleCommandTapPermissionStatusItem.isEnabled = false
-        self.doubleCommandTapPermissionStatusItem = doubleCommandTapPermissionStatusItem
-        settingsMenu.addItem(doubleCommandTapPermissionStatusItem)
-
-        let inputMonitoringSettingsItem = NSMenuItem(
-            title: text.openInputMonitoringSettings,
-            action: #selector(openInputMonitoringSettings),
-            keyEquivalent: ""
-        )
-        inputMonitoringSettingsItem.target = self
-        self.inputMonitoringSettingsItem = inputMonitoringSettingsItem
-        settingsMenu.addItem(inputMonitoringSettingsItem)
-
-        let doubleCommandAccessibilitySettingsItem = NSMenuItem(
-            title: text.openAccessibilitySettings,
-            action: #selector(openDoubleCommandAccessibilitySettings),
-            keyEquivalent: ""
-        )
-        doubleCommandAccessibilitySettingsItem.target = self
-        self.doubleCommandAccessibilitySettingsItem = doubleCommandAccessibilitySettingsItem
-        settingsMenu.addItem(doubleCommandAccessibilitySettingsItem)
-
         let mouseScrollPermissionItem = NSMenuItem(
             title: text.openAccessibilitySettings,
             action: #selector(openAccessibilitySettings),
@@ -434,6 +361,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         mouseScrollPermissionItem.target = self
         self.mouseScrollPermissionItem = mouseScrollPermissionItem
         settingsMenu.addItem(mouseScrollPermissionItem)
+
+        let doubleCommandTapItem = makeChoiceItem(
+            title: text.enableModifierTapOpenCodex,
+            tag: 0,
+            action: #selector(toggleDoubleCommandTap(_:))
+        )
+        self.doubleCommandTapItem = doubleCommandTapItem
+        settingsMenu.addItem(doubleCommandTapItem)
+
+        let codexInvocationSettingsItem = NSMenuItem(
+            title: text.openCodexInvocationSettings,
+            action: #selector(showCodexInvocationSettings),
+            keyEquivalent: ""
+        )
+        codexInvocationSettingsItem.target = self
+        settingsMenu.addItem(codexInvocationSettingsItem)
 
         settingsMenu.addItem(.separator())
 
@@ -613,11 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         let doubleCommandTapEnabled = doubleCommandTapController.isEnabled
         doubleCommandTapItem?.state = doubleCommandTapEnabled ? .on : .off
         (doubleCommandTapItem?.view as? MenuChoiceRow)?.isSelected = doubleCommandTapEnabled
-        modifierTapGestureItem?.title = text.triggerGesture(
-            ModifierTapGesture(defaults: .standard).displayString(text: text)
-        )
         mouseScrollPermissionItem?.title = accessibilityPermissionTitle()
-        syncDoubleCommandTapPermissionItems()
 
         if isUpdateInstallInFlight {
             updateMenuItem?.title = text.downloadingUpdate
@@ -719,39 +658,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     @objc private func toggleDoubleCommandTap(_ sender: NSButton) {
-        doubleCommandTapController.isEnabled.toggle()
-        if doubleCommandTapController.isEnabled,
+        setDoubleCommandTapEnabled(!doubleCommandTapController.isEnabled)
+    }
+
+    private func setDoubleCommandTapEnabled(_ isEnabled: Bool) {
+        doubleCommandTapController.isEnabled = isEnabled
+        if isEnabled,
            !doubleCommandTapController.startIfPermitted() {
             doubleCommandTapController.requestInputMonitoringPermission()
             doubleCommandTapController.requestAccessibilityPermission()
-        } else if !doubleCommandTapController.isEnabled {
+        } else if !isEnabled {
             doubleCommandTapController.stop()
         }
         syncMenuState()
     }
 
-    @objc private func showDoubleCommandTapShortcutPanel() {
-        doubleCommandTapShortcutPanelController.show()
-    }
-
-    @objc private func showModifierTapGesturePanel() {
-        modifierTapGesturePanelController.show()
-    }
-
-    @objc private func testCodexShortcut() {
-        doubleCommandTapController.testTriggerCodexShortcut()
+    @objc private func showCodexInvocationSettings() {
+        codexInvocationSettingsPanelController.show()
     }
 
     @objc private func openAccessibilitySettings() {
         mouseScrollReversalController.openAccessibilitySettings()
-    }
-
-    @objc private func openInputMonitoringSettings() {
-        doubleCommandTapController.openInputMonitoringSettings()
-    }
-
-    @objc private func openDoubleCommandAccessibilitySettings() {
-        doubleCommandTapController.openAccessibilitySettings()
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
@@ -792,7 +719,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func refreshAccessibilityControllers() {
-        doubleCommandTapController.observePermissionStatus()
         if mouseScrollReversalController.isEnabled,
            !mouseScrollReversalController.isRunning {
             _ = mouseScrollReversalController.startIfPermitted()
@@ -814,24 +740,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             return text.accessibilityEnableFailed
         }
         return hasEnabledController ? text.accessibilityPermissionRunning : text.accessibilityPermissionGranted
-    }
-
-    private func syncDoubleCommandTapPermissionItems() {
-        let isEnabled = doubleCommandTapController.isEnabled
-        let status = doubleCommandTapController.permissionStatus
-        doubleCommandTapPermissionStatusItem?.isHidden = !isEnabled
-        inputMonitoringSettingsItem?.isHidden = !isEnabled || status == .running || status == .accessibilityRequired
-        doubleCommandAccessibilitySettingsItem?.isHidden = !isEnabled || status == .running || status == .inputMonitoringRequired
-        switch status {
-        case .running:
-            doubleCommandTapPermissionStatusItem?.title = text.doubleCommandTapRunning
-        case .inputMonitoringRequired:
-            doubleCommandTapPermissionStatusItem?.title = text.inputMonitoringPermissionRequired
-        case .accessibilityRequired:
-            doubleCommandTapPermissionStatusItem?.title = text.accessibilityPermissionRequired
-        case .inputMonitoringAndAccessibilityRequired:
-            doubleCommandTapPermissionStatusItem?.title = text.doubleCommandTapPermissionsRequired
-        }
     }
 
     @objc private func refreshFromTimer() {

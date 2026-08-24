@@ -24,24 +24,21 @@ struct AppText {
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
     var mouseScrollReversalDetail: String { choose("仅影响外接鼠标，触控板保持不变；需要辅助功能权限。", "Only affects external mice; trackpad scrolling stays unchanged. Accessibility permission is required.") }
     var mouseScrollReversalConflictHint: String { choose("使用前请退出 MOS、Scroll Reverser 等同类软件，避免双重反转。", "Quit MOS, Scroll Reverser, or similar apps first to avoid double reversal.") }
-    var doubleCommandTap: String { choose("修饰键手势呼出 Codex", "Modifier Gesture Opens Codex") }
-    var testCodexShortcut: String { choose("测试触发 Codex 快捷键", "Test Codex Shortcut") }
-    var doubleCommandTapDetail: String { choose("纯修饰键手势会发送已设置的快捷键；⌘+C 等组合键不受影响。", "A pure modifier gesture sends the configured shortcut; combinations such as ⌘+C are unaffected.") }
-    var doubleCommandTapRunning: String { choose("运行中", "Running") }
-    var inputMonitoringPermissionRequired: String { choose("输入监听权限未授权", "Input Monitoring Permission Required") }
-    var doubleCommandTapPermissionsRequired: String { choose("输入监听和辅助功能权限未授权", "Input Monitoring and Accessibility Permissions Required") }
-    var openInputMonitoringSettings: String { choose("打开“输入监听”设置", "Open Input Monitoring Settings") }
-    var setCodexShortcut: String { choose("设置呼出快捷键…", "Set Open Shortcut…") }
-    var recordTriggerGesture: String { choose("录制触发手势…", "Record Trigger Gesture…") }
+    var enableModifierTapOpenCodex: String { choose("启用修饰键呼出", "Enable Modifier Gesture") }
+    var openCodexInvocationSettings: String { choose("呼出 Codex 设置…", "Open Codex Settings…") }
+    var codexInvocationSettingsTitle: String { choose("呼出 Codex", "Open Codex") }
+    var triggerGestureSection: String { choose("触发手势", "Trigger Gesture") }
+    var targetShortcutSection: String { choose("目标快捷键", "Target Shortcut") }
+    var permissionsSection: String { choose("权限", "Permissions") }
+    var rerecord: String { choose("重新录制", "Record Again") }
     var currentTriggerGesture: String { choose("当前触发手势", "Current Trigger Gesture") }
-    var triggerGestureRecordingHint: String { choose("按下你想用的修饰键（单击或双击）", "Press the modifier key you want to use once or twice.") }
+    var triggerGestureRecordingHint: String { choose("按下左侧或右侧的 ⌘ ⌥ ⇧ ⌃，单击或双击", "Press the left or right ⌘ ⌥ ⇧ ⌃ once or twice") }
     var recordingTriggerGesture: String { choose("请按下修饰键…", "Press a modifier key…") }
-    var triggerGestureRecordingCancelled: String { choose("已取消，保留原手势", "Cancelled; kept the previous gesture") }
-    var codexShortcutMatchHint: String { choose("此快捷键必须与 Codex 设置中的「弹出窗口快捷键」保持一致", "Must match Codex → Settings → 'Pop-out window shortcut'") }
+    var codexShortcutMatchHint: String { choose("必须与 Codex 设置中的『弹出窗口快捷键』保持一致", "Must match Codex Settings' ‘Pop-out window shortcut’") }
     var currentCodexShortcut: String { choose("当前快捷键", "Current shortcut") }
-    var recordCodexShortcut: String { choose("录制快捷键", "Record shortcut") }
     var recordingCodexShortcut: String { choose("请按下快捷键…", "Press a shortcut…") }
-    var escapeCancelsRecording: String { choose("按 Esc 取消录制", "Press Esc to cancel recording") }
+    var openSettings: String { choose("打开设置", "Open Settings") }
+    var codexInvocationShortcutHint: String { choose("触发手势后，App 会模拟发送目标快捷键", "After the gesture, the app simulates the target shortcut") }
     var accessibilityPermissionRequired: String { choose("辅助功能权限未授权", "Accessibility Permission Required") }
     var accessibilityPermissionGranted: String { choose("辅助功能权限已授权", "Accessibility Permission Granted") }
     var accessibilityPermissionRunning: String { choose("辅助功能已授权（运行中）", "Accessibility Authorized (Running)") }
@@ -208,12 +205,18 @@ struct AppText {
         choose("，\(value)", ", \(value)")
     }
 
-    func triggerGesture(_ gesture: String) -> String {
-        choose("触发手势：\(gesture)", "Trigger Gesture: \(gesture)")
+    func inputMonitoringPermissionStatus(isAuthorized: Bool) -> String {
+        choose(
+            "输入监听：\(isAuthorized ? "已授权" : "未授权")",
+            "Input Monitoring: \(isAuthorized ? "Authorized" : "Not Authorized")"
+        )
     }
 
-    func triggerGestureSaved(_ gesture: String) -> String {
-        choose("已设置为：\(gesture)", "Set to: \(gesture)")
+    func accessibilityPermissionStatus(isAuthorized: Bool) -> String {
+        choose(
+            "辅助功能：\(isAuthorized ? "已授权" : "未授权")",
+            "Accessibility: \(isAuthorized ? "Authorized" : "Not Authorized")"
+        )
     }
 
     func modifierTapGestureDisplay(keyCodes: Set<UInt16>, tapCount: Int) -> String {
@@ -304,10 +307,14 @@ struct AppText {
             choose("左 ⇧", "Left ⇧")
         case 58:
             choose("左 ⌥", "Left ⌥")
+        case 59:
+            choose("左 ⌃", "Left ⌃")
         case 60:
             choose("右 ⇧", "Right ⇧")
         case 61:
             choose("右 ⌥", "Right ⌥")
+        case 62:
+            choose("右 ⌃", "Right ⌃")
         default:
             choose("修饰键", "Modifier Key")
         }

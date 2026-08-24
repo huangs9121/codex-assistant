@@ -12,12 +12,6 @@ final class DoubleCommandTapController {
     private var sequence: ModifierTapSequence
     private var pressedModifierKeyCodes = Set<CGKeyCode>()
     private var isSynthesizing = false
-    private var lastLoggedPermissionStatus: DoubleCommandTapPermissionStatus?
-    private var lastLoggedTapCreationFailure: String?
-
-    private static let logURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/CodexQuota-doublecmd.log")
-    private static let maximumLogSize = 1_024 * 1_024
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -28,13 +22,7 @@ final class DoubleCommandTapController {
 
     var isEnabled: Bool {
         get { defaults.bool(forKey: Self.isEnabledDefaultsKey) }
-        set {
-            defaults.set(newValue, forKey: Self.isEnabledDefaultsKey)
-            if !newValue {
-                lastLoggedPermissionStatus = nil
-                lastLoggedTapCreationFailure = nil
-            }
-        }
+        set { defaults.set(newValue, forKey: Self.isEnabledDefaultsKey) }
     }
 
     var isAccessibilityTrusted: Bool {
@@ -62,16 +50,12 @@ final class DoubleCommandTapController {
     @discardableResult
     func startIfPermitted() -> Bool {
         reloadGestureIfNeeded()
-        let status = permissionStatus
-        logPermissionStatusIfChanged(status)
-        guard status == .running else {
-            logTapCreationFailureIfChanged(status)
+        guard permissionStatus == .running else {
             stop()
             return false
         }
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: true)
-            log("tap re-enabled")
             return true
         }
 
@@ -85,20 +69,16 @@ final class DoubleCommandTapController {
             callback: Self.handleEvent,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            logTapCreationFailureIfChanged(status)
             return false
         }
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         self.eventTap = eventTap
         runLoopSource = source
-        lastLoggedTapCreationFailure = nil
-        log("tap created successfully")
         return true
     }
 
     func stop() {
-        let hadEventTap = eventTap != nil
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
         }
@@ -109,25 +89,10 @@ final class DoubleCommandTapController {
         runLoopSource = nil
         sequence.cancel()
         pressedModifierKeyCodes.removeAll()
-        if hadEventTap {
-            log("tap stopped")
-        }
     }
 
     func reloadGesture() {
         reloadGestureIfNeeded()
-    }
-
-    func observePermissionStatus() {
-        guard isEnabled else {
-            return
-        }
-        logPermissionStatusIfChanged(permissionStatus)
-    }
-
-    func testTriggerCodexShortcut() {
-        log("test trigger menu item selected")
-        triggerCodexShortcut()
     }
 
     func requestAccessibilityPermission() {
@@ -177,19 +142,14 @@ final class DoubleCommandTapController {
             return
         }
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            log("tap disabled by system (\(type == .tapDisabledByTimeout ? "timeout" : "user input"))")
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
-                log("tap re-enabled")
             }
             return
         }
 
         let time = ProcessInfo.processInfo.systemUptime
         if type == .keyDown {
-            if sequence.isTracking {
-                log("keyDown cancelled modifier gesture (keyCode=\(event.getIntegerValueField(.keyboardEventKeycode)))")
-            }
             _ = sequence.register(.keyDown, at: time)
             return
         }
@@ -231,7 +191,6 @@ final class DoubleCommandTapController {
         }
 
         if sequence.register(gestureEvent, at: time) {
-            log("modifier gesture triggered")
             triggerCodexShortcut()
         }
     }
@@ -266,60 +225,14 @@ final class DoubleCommandTapController {
         if let keyDown {
             keyDown.flags = shortcut.flags
             keyDown.post(tap: .cghidEventTap)
-            log("trigger keyDown keyCode=\(shortcut.keyCode) flags=\(shortcut.flags.rawValue) constructed=true post completed")
-        } else {
-            log("trigger keyDown keyCode=\(shortcut.keyCode) flags=\(shortcut.flags.rawValue) constructed=false")
         }
         Thread.sleep(forTimeInterval: 0.04)
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: shortcut.keyCode, keyDown: false)
         if let keyUp {
             keyUp.flags = shortcut.flags
             keyUp.post(tap: .cghidEventTap)
-            log("trigger keyUp keyCode=\(shortcut.keyCode) flags=\(shortcut.flags.rawValue) constructed=true post completed")
-        } else {
-            log("trigger keyUp keyCode=\(shortcut.keyCode) flags=\(shortcut.flags.rawValue) constructed=false")
         }
     }
-
-    private func logPermissionStatusIfChanged(_ status: DoubleCommandTapPermissionStatus) {
-        guard lastLoggedPermissionStatus != status else { return }
-        lastLoggedPermissionStatus = status
-        log("permissions changed status=\(status)")
-    }
-
-    private func logTapCreationFailureIfChanged(_ status: DoubleCommandTapPermissionStatus) {
-        let message = "tap creation failed (status=\(status))"
-        guard lastLoggedTapCreationFailure != message else { return }
-        lastLoggedTapCreationFailure = message
-        log(message)
-    }
-
-    private func log(_ message: String) {
-        guard isEnabled || eventTap != nil else { return }
-        let fileManager = FileManager.default
-        let url = Self.logURL
-        if let attributes = try? fileManager.attributesOfItem(atPath: url.path),
-           let size = attributes[.size] as? NSNumber,
-           size.intValue >= Self.maximumLogSize {
-            try? Data().write(to: url, options: .atomic)
-        }
-        if !fileManager.fileExists(atPath: url.path) {
-            fileManager.createFile(atPath: url.path, contents: nil)
-        }
-        let timestamp = Self.logDateFormatter.string(from: Date())
-        let line = "[\(timestamp)] \(message)\n"
-        guard let data = line.data(using: .utf8),
-              let handle = try? FileHandle(forWritingTo: url) else { return }
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: data)
-    }
-
-    private static let logDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss.SSS"
-        return formatter
-    }()
 
     private static let handleEvent: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo else {
