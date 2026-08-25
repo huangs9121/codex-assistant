@@ -83,6 +83,14 @@ enum TaskStatusParserTests {
         TaskStatusParserTestCase(
             name: "task archive moves one selected record and keeps peer records",
             run: testArchiveSingleRecord
+        ),
+        TaskStatusParserTestCase(
+            name: "task orphan session removal preserves peer log lines and snapshots",
+            run: testOrphanSessionRemoval
+        ),
+        TaskStatusParserTestCase(
+            name: "task cleanup removes terminal orphan sessions",
+            run: testTerminalOrphanCleanup
         )
     ]
 
@@ -664,6 +672,103 @@ enum TaskStatusParserTests {
                 && selectedFilesRemoved
                 && peerFilesRemain
                 && !TaskArchive.archiveRecord(id: "invalid", in: tasks)
+        }
+    }
+
+    private static func testOrphanSessionRemoval() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let orphanUUID = "019fb5f6-40d1-7383-ac0d-48b797170e09"
+            let orphanLine =
+                "2026-07-31 10:17:47 \(orphanUUID) sync /tmp/dual-window-core.md\n"
+            let peerLine =
+                "2026-07-31 10:18:00 \(sessionUUID) sync /tmp/peer.md\n"
+            let invalidLine = "not a session line\n"
+            guard write(
+                orphanLine + invalidLine + peerLine,
+                to: tasks.appendingPathComponent("sessions.log")
+            ) else {
+                return false
+            }
+
+            let parser = makeParser(tasks: tasks, sessions: sessions)
+            guard let orphan = parser.snapshots().first(
+                where: { $0.sessionUUID == orphanUUID }
+            ) else {
+                return false
+            }
+            guard TaskArchive.removeSessionEntry(
+                sessionUUID: orphanUUID,
+                startedAt: orphan.startedAt,
+                in: tasks,
+                timeZone: shanghai
+            ) else {
+                return false
+            }
+
+            let remaining = try? String(
+                contentsOf: tasks.appendingPathComponent("sessions.log"),
+                encoding: .utf8
+            )
+            return remaining == invalidLine + peerLine
+                && parser.snapshots().first(
+                    where: { $0.sessionUUID == orphanUUID }
+                ) == nil
+                && parser.snapshots().contains {
+                    $0.sessionUUID == sessionUUID
+                }
+        }
+    }
+
+    private static func testTerminalOrphanCleanup() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let failedUUID = "019fb5f6-40d1-7383-ac0d-48b797170e09"
+            let doneUUID = "019fb5f6-40d1-7383-ac0d-48b797170e10"
+            let failedLine =
+                "2026-07-31 10:17:47 \(failedUUID) sync /tmp/failed.md\n"
+            let doneLine =
+                "2026-07-31 10:18:00 \(doneUUID) sync /tmp/done.md\n"
+            let peerLine =
+                "2026-07-31 10:19:00 \(sessionUUID) sync /tmp/peer.md\n"
+            guard write(
+                failedLine + doneLine + peerLine,
+                to: tasks.appendingPathComponent("sessions.log")
+            ) else {
+                return false
+            }
+
+            let archived = TaskArchive.archiveCompletedRecords(
+                in: tasks,
+                snapshots: [
+                    TaskStatusSnapshot(
+                        id: "session-1-0",
+                        startedAt: date("2026-07-31 10:17:47"),
+                        sessionUUID: failedUUID,
+                        mode: .sync,
+                        taskName: "failed",
+                        isBackgroundTask: false,
+                        status: .failed,
+                        exitCode: nil,
+                        lastMessage: nil
+                    ),
+                    TaskStatusSnapshot(
+                        id: "session-2-1",
+                        startedAt: date("2026-07-31 10:18:00"),
+                        sessionUUID: doneUUID,
+                        mode: .sync,
+                        taskName: "done",
+                        isBackgroundTask: false,
+                        status: .done,
+                        exitCode: 0,
+                        lastMessage: nil
+                    )
+                ],
+                timeZone: shanghai
+            )
+            let remaining = try? String(
+                contentsOf: tasks.appendingPathComponent("sessions.log"),
+                encoding: .utf8
+            )
+            return archived.isEmpty && remaining == peerLine
         }
     }
 

@@ -124,7 +124,8 @@ final class TaskStatusController {
             for parser in parsers {
                 TaskArchive.archiveCompletedRecords(
                     in: parser.tasksDirectory,
-                    snapshots: parser.snapshots()
+                    snapshots: parser.snapshots(),
+                    timeZone: parser.timeZone
                 )
             }
             let tasks = TaskStatusSnapshotMerger.merge(
@@ -170,10 +171,24 @@ final class TaskStatusController {
                 else {
                     continue
                 }
-                _ = TaskArchive.archiveRecord(
+                let archived = TaskArchive.archiveRecord(
                     id: task.id,
                     in: parser.tasksDirectory
                 )
+                if
+                    !archived,
+                    task.id.hasPrefix("session-"),
+                    let sessionUUID = currentTask.sessionUUID,
+                    sessionUUID == task.sessionUUID,
+                    currentTask.startedAt == task.startedAt
+                {
+                    _ = TaskArchive.removeSessionEntry(
+                        sessionUUID: sessionUUID,
+                        startedAt: currentTask.startedAt,
+                        in: parser.tasksDirectory,
+                        timeZone: parser.timeZone
+                    )
+                }
             }
             let tasks = TaskStatusSnapshotMerger.merge(
                 parsers.map { $0.snapshots() }
