@@ -62,6 +62,8 @@ struct AppText {
     var moveToApplications: String { choose("建议先将 Codex Quota 移到“应用程序”文件夹，开机启动会更稳定。", "Move Codex Quota to the Applications folder first for more reliable launch at login.") }
     var enableAnyway: String { choose("仍然开启", "Enable Anyway") }
     var cancel: String { choose("取消", "Cancel") }
+    var save: String { choose("保存", "Save") }
+    var none: String { choose("无", "None") }
     var checkingUpdates: String { choose("正在检查更新，请稍候。", "Checking for updates. Please wait.") }
     var cannotCheckUpdates: String { choose("无法检查更新", "Could Not Check for Updates") }
     var invalidVersion: String { choose("当前版本信息无效，请重新安装 Codex Quota。", "The current version information is invalid. Reinstall Codex Quota.") }

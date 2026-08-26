@@ -83,12 +83,14 @@ enum QuotaParserTests {
             ("keyboard shortcut names special keys", testKeyboardShortcutSpecialKeys),
             ("keyboard shortcut requires a modifier", testKeyboardShortcutValidation),
             ("mouse gesture direction uses the dominant axis", testMouseGestureDirection),
+            ("mouse gesture direction recognizes diagonal boundaries", testMouseGestureDiagonalBoundaries),
             ("mouse gesture recognizer waits for minimum distances", testMouseGestureMinimumDistances),
             ("mouse gesture recognizer merges repeated directions", testMouseGestureMergesRepeatedDirections),
-            ("mouse gesture recognizer caps at four directions", testMouseGestureSegmentLimit),
+            ("mouse gesture recognizer caps at two directions", testMouseGestureSegmentLimit),
             ("mouse gesture rule matching is exact and case insensitive", testMouseGestureRuleMatching),
             ("mouse gesture matching skips disabled rules and preserves order", testMouseGestureRuleOrder),
             ("mouse gesture rules round trip through JSON", testMouseGestureRuleJSONRoundTrip),
+            ("mouse gesture legacy strings migrate to direction arrays", testMouseGestureLegacyMigration),
             ("mouse gesture filter wildcard supports global and case insensitive matches", testMouseGestureFilterWildcard),
             ("mouse gesture filter accepts multiple patterns", testMouseGestureFilterMultiplePatterns),
             ("mouse gesture filter rejects nonmatching patterns", testMouseGestureFilterNonmatch),
@@ -1100,7 +1102,13 @@ enum QuotaParserTests {
             && MouseGestureDirection.direction(dx: -40, dy: 10) == .left
             && MouseGestureDirection.direction(dx: 10, dy: -40) == .up
             && MouseGestureDirection.direction(dx: 10, dy: 40) == .down
-            && MouseGestureDirection.direction(dx: 20, dy: 20) == .down
+            && MouseGestureDirection.direction(dx: 20, dy: 20) == .downRight
+    }
+
+    private static func testMouseGestureDiagonalBoundaries() -> Bool {
+        MouseGestureDirection.direction(dx: 10, dy: 4) == .right
+            && MouseGestureDirection.direction(dx: 10, dy: 5) == .downRight
+            && MouseGestureDirection.direction(dx: -10, dy: -5) == .upLeft
     }
 
     private static func testMouseGestureMinimumDistances() -> Bool {
@@ -1110,7 +1118,7 @@ enum QuotaParserTests {
         _ = recognizer.update(point: MouseGesturePoint(x: 29, y: 0), isRecognizing: true)
         let beforeSegment = recognizer.sequence.isEmpty
         _ = recognizer.update(point: MouseGesturePoint(x: 30, y: 0), isRecognizing: true)
-        return !pending && started && beforeSegment && recognizer.sequence == "R"
+        return !pending && started && beforeSegment && recognizer.sequence == [.right]
     }
 
     private static func testMouseGestureMergesRepeatedDirections() -> Bool {
@@ -1118,7 +1126,7 @@ enum QuotaParserTests {
         _ = recognizer.update(point: MouseGesturePoint(x: 30, y: 0), isRecognizing: true)
         _ = recognizer.update(point: MouseGesturePoint(x: 60, y: 0), isRecognizing: true)
         _ = recognizer.update(point: MouseGesturePoint(x: 60, y: 30), isRecognizing: true)
-        return recognizer.sequence == "RD"
+        return recognizer.sequence == [.right, .downRight]
     }
 
     private static func testMouseGestureSegmentLimit() -> Bool {
@@ -1130,25 +1138,25 @@ enum QuotaParserTests {
         ] {
             _ = recognizer.update(point: point, isRecognizing: true)
         }
-        return recognizer.sequence == "RDLU"
+        return recognizer.sequence == [.right, .down]
     }
 
     private static func testMouseGestureRuleMatching() -> Bool {
-        let rule = MouseGestureRule(gesture: "dr", appFilter: "*safari*", keyCode: 17, modifierFlags: KeyboardShortcut.commandFlag)
-        return MouseGestureRuleMatcher.firstMatch(sequence: "DR", bundleIdentifier: "com.apple.Safari", rules: [rule]) == rule
-            && MouseGestureRuleMatcher.firstMatch(sequence: "D", bundleIdentifier: "com.apple.Safari", rules: [rule]) == nil
+        let rule = MouseGestureRule(gesture: [.down, .right], appFilter: "*safari*", keyCode: 17, modifierFlags: KeyboardShortcut.commandFlag)
+        return MouseGestureRuleMatcher.firstMatch(sequence: [.down, .right], bundleIdentifier: "com.apple.Safari", rules: [rule]) == rule
+            && MouseGestureRuleMatcher.firstMatch(sequence: [.down], bundleIdentifier: "com.apple.Safari", rules: [rule]) == nil
     }
 
     private static func testMouseGestureRuleOrder() -> Bool {
-        let disabled = MouseGestureRule(gesture: "D", keyCode: 17, modifierFlags: KeyboardShortcut.commandFlag, isEnabled: false)
-        let first = MouseGestureRule(gesture: "D", keyCode: 12, modifierFlags: KeyboardShortcut.commandFlag)
-        let second = MouseGestureRule(gesture: "D", keyCode: 13, modifierFlags: KeyboardShortcut.commandFlag)
-        return MouseGestureRuleMatcher.firstMatch(sequence: "d", bundleIdentifier: "com.apple.Safari", rules: [disabled, first, second])?.id == first.id
+        let disabled = MouseGestureRule(gesture: [.down], keyCode: 17, modifierFlags: KeyboardShortcut.commandFlag, isEnabled: false)
+        let first = MouseGestureRule(gesture: [.down], keyCode: 12, modifierFlags: KeyboardShortcut.commandFlag)
+        let second = MouseGestureRule(gesture: [.down], keyCode: 13, modifierFlags: KeyboardShortcut.commandFlag)
+        return MouseGestureRuleMatcher.firstMatch(sequence: [.down], bundleIdentifier: "com.apple.Safari", rules: [disabled, first, second])?.id == first.id
     }
 
     private static func testMouseGestureRuleJSONRoundTrip() -> Bool {
         let rule = MouseGestureRule(
-            gesture: "LU",
+            gesture: [.left, .up],
             appFilter: "*safari*|*chrome",
             keyCode: 30,
             modifierFlags: KeyboardShortcut.commandFlag | KeyboardShortcut.shiftFlag,
@@ -1160,6 +1168,12 @@ enum QuotaParserTests {
             return false
         }
         return restored == [rule]
+    }
+
+    private static func testMouseGestureLegacyMigration() -> Bool {
+        let json = "{\"id\":\"00000000-0000-0000-0000-000000000001\",\"gesture\":\"DLRU\",\"appFilter\":\"*\",\"keyCode\":17,\"modifierFlags\":1048576,\"note\":\"\",\"isEnabled\":true}"
+        guard let rule = try? JSONDecoder().decode(MouseGestureRule.self, from: Data(json.utf8)) else { return false }
+        return rule.gesture == [.down, .left]
     }
 
     private static func testMouseGestureFilterWildcard() -> Bool {

@@ -5,13 +5,30 @@ public enum MouseGestureDirection: String, CaseIterable, Codable, Sendable {
     case down = "D"
     case left = "L"
     case right = "R"
+    case upLeft = "UL"
+    case upRight = "UR"
+    case downLeft = "DL"
+    case downRight = "DR"
 
     public static func direction(dx: Double, dy: Double) -> MouseGestureDirection {
-        if abs(dx) > abs(dy) {
+        let horizontal = abs(dx)
+        let vertical = abs(dy)
+        if horizontal > 0, vertical / horizontal >= 0.414_213_562, vertical / horizontal <= 2.414_213_562 {
+            if dx < 0 { return dy < 0 ? .upLeft : .downLeft }
+            return dy < 0 ? .upRight : .downRight
+        }
+        if horizontal > vertical {
             return dx < 0 ? .left : .right
         }
         // Quartz global coordinates start at the top-left, so y increases downward.
         return dy < 0 ? .up : .down
+    }
+
+    public var symbol: String {
+        switch self {
+        case .up: "⬆️"; case .down: "⬇️"; case .left: "⬅️"; case .right: "➡️"
+        case .upLeft: "↖️"; case .upRight: "↗️"; case .downLeft: "↙️"; case .downRight: "↘️"
+        }
     }
 }
 
@@ -32,7 +49,7 @@ public struct MouseGesturePoint: Equatable, Sendable {
 public struct MouseGestureRecognizer: Sendable {
     public static let activationDistance = 10.0
     public static let segmentDistance = 30.0
-    public static let maximumSegments = 4
+    public static let maximumSegments = 2
 
     private let start: MouseGesturePoint
     private var segmentStart: MouseGesturePoint
@@ -64,14 +81,14 @@ public struct MouseGestureRecognizer: Sendable {
         return true
     }
 
-    public var sequence: String {
-        directions.map(\.rawValue).joined()
+    public var sequence: [MouseGestureDirection] {
+        directions
     }
 }
 
 public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
-    public var gesture: String
+    public var gesture: [MouseGestureDirection]
     public var appFilter: String
     public var keyCode: UInt16
     public var modifierFlags: UInt64
@@ -80,7 +97,7 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
 
     public init(
         id: UUID = UUID(),
-        gesture: String = "",
+        gesture: [MouseGestureDirection] = [],
         appFilter: String = "*",
         keyCode: UInt16 = 0,
         modifierFlags: UInt64 = 0,
@@ -96,35 +113,58 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
         self.isEnabled = isEnabled
     }
 
-    public var normalizedGesture: String {
-        MouseGestureRule.normalizedGesture(gesture)
-    }
-
     public var hasValidGesture: Bool {
-        let value = normalizedGesture
-        return (1...4).contains(value.count) && value.allSatisfy { "UDLR".contains($0) }
+        (1...2).contains(gesture.count)
     }
 
     public var hasValidShortcut: Bool {
         KeyboardShortcut.isValid(keyCode: keyCode, flags: modifierFlags)
     }
 
-    public static func normalizedGesture(_ value: String) -> String {
-        String(value.uppercased().filter { "UDLR".contains($0) }.prefix(4))
+    public var displayGesture: String {
+        gesture.map(\.symbol).joined()
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, gesture, appFilter, keyCode, modifierFlags, note, isEnabled }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        if let directions = try? values.decode([MouseGestureDirection].self, forKey: .gesture) {
+            gesture = Array(directions.prefix(2))
+        } else {
+            let legacy = try values.decode(String.self, forKey: .gesture)
+            gesture = Self.legacyDirections(legacy)
+        }
+        appFilter = try values.decode(String.self, forKey: .appFilter)
+        keyCode = try values.decode(UInt16.self, forKey: .keyCode)
+        modifierFlags = try values.decode(UInt64.self, forKey: .modifierFlags)
+        note = try values.decode(String.self, forKey: .note)
+        isEnabled = try values.decode(Bool.self, forKey: .isEnabled)
+    }
+
+    public static func legacyDirections(_ value: String) -> [MouseGestureDirection] {
+        var result: [MouseGestureDirection] = []
+        for character in value.uppercased() {
+            let direction: MouseGestureDirection?
+            switch character { case "U": direction = .up; case "D": direction = .down; case "L": direction = .left; case "R": direction = .right; default: direction = nil }
+            if let direction { result.append(direction) }
+            if result.count == 2 { break }
+        }
+        return result
     }
 }
 
 public enum MouseGestureRuleMatcher {
     public static func firstMatch(
-        sequence: String,
+        sequence: [MouseGestureDirection],
         bundleIdentifier: String?,
         rules: [MouseGestureRule]
     ) -> MouseGestureRule? {
-        let normalizedSequence = MouseGestureRule.normalizedGesture(sequence)
         return rules.first { rule in
             rule.isEnabled
                 && rule.hasValidShortcut
-                && rule.normalizedGesture == normalizedSequence
+                && rule.gesture == sequence
                 && matches(filter: rule.appFilter, bundleIdentifier: bundleIdentifier)
         }
     }
