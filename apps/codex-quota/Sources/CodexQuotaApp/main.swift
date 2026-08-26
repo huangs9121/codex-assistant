@@ -208,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
     private let mouseScrollReversalController = MouseScrollReversalController()
+    private let mouseGestureController = MouseGestureController()
     private let doubleCommandTapController = DoubleCommandTapController()
     private lazy var codexInvocationSettingsPanelController = CodexInvocationSettingsPanelController(
         text: text,
@@ -221,6 +222,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         },
         onPermissionRefresh: { [weak self] in
             self?.refreshAccessibilityControllers()
+        }
+    )
+    private lazy var mouseGestureSettingsPanelController = MouseGestureSettingsPanelController(
+        text: text,
+        controller: mouseGestureController,
+        onRulesChanged: { [weak self] in
+            self?.refreshAccessibilityControllers()
+            self?.syncMenuState()
         }
     )
     private let rateLimitController = CodexRateLimitController()
@@ -310,6 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         rateLimitController.invalidate()
         taskStatusController.invalidate()
         mouseScrollReversalController.stop()
+        mouseGestureController.stop()
         doubleCommandTapController.stop()
     }
 
@@ -408,6 +418,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         self.doubleCommandTapItem = doubleCommandTapItem
         settingsMenu.addItem(doubleCommandTapItem)
+
+        let mouseGestureItem = NSMenuItem(
+            title: text.rightClickShortcutOperationsMenu,
+            action: #selector(showMouseGestureSettings),
+            keyEquivalent: ""
+        )
+        mouseGestureItem.target = self
+        settingsMenu.addItem(mouseGestureItem)
 
         settingsMenu.addItem(.separator())
 
@@ -721,6 +739,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         codexInvocationSettingsPanelController.show()
     }
 
+    @objc private func showMouseGestureSettings() {
+        settingsMenu.cancelTracking()
+        mouseGestureSettingsPanelController.show()
+    }
+
     private func setLaunchAtLogin(_ enabled: Bool) {
         do {
             try launchAtLoginController.setEnabled(enabled)
@@ -766,6 +789,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         if doubleCommandTapController.isEnabled,
            !doubleCommandTapController.isRunning {
             _ = doubleCommandTapController.startIfPermitted()
+        }
+        if mouseGestureController.hasEnabledRules,
+           !mouseGestureController.isRunning {
+            _ = mouseGestureController.startIfPermitted()
         }
     }
 

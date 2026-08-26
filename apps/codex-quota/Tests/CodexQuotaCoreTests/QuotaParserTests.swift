@@ -82,6 +82,16 @@ enum QuotaParserTests {
             ("keyboard shortcut formats modifiers in stable order", testKeyboardShortcutDisplay),
             ("keyboard shortcut names special keys", testKeyboardShortcutSpecialKeys),
             ("keyboard shortcut requires a modifier", testKeyboardShortcutValidation),
+            ("mouse gesture direction uses the dominant axis", testMouseGestureDirection),
+            ("mouse gesture recognizer waits for minimum distances", testMouseGestureMinimumDistances),
+            ("mouse gesture recognizer merges repeated directions", testMouseGestureMergesRepeatedDirections),
+            ("mouse gesture recognizer caps at four directions", testMouseGestureSegmentLimit),
+            ("mouse gesture rule matching is exact and case insensitive", testMouseGestureRuleMatching),
+            ("mouse gesture matching skips disabled rules and preserves order", testMouseGestureRuleOrder),
+            ("mouse gesture rules round trip through JSON", testMouseGestureRuleJSONRoundTrip),
+            ("mouse gesture filter wildcard supports global and case insensitive matches", testMouseGestureFilterWildcard),
+            ("mouse gesture filter accepts multiple patterns", testMouseGestureFilterMultiplePatterns),
+            ("mouse gesture filter rejects nonmatching patterns", testMouseGestureFilterNonmatch),
             ("battery style defaults to native", testDefaultBatteryStyle),
             ("battery styles have stable order and raw values", testBatteryStyleCases),
             ("battery styles have exact menu titles", testBatteryStyleMenuTitles),
@@ -1083,6 +1093,86 @@ enum QuotaParserTests {
     private static func testKeyboardShortcutValidation() -> Bool {
         !KeyboardShortcut.isValid(keyCode: 8, flags: 0)
             && KeyboardShortcut.isValid(keyCode: 8, flags: KeyboardShortcut.commandFlag)
+    }
+
+    private static func testMouseGestureDirection() -> Bool {
+        MouseGestureDirection.direction(dx: 40, dy: 10) == .right
+            && MouseGestureDirection.direction(dx: -40, dy: 10) == .left
+            && MouseGestureDirection.direction(dx: 10, dy: -40) == .up
+            && MouseGestureDirection.direction(dx: 10, dy: 40) == .down
+            && MouseGestureDirection.direction(dx: 20, dy: 20) == .down
+    }
+
+    private static func testMouseGestureMinimumDistances() -> Bool {
+        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
+        let pending = recognizer.update(point: MouseGesturePoint(x: 9, y: 0), isRecognizing: false)
+        let started = recognizer.update(point: MouseGesturePoint(x: 10, y: 0), isRecognizing: false)
+        _ = recognizer.update(point: MouseGesturePoint(x: 29, y: 0), isRecognizing: true)
+        let beforeSegment = recognizer.sequence.isEmpty
+        _ = recognizer.update(point: MouseGesturePoint(x: 30, y: 0), isRecognizing: true)
+        return !pending && started && beforeSegment && recognizer.sequence == "R"
+    }
+
+    private static func testMouseGestureMergesRepeatedDirections() -> Bool {
+        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
+        _ = recognizer.update(point: MouseGesturePoint(x: 30, y: 0), isRecognizing: true)
+        _ = recognizer.update(point: MouseGesturePoint(x: 60, y: 0), isRecognizing: true)
+        _ = recognizer.update(point: MouseGesturePoint(x: 60, y: 30), isRecognizing: true)
+        return recognizer.sequence == "RD"
+    }
+
+    private static func testMouseGestureSegmentLimit() -> Bool {
+        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
+        for point in [
+            MouseGesturePoint(x: 30, y: 0), MouseGesturePoint(x: 30, y: 30),
+            MouseGesturePoint(x: 0, y: 30), MouseGesturePoint(x: 0, y: 0),
+            MouseGesturePoint(x: 30, y: 0)
+        ] {
+            _ = recognizer.update(point: point, isRecognizing: true)
+        }
+        return recognizer.sequence == "RDLU"
+    }
+
+    private static func testMouseGestureRuleMatching() -> Bool {
+        let rule = MouseGestureRule(gesture: "dr", appFilter: "*safari*", keyCode: 17, modifierFlags: KeyboardShortcut.commandFlag)
+        return MouseGestureRuleMatcher.firstMatch(sequence: "DR", bundleIdentifier: "com.apple.Safari", rules: [rule]) == rule
+            && MouseGestureRuleMatcher.firstMatch(sequence: "D", bundleIdentifier: "com.apple.Safari", rules: [rule]) == nil
+    }
+
+    private static func testMouseGestureRuleOrder() -> Bool {
+        let disabled = MouseGestureRule(gesture: "D", keyCode: 17, modifierFlags: KeyboardShortcut.commandFlag, isEnabled: false)
+        let first = MouseGestureRule(gesture: "D", keyCode: 12, modifierFlags: KeyboardShortcut.commandFlag)
+        let second = MouseGestureRule(gesture: "D", keyCode: 13, modifierFlags: KeyboardShortcut.commandFlag)
+        return MouseGestureRuleMatcher.firstMatch(sequence: "d", bundleIdentifier: "com.apple.Safari", rules: [disabled, first, second])?.id == first.id
+    }
+
+    private static func testMouseGestureRuleJSONRoundTrip() -> Bool {
+        let rule = MouseGestureRule(
+            gesture: "LU",
+            appFilter: "*safari*|*chrome",
+            keyCode: 30,
+            modifierFlags: KeyboardShortcut.commandFlag | KeyboardShortcut.shiftFlag,
+            note: "Next tab",
+            isEnabled: false
+        )
+        guard let data = try? JSONEncoder().encode([rule]),
+              let restored = try? JSONDecoder().decode([MouseGestureRule].self, from: data) else {
+            return false
+        }
+        return restored == [rule]
+    }
+
+    private static func testMouseGestureFilterWildcard() -> Bool {
+        MouseGestureRuleMatcher.matches(filter: "*", bundleIdentifier: "com.apple.Safari")
+            && MouseGestureRuleMatcher.matches(filter: "*SaFaRi*", bundleIdentifier: "com.apple.Safari")
+    }
+
+    private static func testMouseGestureFilterMultiplePatterns() -> Bool {
+        MouseGestureRuleMatcher.matches(filter: "*chrome|*safari*", bundleIdentifier: "com.apple.Safari")
+    }
+
+    private static func testMouseGestureFilterNonmatch() -> Bool {
+        !MouseGestureRuleMatcher.matches(filter: "*chrome*", bundleIdentifier: "com.apple.Safari")
     }
 
     private static func testDefaultBatteryStyle() -> Bool {

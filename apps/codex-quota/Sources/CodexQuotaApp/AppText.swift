@@ -24,6 +24,19 @@ struct AppText {
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
     var enableModifierTapOpenCodex: String { choose("启用修饰键呼出", "Enable Modifier Gesture") }
     var globalShortcutSettings: String { choose("全局快捷键设置", "Global Shortcut Settings") }
+    var rightClickShortcutOperations: String { choose("右键快捷操作", "Right-Click Shortcuts") }
+    var rightClickShortcutOperationsMenu: String { choose("右键快捷操作…", "Right-Click Shortcuts…") }
+    var gesture: String { choose("手势", "Gesture") }
+    var filter: String { choose("过滤", "Filter") }
+    var action: String { choose("行为", "Action") }
+    var description: String { choose("说明", "Description") }
+    var enabled: String { choose("启用", "Enabled") }
+    var recordShortcut: String { choose("录制快捷键", "Record Shortcut") }
+    var recordingShortcut: String { choose("按下快捷键…", "Press a shortcut…") }
+    var noShortcut: String { choose("未设置", "Not Set") }
+    var rightClickShortcutHint: String { choose("按住右键拖出方向后松开，触发匹配的快捷键。", "Hold the right mouse button, draw a direction, then release to trigger a shortcut.") }
+    var rightClickShortcutPermissionGranted: String { choose("辅助功能权限：已授权", "Accessibility: Authorized") }
+    var rightClickShortcutPermissionRequired: String { choose("辅助功能权限：未授权，右键快捷操作不可用。", "Accessibility permission is required; right-click shortcuts are unavailable.") }
     var triggerGestureSection: String { choose("触发手势", "Trigger Gesture") }
     var targetShortcutSection: String { choose("目标快捷键", "Target Shortcut") }
     var permissionsSection: String { choose("权限", "Permissions") }
