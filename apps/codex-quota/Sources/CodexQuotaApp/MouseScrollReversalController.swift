@@ -40,8 +40,8 @@ final class MouseScrollReversalController {
 
         let mask = CGEventMask(1) << CGEventType.scrollWheel.rawValue
         guard let eventTap = CGEvent.tapCreate(
-            tap: .cghidEventTap,
-            place: .headInsertEventTap,
+            tap: .cgSessionEventTap,
+            place: .tailAppendEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
             callback: Self.handleEvent,
@@ -85,12 +85,6 @@ final class MouseScrollReversalController {
         NSWorkspace.shared.open(url)
     }
 
-    private static let verticalFields: [CGEventField] = [
-        .scrollWheelEventDeltaAxis1,
-        .scrollWheelEventPointDeltaAxis1,
-        .scrollWheelEventFixedPtDeltaAxis1
-    ]
-
     private static let handleEvent: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo else {
             return Unmanaged.passUnretained(event)
@@ -122,9 +116,15 @@ final class MouseScrollReversalController {
             return Unmanaged.passUnretained(event)
         }
 
-        for field in verticalFields {
-            event.setIntegerValueField(field, value: -event.getIntegerValueField(field))
-        }
+        let delta1 = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+        let fixedPt1 = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1)
+        let point1 = event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1)
+
+        // DeltaAxis updates the derived point and fixed-point values internally, so it
+        // must be written first. Preserve the fixed-point value before the point value.
+        event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: -delta1)
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: -fixedPt1)
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: -point1)
         return Unmanaged.passUnretained(event)
     }
 }
@@ -160,7 +160,7 @@ private final class ScrollDiagnostics {
             "scrollWheelEventDeltaAxis2=\(event.getIntegerValueField(.scrollWheelEventDeltaAxis2))",
             "scrollWheelEventPointDeltaAxis1=\(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))",
             "scrollWheelEventPointDeltaAxis2=\(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))",
-            "scrollWheelEventFixedPtDeltaAxis1=\(event.getIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1))",
+            "scrollWheelEventFixedPtDeltaAxis1=\(event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1))",
             "scrollWheelEventFixedPtDeltaAxis2=\(event.getIntegerValueField(.scrollWheelEventFixedPtDeltaAxis2))",
             "scrollPhase=\(event.getIntegerValueField(.scrollWheelEventScrollPhase))",
             "momentumPhase=\(event.getIntegerValueField(.scrollWheelEventMomentumPhase))",

@@ -927,6 +927,8 @@ enum QuotaParserTests {
 
     private static func testContinuousScrollDoesNotReverse() -> Bool {
         !MouseScrollReversal.shouldReverseVerticalAxis(isContinuous: 1)
+            && !MouseScrollReversal.shouldReverseVerticalAxis(isContinuous: -1)
+            && !MouseScrollReversal.shouldReverseVerticalAxis(isContinuous: 2)
     }
 
     private static func testDoubleCommandFirstTap() -> Bool {
