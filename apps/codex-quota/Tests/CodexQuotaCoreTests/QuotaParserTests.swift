@@ -89,11 +89,15 @@ enum QuotaParserTests {
             ("mouse gesture direction recognizes diagonal boundaries", testMouseGestureDiagonalBoundaries),
             ("mouse gesture recognizer waits for minimum distances", testMouseGestureMinimumDistances),
             ("mouse gesture recognizer merges repeated directions", testMouseGestureMergesRepeatedDirections),
+            ("mouse gesture corner defers diagonal confirmation", testMouseGestureCornerDefersDiagonal),
+            ("mouse gesture confirms a sustained diagonal", testMouseGestureSustainedDiagonal),
             ("mouse gesture recognizer caps at two directions", testMouseGestureSegmentLimit),
             ("mouse gesture rule matching is exact and case insensitive", testMouseGestureRuleMatching),
             ("mouse gesture matching skips disabled rules and preserves order", testMouseGestureRuleOrder),
+            ("mouse gesture immediate matching honors the first matching rule", testMouseGestureImmediateMatching),
             ("mouse gesture rules round trip through JSON", testMouseGestureRuleJSONRoundTrip),
             ("mouse gesture legacy strings migrate to direction arrays", testMouseGestureLegacyMigration),
+            ("mouse gesture legacy rules default immediate trigger to false", testMouseGestureLegacyImmediateDefault),
             ("mouse gesture filter wildcard supports global and case insensitive matches", testMouseGestureFilterWildcard),
             ("mouse gesture filter accepts multiple patterns", testMouseGestureFilterMultiplePatterns),
             ("mouse gesture filter rejects nonmatching patterns", testMouseGestureFilterNonmatch),
@@ -1199,8 +1203,23 @@ enum QuotaParserTests {
         var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
         _ = recognizer.update(point: MouseGesturePoint(x: 30, y: 0), isRecognizing: true)
         _ = recognizer.update(point: MouseGesturePoint(x: 60, y: 0), isRecognizing: true)
-        _ = recognizer.update(point: MouseGesturePoint(x: 60, y: 30), isRecognizing: true)
+        _ = recognizer.update(point: MouseGesturePoint(x: 66, y: 36), isRecognizing: true)
         return recognizer.sequence == [.right, .downRight]
+    }
+
+    private static func testMouseGestureCornerDefersDiagonal() -> Bool {
+        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
+        _ = recognizer.update(point: MouseGesturePoint(x: 0, y: 30), isRecognizing: true)
+        _ = recognizer.update(point: MouseGesturePoint(x: 22, y: 52), isRecognizing: true)
+        let cornerDidNotAppendDiagonal = recognizer.sequence == [.down]
+        _ = recognizer.update(point: MouseGesturePoint(x: 54, y: 52), isRecognizing: true)
+        return cornerDidNotAppendDiagonal && recognizer.sequence == [.down, .right]
+    }
+
+    private static func testMouseGestureSustainedDiagonal() -> Bool {
+        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
+        _ = recognizer.update(point: MouseGesturePoint(x: 36, y: 36), isRecognizing: true)
+        return recognizer.sequence == [.downRight]
     }
 
     private static func testMouseGestureSegmentLimit() -> Bool {
@@ -1228,6 +1247,40 @@ enum QuotaParserTests {
         return MouseGestureRuleMatcher.firstMatch(sequence: [.down], bundleIdentifier: "com.apple.Safari", rules: [disabled, first, second])?.id == first.id
     }
 
+    private static func testMouseGestureImmediateMatching() -> Bool {
+        let immediate = MouseGestureRule(
+            gesture: [.down],
+            keyCode: 17,
+            modifierFlags: KeyboardShortcut.commandFlag,
+            firesImmediately: true
+        )
+        let deferred = MouseGestureRule(
+            gesture: [.down],
+            keyCode: 12,
+            modifierFlags: KeyboardShortcut.commandFlag
+        )
+        return MouseGestureRuleMatcher.firstImmediateMatch(
+            sequence: [.down],
+            bundleIdentifier: "com.apple.Safari",
+            rules: [immediate]
+        ) == immediate
+            && MouseGestureRuleMatcher.firstImmediateMatch(
+                sequence: [.down],
+                bundleIdentifier: "com.apple.Safari",
+                rules: [deferred]
+            ) == nil
+            && MouseGestureRuleMatcher.firstImmediateMatch(
+                sequence: [.down],
+                bundleIdentifier: "com.apple.Safari",
+                rules: [deferred, immediate]
+            ) == nil
+            && MouseGestureRuleMatcher.firstImmediateMatch(
+                sequence: [.down, .right],
+                bundleIdentifier: "com.apple.Safari",
+                rules: [immediate]
+            ) == nil
+    }
+
     private static func testMouseGestureRuleJSONRoundTrip() -> Bool {
         let rule = MouseGestureRule(
             gesture: [.left, .up],
@@ -1235,6 +1288,7 @@ enum QuotaParserTests {
             keyCode: 30,
             modifierFlags: KeyboardShortcut.commandFlag | KeyboardShortcut.shiftFlag,
             note: "Next tab",
+            firesImmediately: true,
             isEnabled: false
         )
         guard let data = try? JSONEncoder().encode([rule]),
@@ -1248,6 +1302,14 @@ enum QuotaParserTests {
         let json = "{\"id\":\"00000000-0000-0000-0000-000000000001\",\"gesture\":\"DLRU\",\"appFilter\":\"*\",\"keyCode\":17,\"modifierFlags\":1048576,\"note\":\"\",\"isEnabled\":true}"
         guard let rule = try? JSONDecoder().decode(MouseGestureRule.self, from: Data(json.utf8)) else { return false }
         return rule.gesture == [.down, .left]
+    }
+
+    private static func testMouseGestureLegacyImmediateDefault() -> Bool {
+        let json = "{\"id\":\"00000000-0000-0000-0000-000000000003\",\"gesture\":\"D\",\"appFilter\":\"*\",\"keyCode\":17,\"modifierFlags\":1048576,\"note\":\"\",\"isEnabled\":true}"
+        guard let rule = try? JSONDecoder().decode(MouseGestureRule.self, from: Data(json.utf8)) else {
+            return false
+        }
+        return !rule.firesImmediately
     }
 
     private static func testMouseGestureFilterWildcard() -> Bool {

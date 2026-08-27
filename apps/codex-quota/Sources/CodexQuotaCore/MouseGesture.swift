@@ -49,6 +49,7 @@ public struct MouseGesturePoint: Equatable, Sendable {
 public struct MouseGestureRecognizer: Sendable {
     public static let activationDistance = 10.0
     public static let segmentDistance = 30.0
+    public static let diagonalSegmentDistanceMultiplier = 1.6
     public static let maximumSegments = 2
 
     private let start: MouseGesturePoint
@@ -64,15 +65,24 @@ public struct MouseGestureRecognizer: Sendable {
         guard isRecognizing else {
             return start.distance(to: point) >= Self.activationDistance
         }
-        guard directions.count < Self.maximumSegments,
-              segmentStart.distance(to: point) >= Self.segmentDistance else {
+        guard directions.count < Self.maximumSegments else {
             return true
         }
 
+        let dx = point.x - segmentStart.x
+        let dy = point.y - segmentStart.y
         let direction = MouseGestureDirection.direction(
-            dx: point.x - segmentStart.x,
-            dy: point.y - segmentStart.y
+            dx: dx,
+            dy: dy
         )
+        let minimumDistance: Double
+        switch direction {
+        case .upLeft, .upRight, .downLeft, .downRight:
+            minimumDistance = Self.segmentDistance * Self.diagonalSegmentDistanceMultiplier
+        default:
+            minimumDistance = Self.segmentDistance
+        }
+        guard hypot(dx, dy) >= minimumDistance else { return true }
         guard directions.last != direction else {
             return true
         }
@@ -93,6 +103,7 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
     public var keyCode: UInt16
     public var modifierFlags: UInt64
     public var note: String
+    public var firesImmediately: Bool
     public var isEnabled: Bool
 
     public init(
@@ -102,6 +113,7 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
         keyCode: UInt16 = 0,
         modifierFlags: UInt64 = 0,
         note: String = "",
+        firesImmediately: Bool = false,
         isEnabled: Bool = true
     ) {
         self.id = id
@@ -110,6 +122,7 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
         self.keyCode = keyCode
         self.modifierFlags = modifierFlags
         self.note = note
+        self.firesImmediately = firesImmediately
         self.isEnabled = isEnabled
     }
 
@@ -131,7 +144,7 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
         gesture.map(\.symbol).joined()
     }
 
-    private enum CodingKeys: String, CodingKey { case id, gesture, appFilter, keyCode, modifierFlags, note, isEnabled }
+    private enum CodingKeys: String, CodingKey { case id, gesture, appFilter, keyCode, modifierFlags, note, firesImmediately, isEnabled }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -146,6 +159,7 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
         keyCode = try values.decode(UInt16.self, forKey: .keyCode)
         modifierFlags = try values.decode(UInt64.self, forKey: .modifierFlags)
         note = try values.decode(String.self, forKey: .note)
+        firesImmediately = try values.decodeIfPresent(Bool.self, forKey: .firesImmediately) ?? false
         isEnabled = try values.decode(Bool.self, forKey: .isEnabled)
     }
 
@@ -173,6 +187,21 @@ public enum MouseGestureRuleMatcher {
                 && rule.gesture == sequence
                 && matches(filter: rule.appFilter, bundleIdentifier: bundleIdentifier)
         }
+    }
+
+    public static func firstImmediateMatch(
+        sequence: [MouseGestureDirection],
+        bundleIdentifier: String?,
+        rules: [MouseGestureRule]
+    ) -> MouseGestureRule? {
+        guard let rule = firstMatch(
+            sequence: sequence,
+            bundleIdentifier: bundleIdentifier,
+            rules: rules
+        ), rule.firesImmediately else {
+            return nil
+        }
+        return rule
     }
 
     public static func matches(filter: String, bundleIdentifier: String?) -> Bool {

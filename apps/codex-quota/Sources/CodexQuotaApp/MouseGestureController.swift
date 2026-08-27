@@ -14,7 +14,11 @@ final class MouseGestureController: NSObject {
     private enum State {
         case idle
         case pending(start: CGPoint, recognizer: MouseGestureRecognizer)
-        case recognizing(start: CGPoint, recognizer: MouseGestureRecognizer)
+        case recognizing(
+            start: CGPoint,
+            recognizer: MouseGestureRecognizer,
+            hasConsumedGesture: Bool
+        )
     }
 
     private let defaults: UserDefaults
@@ -164,12 +168,27 @@ final class MouseGestureController: NSObject {
         case let .pending(start, recognizer):
             var recognizer = recognizer
             guard recognizer.update(point: gesturePoint(point), isRecognizing: false) else { return }
+            let sequenceBeforeUpdate = recognizer.sequence
             _ = recognizer.update(point: gesturePoint(point), isRecognizing: true)
-            state = .recognizing(start: start, recognizer: recognizer)
-        case let .recognizing(start, recognizer):
+            let hasConsumedGesture = recognizer.sequence != sequenceBeforeUpdate
+                && fireImmediateRuleIfMatched(sequence: recognizer.sequence)
+            state = .recognizing(
+                start: start,
+                recognizer: recognizer,
+                hasConsumedGesture: hasConsumedGesture
+            )
+        case let .recognizing(start, recognizer, hasConsumedGesture):
             var recognizer = recognizer
+            let sequenceBeforeUpdate = recognizer.sequence
             _ = recognizer.update(point: gesturePoint(point), isRecognizing: true)
-            state = .recognizing(start: start, recognizer: recognizer)
+            let didConsumeGesture = !hasConsumedGesture
+                && recognizer.sequence != sequenceBeforeUpdate
+                && fireImmediateRuleIfMatched(sequence: recognizer.sequence)
+            state = .recognizing(
+                start: start,
+                recognizer: recognizer,
+                hasConsumedGesture: hasConsumedGesture || didConsumeGesture
+            )
         }
     }
 
@@ -181,7 +200,8 @@ final class MouseGestureController: NSObject {
             return
         case let .pending(start, _):
             repostRightClick(at: start)
-        case let .recognizing(start, recognizer):
+        case let .recognizing(start, recognizer, hasConsumedGesture):
+            guard !hasConsumedGesture else { return }
             let frontmostApplication = NSWorkspace.shared.frontmostApplication
             let bundleIdentifier = frontmostApplication?.bundleIdentifier
             let targetPID = frontmostApplication?.processIdentifier
@@ -195,6 +215,19 @@ final class MouseGestureController: NSObject {
                 repostRightClick(at: start)
             }
         }
+    }
+
+    private func fireImmediateRuleIfMatched(sequence: [MouseGestureDirection]) -> Bool {
+        let frontmostApplication = NSWorkspace.shared.frontmostApplication
+        guard let rule = MouseGestureRuleMatcher.firstImmediateMatch(
+            sequence: sequence,
+            bundleIdentifier: frontmostApplication?.bundleIdentifier,
+            rules: rules
+        ) else {
+            return false
+        }
+        postShortcut(rule, targetPID: frontmostApplication?.processIdentifier)
+        return true
     }
 
     private func scheduleTimeout() {

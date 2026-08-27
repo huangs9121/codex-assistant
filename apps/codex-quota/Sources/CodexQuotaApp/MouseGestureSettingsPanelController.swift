@@ -16,7 +16,7 @@ private final class SingleClickTextField: NSTextField {
 @MainActor
 final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private enum Column: String {
-        case gesture, filter, action, note, enabled
+        case gesture, filter, action, note, immediate, enabled
     }
 
     private let defaults: UserDefaults
@@ -145,7 +145,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         tableView.usesAlternatingRowBackgroundColors = true
         for (column, width) in [
             (Column.gesture, 130.0), (Column.filter, 145.0), (Column.action, 155.0),
-            (Column.note, 170.0), (Column.enabled, 60.0)
+            (Column.note, 170.0), (Column.immediate, 45.0), (Column.enabled, 60.0)
         ] {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
             tableColumn.title = columnTitle(column)
@@ -161,6 +161,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         case .filter: text.filter
         case .action: text.action
         case .note: text.description
+        case .immediate: "⚡️"
         case .enabled: text.enabled
         }
     }
@@ -200,6 +201,12 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
             manual.tag = row
             manual.bezelStyle = .rounded
             return NSStackView(views: [button, manual])
+        case .immediate:
+            let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleImmediateRule(_:)))
+            button.tag = row
+            button.state = rules[row].firesImmediately ? .on : .off
+            button.setAccessibilityLabel(text.immediateTrigger)
+            return button
         case .enabled:
             let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleRule(_:)))
             button.tag = row
@@ -246,6 +253,12 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
     @objc private func toggleRule(_ sender: NSButton) {
         guard rules.indices.contains(sender.tag) else { return }
         rules[sender.tag].isEnabled = sender.state == .on
+        saveRules()
+    }
+
+    @objc private func toggleImmediateRule(_ sender: NSButton) {
+        guard rules.indices.contains(sender.tag) else { return }
+        rules[sender.tag].firesImmediately = sender.state == .on
         saveRules()
     }
 

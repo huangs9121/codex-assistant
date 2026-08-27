@@ -65,6 +65,7 @@ struct AppText {
     var save: String { choose("保存", "Save") }
     var none: String { choose("无", "None") }
     var systemActions: String { choose("系统动作", "System Actions") }
+    var immediateTrigger: String { choose("立即触发", "Fire Immediately") }
     var checkingUpdates: String { choose("正在检查更新，请稍候。", "Checking for updates. Please wait.") }
     var cannotCheckUpdates: String { choose("无法检查更新", "Could Not Check for Updates") }
     var invalidVersion: String { choose("当前版本信息无效，请重新安装 Codex Quota。", "The current version information is invalid. Reinstall Codex Quota.") }
