@@ -1,6 +1,11 @@
 import AppKit
 import CodexQuotaCore
 import CoreGraphics
+import Darwin
+
+private final class ShortcutEventSource: @unchecked Sendable {
+    let source = CGEventSource(stateID: .hidSystemState)
+}
 
 final class MouseGestureController: NSObject {
     static let rulesDefaultsKey = "mouseGestureRules"
@@ -18,6 +23,11 @@ final class MouseGestureController: NSObject {
     private var timeoutTimer: Timer?
     private var state: State = .idle
     private(set) var rules: [MouseGestureRule] = []
+    private let shortcutPostingQueue = DispatchQueue(
+        label: "CodexQuota.mouseGestureShortcutPosting",
+        qos: .userInteractive
+    )
+    private let shortcutEventSource = ShortcutEventSource()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -172,13 +182,15 @@ final class MouseGestureController: NSObject {
         case let .pending(start, _):
             repostRightClick(at: start)
         case let .recognizing(start, recognizer):
-            let bundleIdentifier = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+            let frontmostApplication = NSWorkspace.shared.frontmostApplication
+            let bundleIdentifier = frontmostApplication?.bundleIdentifier
+            let targetPID = frontmostApplication?.processIdentifier
             if let rule = MouseGestureRuleMatcher.firstMatch(
                 sequence: recognizer.sequence,
                 bundleIdentifier: bundleIdentifier,
                 rules: rules
             ) {
-                postShortcut(rule)
+                postShortcut(rule, targetPID: targetPID)
             } else {
                 repostRightClick(at: start)
             }
@@ -226,15 +238,79 @@ final class MouseGestureController: NSObject {
         }
     }
 
-    private func postShortcut(_ rule: MouseGestureRule) {
-        let flags = CGEventFlags(rawValue: rule.modifierFlags)
-        for isKeyDown in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: nil, virtualKey: rule.keyCode, keyDown: isKeyDown) else {
-                continue
+    private func postShortcut(_ rule: MouseGestureRule, targetPID: pid_t?) {
+        if KeyboardShortcut.isMissionControl(keyCode: rule.keyCode, flags: rule.modifierFlags) {
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(
+                    URL(fileURLWithPath: "/System/Applications/Mission Control.app")
+                )
             }
-            event.flags = flags
-            event.post(tap: .cghidEventTap)
+            return
         }
+        let source = shortcutEventSource
+        shortcutPostingQueue.async {
+            Self.postShortcut(rule, targetPID: targetPID, eventSource: source)
+        }
+    }
+
+    private static func postShortcut(
+        _ rule: MouseGestureRule,
+        targetPID: pid_t?,
+        eventSource: ShortcutEventSource
+    ) {
+        let modifierDefinitions: [(keyCode: CGKeyCode, flag: CGEventFlags)] = [
+            (59, CGEventFlags(rawValue: KeyboardShortcut.controlFlag)),
+            (58, CGEventFlags(rawValue: KeyboardShortcut.optionFlag)),
+            (56, CGEventFlags(rawValue: KeyboardShortcut.shiftFlag)),
+            (55, CGEventFlags(rawValue: KeyboardShortcut.commandFlag))
+        ]
+        let modifiers = modifierDefinitions.filter { rule.modifierFlags & $0.flag.rawValue != 0 }
+        let fullFlags = CGEventFlags(rawValue: rule.modifierFlags)
+
+        func post(
+            keyCode: CGKeyCode,
+            type: CGEventType,
+            flags: CGEventFlags
+        ) {
+            guard let event = CGEvent(
+                keyboardEventSource: eventSource.source,
+                virtualKey: keyCode,
+                keyDown: type != .keyUp
+            ) else {
+                return
+            }
+            event.type = type
+            event.flags = flags
+            if let targetPID {
+                event.postToPid(targetPID)
+            } else {
+                event.post(tap: .cghidEventTap)
+            }
+            usleep(10_000)
+        }
+
+        var currentFlags = CGEventFlags()
+        for modifier in modifiers {
+            currentFlags.insert(modifier.flag)
+            post(
+                keyCode: modifier.keyCode,
+                type: .flagsChanged,
+                flags: currentFlags
+            )
+        }
+
+        post(keyCode: rule.keyCode, type: .keyDown, flags: fullFlags)
+        post(keyCode: rule.keyCode, type: .keyUp, flags: fullFlags)
+
+        for modifier in modifiers.reversed() {
+            currentFlags.remove(modifier.flag)
+            post(
+                keyCode: modifier.keyCode,
+                type: .flagsChanged,
+                flags: currentFlags
+            )
+        }
+
     }
 
     private func gesturePoint(_ point: CGPoint) -> MouseGesturePoint {

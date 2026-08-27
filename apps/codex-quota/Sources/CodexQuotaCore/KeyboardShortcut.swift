@@ -1,6 +1,7 @@
 import Foundation
 
 public enum KeyboardShortcut {
+    public static let missionControlKeyCode: UInt16 = 0xFFFF
     public static let controlFlag: UInt64 = 1 << 18
     public static let optionFlag: UInt64 = 1 << 19
     public static let shiftFlag: UInt64 = 1 << 17
@@ -10,8 +11,15 @@ public enum KeyboardShortcut {
         flags & (controlFlag | optionFlag | shiftFlag | commandFlag) != 0
     }
 
+    public static func isMissionControl(keyCode: UInt16, flags: UInt64) -> Bool {
+        keyCode == missionControlKeyCode && flags == 0
+    }
+
     public static func displayString(keyCode: UInt16, flags: UInt64) -> String {
-        modifierSymbols(flags: flags) + keyName(for: keyCode)
+        if isMissionControl(keyCode: keyCode, flags: flags) {
+            return "Mission Control"
+        }
+        return modifierSymbols(flags: flags) + keyName(for: keyCode)
     }
 
     private static func modifierSymbols(flags: UInt64) -> String {

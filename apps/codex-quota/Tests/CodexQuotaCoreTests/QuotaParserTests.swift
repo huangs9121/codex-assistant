@@ -82,6 +82,8 @@ enum QuotaParserTests {
             ("keyboard shortcut formats modifiers in stable order", testKeyboardShortcutDisplay),
             ("keyboard shortcut names special keys", testKeyboardShortcutSpecialKeys),
             ("keyboard shortcut requires a modifier", testKeyboardShortcutValidation),
+            ("Mission Control sentinel is a valid gesture shortcut", testMissionControlShortcutValidation),
+            ("Mission Control sentinel has a display string", testMissionControlShortcutDisplay),
             ("mouse gesture direction uses the dominant axis", testMouseGestureDirection),
             ("mouse gesture direction recognizes diagonal boundaries", testMouseGestureDiagonalBoundaries),
             ("mouse gesture recognizer waits for minimum distances", testMouseGestureMinimumDistances),
@@ -1095,6 +1097,32 @@ enum QuotaParserTests {
     private static func testKeyboardShortcutValidation() -> Bool {
         !KeyboardShortcut.isValid(keyCode: 8, flags: 0)
             && KeyboardShortcut.isValid(keyCode: 8, flags: KeyboardShortcut.commandFlag)
+    }
+
+    private static func testMissionControlShortcutValidation() -> Bool {
+        let rule = MouseGestureRule(
+            gesture: [.up],
+            keyCode: KeyboardShortcut.missionControlKeyCode,
+            modifierFlags: 0
+        )
+        let malformedRule = MouseGestureRule(
+            gesture: [.up],
+            keyCode: KeyboardShortcut.missionControlKeyCode,
+            modifierFlags: KeyboardShortcut.commandFlag
+        )
+        return KeyboardShortcut.isMissionControl(keyCode: rule.keyCode, flags: rule.modifierFlags)
+            && rule.hasValidShortcut
+            && !malformedRule.hasValidShortcut
+    }
+
+    private static func testMissionControlShortcutDisplay() -> Bool {
+        expect(
+            KeyboardShortcut.displayString(
+                keyCode: KeyboardShortcut.missionControlKeyCode,
+                flags: 0
+            ),
+            equals: "Mission Control"
+        )
     }
 
     private static func testMouseGestureDirection() -> Bool {

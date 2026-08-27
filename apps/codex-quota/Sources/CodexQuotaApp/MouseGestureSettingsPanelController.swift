@@ -31,6 +31,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
     private var manualKeyCode: UInt16 = 0
     private var manualFlags: UInt64 = 0
     private let manualPreview = NSTextField(labelWithString: "")
+    private var manualModifierButtons: [NSButton] = []
 
     private let tableView = NSTableView()
     private let permissionLabel = NSTextField(labelWithString: "")
@@ -325,27 +326,71 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
 
     private func makeManualShortcutView() -> NSView {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
-        manualPreview.stringValue = KeyboardShortcut.displayString(keyCode: manualKeyCode, flags: manualFlags)
+        manualPreview.stringValue = shortcutDisplayString(keyCode: manualKeyCode, flags: manualFlags)
         manualPreview.alignment = .center; manualPreview.font = .monospacedSystemFont(ofSize: 20, weight: .medium); manualPreview.frame = NSRect(x: 20, y: 320, width: 480, height: 28)
         view.addSubview(manualPreview)
         let modifiers: [(String, UInt64)] = [("⌃ Control", KeyboardShortcut.controlFlag), ("⌥ Option", KeyboardShortcut.optionFlag), ("⇧ Shift", KeyboardShortcut.shiftFlag), ("⌘ Command", KeyboardShortcut.commandFlag)]
+        manualModifierButtons = []
         for (index, item) in modifiers.enumerated() {
             let button = NSButton(checkboxWithTitle: item.0, target: self, action: #selector(toggleManualModifier(_:)))
             button.tag = index; button.state = manualFlags & item.1 != 0 ? .on : .off; button.frame = NSRect(x: 20, y: 275 - index * 34, width: 130, height: 26); view.addSubview(button)
+            manualModifierButtons.append(button)
         }
         let keys = manualKeys()
         for (index, key) in keys.enumerated() {
             let button = NSButton(title: key.0, target: self, action: #selector(selectManualKey(_:)))
             button.tag = Int(key.1); button.frame = NSRect(x: 170 + (index % 8) * 41, y: 275 - (index / 8) * 36, width: 37, height: 28); view.addSubview(button)
         }
+        let systemActions = NSTextField(labelWithString: text.systemActions)
+        systemActions.font = .systemFont(ofSize: 12)
+        systemActions.textColor = .secondaryLabelColor
+        systemActions.frame = NSRect(x: 20, y: 94, width: 130, height: 18)
+        view.addSubview(systemActions)
+        let missionControl = NSButton(
+            title: text.missionControl,
+            target: self,
+            action: #selector(selectMissionControlAction)
+        )
+        missionControl.frame = NSRect(x: 20, y: 62, width: 130, height: 28)
+        view.addSubview(missionControl)
         let save = NSButton(title: text.save, target: self, action: #selector(saveManualShortcut)); save.bezelStyle = .rounded; save.frame = NSRect(x: 420, y: 16, width: 80, height: 28); view.addSubview(save)
         return view
     }
 
-    @objc private func toggleManualModifier(_ sender: NSButton) { let flags = [KeyboardShortcut.controlFlag, KeyboardShortcut.optionFlag, KeyboardShortcut.shiftFlag, KeyboardShortcut.commandFlag]; manualFlags ^= flags[sender.tag]; refreshManualPreview() }
-    @objc private func selectManualKey(_ sender: NSButton) { manualKeyCode = UInt16(sender.tag); refreshManualPreview() }
+    @objc private func toggleManualModifier(_ sender: NSButton) {
+        if KeyboardShortcut.isMissionControl(keyCode: manualKeyCode, flags: manualFlags) {
+            manualKeyCode = 0
+            manualFlags = 0
+        }
+        let flags = [KeyboardShortcut.controlFlag, KeyboardShortcut.optionFlag, KeyboardShortcut.shiftFlag, KeyboardShortcut.commandFlag]
+        manualFlags ^= flags[sender.tag]
+        refreshManualPreview()
+    }
+
+    @objc private func selectManualKey(_ sender: NSButton) {
+        if KeyboardShortcut.isMissionControl(keyCode: manualKeyCode, flags: manualFlags) {
+            manualFlags = 0
+        }
+        manualKeyCode = UInt16(sender.tag)
+        refreshManualPreview()
+    }
+
+    @objc private func selectMissionControlAction() {
+        manualKeyCode = KeyboardShortcut.missionControlKeyCode
+        manualFlags = 0
+        manualModifierButtons.forEach { $0.state = .off }
+        refreshManualPreview()
+    }
+
     @objc private func saveManualShortcut() { guard let row = manualRow else { return }; rules[row].keyCode = manualKeyCode; rules[row].modifierFlags = manualFlags; saveRules(); manualPopover.close(); tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 2)) }
-    private func refreshManualPreview() { manualPreview.stringValue = KeyboardShortcut.displayString(keyCode: manualKeyCode, flags: manualFlags) }
+    private func refreshManualPreview() { manualPreview.stringValue = shortcutDisplayString(keyCode: manualKeyCode, flags: manualFlags) }
+
+    private func shortcutDisplayString(keyCode: UInt16, flags: UInt64) -> String {
+        if KeyboardShortcut.isMissionControl(keyCode: keyCode, flags: flags) {
+            return text.missionControl
+        }
+        return KeyboardShortcut.displayString(keyCode: keyCode, flags: flags)
+    }
     private func manualKeys() -> [(String, UInt16)] {
         var keys: [(String, UInt16)] = [("Esc",53),("Space",49),("Tab",48),("Return",36),("Delete",51),("←",123),("↑",126),("→",124),("↓",125)]
         keys += (0...25).map { (String(UnicodeScalar(65 + $0)!), ansiKeyCode(for: $0)) }
@@ -361,7 +406,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         if recordingRow == row { return text.recordingShortcut }
         let rule = rules[row]
         return rule.hasValidShortcut
-            ? KeyboardShortcut.displayString(keyCode: rule.keyCode, flags: rule.modifierFlags)
+            ? shortcutDisplayString(keyCode: rule.keyCode, flags: rule.modifierFlags)
             : text.recordShortcut
     }
 
