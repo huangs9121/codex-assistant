@@ -89,8 +89,11 @@ enum QuotaParserTests {
             ("mouse gesture direction recognizes diagonal boundaries", testMouseGestureDiagonalBoundaries),
             ("mouse gesture recognizer waits for minimum distances", testMouseGestureMinimumDistances),
             ("mouse gesture recognizer merges repeated directions", testMouseGestureMergesRepeatedDirections),
-            ("mouse gesture corner defers diagonal confirmation", testMouseGestureCornerDefersDiagonal),
+            ("mouse gesture right-angle turn uses local tangent", testMouseGestureRightAngleTurn),
+            ("mouse gesture mirrored right-angle turn uses local tangent", testMouseGestureMirroredRightAngleTurn),
             ("mouse gesture confirms a sustained diagonal", testMouseGestureSustainedDiagonal),
+            ("mouse gesture confirms a diagonal after a cardinal segment", testMouseGestureCardinalThenDiagonal),
+            ("mouse gesture ignores horizontal jitter in a cardinal drag", testMouseGestureCardinalJitter),
             ("mouse gesture recognizer caps at two directions", testMouseGestureSegmentLimit),
             ("mouse gesture rule matching is exact and case insensitive", testMouseGestureRuleMatching),
             ("mouse gesture matching skips disabled rules and preserves order", testMouseGestureRuleOrder),
@@ -1203,23 +1206,70 @@ enum QuotaParserTests {
         var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
         _ = recognizer.update(point: MouseGesturePoint(x: 30, y: 0), isRecognizing: true)
         _ = recognizer.update(point: MouseGesturePoint(x: 60, y: 0), isRecognizing: true)
-        _ = recognizer.update(point: MouseGesturePoint(x: 66, y: 36), isRecognizing: true)
+        _ = recognizer.update(point: MouseGesturePoint(x: 84, y: 24), isRecognizing: true)
+        _ = recognizer.update(point: MouseGesturePoint(x: 96, y: 36), isRecognizing: true)
         return recognizer.sequence == [.right, .downRight]
     }
 
-    private static func testMouseGestureCornerDefersDiagonal() -> Bool {
-        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
-        _ = recognizer.update(point: MouseGesturePoint(x: 0, y: 30), isRecognizing: true)
-        _ = recognizer.update(point: MouseGesturePoint(x: 22, y: 52), isRecognizing: true)
-        let cornerDidNotAppendDiagonal = recognizer.sequence == [.down]
-        _ = recognizer.update(point: MouseGesturePoint(x: 54, y: 52), isRecognizing: true)
-        return cornerDidNotAppendDiagonal && recognizer.sequence == [.down, .right]
+    private static func testMouseGestureRightAngleTurn() -> Bool {
+        recognizedDirections(for: [
+            MouseGesturePoint(x: 0, y: 30),
+            MouseGesturePoint(x: 3, y: 45),
+            MouseGesturePoint(x: 12, y: 58),
+            MouseGesturePoint(x: 25, y: 67),
+            MouseGesturePoint(x: 40, y: 70),
+            MouseGesturePoint(x: 55, y: 70),
+            MouseGesturePoint(x: 70, y: 70),
+            MouseGesturePoint(x: 85, y: 70),
+            MouseGesturePoint(x: 100, y: 70)
+        ]) == [.down, .right]
+    }
+
+    private static func testMouseGestureMirroredRightAngleTurn() -> Bool {
+        recognizedDirections(for: [
+            MouseGesturePoint(x: 0, y: 30),
+            MouseGesturePoint(x: -3, y: 45),
+            MouseGesturePoint(x: -12, y: 58),
+            MouseGesturePoint(x: -25, y: 67),
+            MouseGesturePoint(x: -40, y: 70),
+            MouseGesturePoint(x: -55, y: 70),
+            MouseGesturePoint(x: -70, y: 70),
+            MouseGesturePoint(x: -85, y: 70),
+            MouseGesturePoint(x: -100, y: 70)
+        ]) == [.down, .left]
     }
 
     private static func testMouseGestureSustainedDiagonal() -> Bool {
-        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
-        _ = recognizer.update(point: MouseGesturePoint(x: 36, y: 36), isRecognizing: true)
-        return recognizer.sequence == [.downRight]
+        recognizedDirections(for: [
+            MouseGesturePoint(x: 8, y: 8),
+            MouseGesturePoint(x: 18, y: 18),
+            MouseGesturePoint(x: 28, y: 28),
+            MouseGesturePoint(x: 36, y: 36)
+        ]) == [.downRight]
+    }
+
+    private static func testMouseGestureCardinalThenDiagonal() -> Bool {
+        recognizedDirections(for: [
+            MouseGesturePoint(x: 0, y: 30),
+            MouseGesturePoint(x: 8, y: 38),
+            MouseGesturePoint(x: 18, y: 48),
+            MouseGesturePoint(x: 28, y: 58),
+            MouseGesturePoint(x: 36, y: 66)
+        ]) == [.down, .downRight]
+    }
+
+    private static func testMouseGestureCardinalJitter() -> Bool {
+        recognizedDirections(for: [
+            MouseGesturePoint(x: 0, y: 10),
+            MouseGesturePoint(x: 3, y: 20),
+            MouseGesturePoint(x: -3, y: 30),
+            MouseGesturePoint(x: 4, y: 40),
+            MouseGesturePoint(x: -4, y: 50),
+            MouseGesturePoint(x: 5, y: 60),
+            MouseGesturePoint(x: -5, y: 70),
+            MouseGesturePoint(x: 8, y: 80),
+            MouseGesturePoint(x: -8, y: 90)
+        ]) == [.down]
     }
 
     private static func testMouseGestureSegmentLimit() -> Bool {
@@ -1323,6 +1373,16 @@ enum QuotaParserTests {
 
     private static func testMouseGestureFilterNonmatch() -> Bool {
         !MouseGestureRuleMatcher.matches(filter: "*chrome*", bundleIdentifier: "com.apple.Safari")
+    }
+
+    private static func recognizedDirections(
+        for points: [MouseGesturePoint]
+    ) -> [MouseGestureDirection] {
+        var recognizer = MouseGestureRecognizer(start: MouseGesturePoint(x: 0, y: 0))
+        for point in points {
+            _ = recognizer.update(point: point, isRecognizing: true)
+        }
+        return recognizer.sequence
     }
 
     private static func testDefaultBatteryStyle() -> Bool {

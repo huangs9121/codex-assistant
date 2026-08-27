@@ -49,16 +49,22 @@ public struct MouseGesturePoint: Equatable, Sendable {
 public struct MouseGestureRecognizer: Sendable {
     public static let activationDistance = 10.0
     public static let segmentDistance = 30.0
-    public static let diagonalSegmentDistanceMultiplier = 1.6
+    public static let tangentWindowDistance = 25.0
+    public static let diagonalConfirmationDistance = 40.0
     public static let maximumSegments = 2
 
     private let start: MouseGesturePoint
     private var segmentStart: MouseGesturePoint
+    private var recentPoints: [MouseGesturePoint]
+    private var recentPathDistance = 0.0
+    private var diagonalCandidate: MouseGestureDirection?
+    private var diagonalCandidatePathDistance = 0.0
     public private(set) var directions: [MouseGestureDirection] = []
 
     public init(start: MouseGesturePoint) {
         self.start = start
         segmentStart = start
+        recentPoints = [start]
     }
 
     public mutating func update(point: MouseGesturePoint, isRecognizing: Bool) -> Bool {
@@ -69,30 +75,109 @@ public struct MouseGestureRecognizer: Sendable {
             return true
         }
 
-        let dx = point.x - segmentStart.x
-        let dy = point.y - segmentStart.y
+        let addedPathDistance = appendRecentPoint(point)
+        guard addedPathDistance > 0 else { return true }
+        guard let tangent = recentTangent() else {
+            resetDiagonalCandidate()
+            return true
+        }
         let direction = MouseGestureDirection.direction(
-            dx: dx,
-            dy: dy
+            dx: tangent.dx,
+            dy: tangent.dy
         )
-        let minimumDistance: Double
+        let hasReachedSegmentDistance = segmentStart.distance(to: point) >= Self.segmentDistance
+
         switch direction {
         case .upLeft, .upRight, .downLeft, .downRight:
-            minimumDistance = Self.segmentDistance * Self.diagonalSegmentDistanceMultiplier
+            updateDiagonalCandidate(direction, addedPathDistance: addedPathDistance)
+            guard hasReachedSegmentDistance,
+                  diagonalCandidatePathDistance >= Self.diagonalConfirmationDistance else {
+                return true
+            }
         default:
-            minimumDistance = Self.segmentDistance
+            resetDiagonalCandidate()
+            guard hasReachedSegmentDistance else { return true }
         }
-        guard hypot(dx, dy) >= minimumDistance else { return true }
         guard directions.last != direction else {
             return true
         }
         directions.append(direction)
         segmentStart = point
+        resetRecentPath(at: point)
+        resetDiagonalCandidate()
         return true
     }
 
     public var sequence: [MouseGestureDirection] {
         directions
+    }
+
+    private mutating func appendRecentPoint(_ point: MouseGesturePoint) -> Double {
+        guard let previous = recentPoints.last, previous != point else { return 0 }
+        let addedPathDistance = previous.distance(to: point)
+        recentPoints.append(point)
+        recentPathDistance += addedPathDistance
+
+        while recentPoints.count > 2 {
+            let firstSegmentDistance = recentPoints[0].distance(to: recentPoints[1])
+            guard recentPathDistance - firstSegmentDistance >= Self.tangentWindowDistance else {
+                break
+            }
+            recentPoints.removeFirst()
+            recentPathDistance -= firstSegmentDistance
+        }
+        return addedPathDistance
+    }
+
+    private func recentTangent() -> (dx: Double, dy: Double)? {
+        guard let end = recentPoints.last, recentPoints.count > 1 else { return nil }
+        var distanceToLookBack = min(Self.tangentWindowDistance, recentPathDistance)
+
+        for index in stride(from: recentPoints.count - 1, through: 1, by: -1) {
+            let pathStart = recentPoints[index - 1]
+            let pathEnd = recentPoints[index]
+            let pathDistance = pathStart.distance(to: pathEnd)
+            guard pathDistance > 0 else { continue }
+
+            if distanceToLookBack <= pathDistance {
+                let startFraction = (pathDistance - distanceToLookBack) / pathDistance
+                let tangentStart = MouseGesturePoint(
+                    x: pathStart.x + (pathEnd.x - pathStart.x) * startFraction,
+                    y: pathStart.y + (pathEnd.y - pathStart.y) * startFraction
+                )
+                let dx = end.x - tangentStart.x
+                let dy = end.y - tangentStart.y
+                return hypot(dx, dy) > 0.001 ? (dx, dy) : nil
+            }
+            distanceToLookBack -= pathDistance
+        }
+
+        guard let first = recentPoints.first else { return nil }
+        let dx = end.x - first.x
+        let dy = end.y - first.y
+        return hypot(dx, dy) > 0.001 ? (dx, dy) : nil
+    }
+
+    private mutating func updateDiagonalCandidate(
+        _ direction: MouseGestureDirection,
+        addedPathDistance: Double
+    ) {
+        if diagonalCandidate == direction {
+            diagonalCandidatePathDistance += addedPathDistance
+        } else {
+            diagonalCandidate = direction
+            diagonalCandidatePathDistance = addedPathDistance
+        }
+    }
+
+    private mutating func resetRecentPath(at point: MouseGesturePoint) {
+        recentPoints = [point]
+        recentPathDistance = 0
+    }
+
+    private mutating func resetDiagonalCandidate() {
+        diagonalCandidate = nil
+        diagonalCandidatePathDistance = 0
     }
 }
 
