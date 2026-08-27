@@ -17,6 +17,10 @@ enum StatusPanelPresentationTests {
             run: testFailedSubtitles
         ),
         TaskStatusParserTestCase(
+            name: "status panel interrupted task subtitle",
+            run: testInterruptedSubtitle
+        ),
+        TaskStatusParserTestCase(
             name: "status panel relative time localizes now and minutes",
             run: testRelativeTime
         ),
@@ -95,7 +99,8 @@ enum StatusPanelPresentationTests {
         justNow: "刚刚",
         runningFormat: "已运行 {duration} · {relative}开始",
         completedWithDurationFormat: "{relative} · 耗时 {duration}",
-        failedWithExitCodeFormat: "{relative} · 退出码 {exitCode}"
+        failedWithExitCodeFormat: "{relative} · 退出码 {exitCode}",
+        interrupted: "已中断"
     )
 
     private static func testRunningSubtitle() -> Bool {
@@ -160,6 +165,19 @@ enum StatusPanelPresentationTests {
                 language: .simplifiedChinese,
                 text: chineseText
             ) == "刚刚"
+    }
+
+    private static func testInterruptedSubtitle() -> Bool {
+        let task = snapshot(
+            startedAt: now.addingTimeInterval(-30),
+            status: .interrupted
+        )
+        return TaskStatusPresentationFormatter.subtitle(
+            for: task,
+            now: now,
+            language: .simplifiedChinese,
+            text: chineseText
+        ) == "已中断"
     }
 
     private static func testRelativeTime() -> Bool {

@@ -215,17 +215,20 @@ public struct TaskStatusPresentationText: Equatable, Sendable {
     public let runningFormat: String
     public let completedWithDurationFormat: String
     public let failedWithExitCodeFormat: String
+    public let interrupted: String
 
     public init(
         justNow: String,
         runningFormat: String,
         completedWithDurationFormat: String,
-        failedWithExitCodeFormat: String
+        failedWithExitCodeFormat: String,
+        interrupted: String
     ) {
         self.justNow = justNow
         self.runningFormat = runningFormat
         self.completedWithDurationFormat = completedWithDurationFormat
         self.failedWithExitCodeFormat = failedWithExitCodeFormat
+        self.interrupted = interrupted
     }
 }
 
@@ -288,6 +291,8 @@ public enum TaskStatusPresentationFormatter {
                     "exitCode": String(exitCode)
                 ]
             )
+        case .interrupted:
+            return text.interrupted
         }
     }
 

@@ -11,9 +11,18 @@ public enum TaskExecutionStatus: String, Codable, Equatable, Sendable {
     case running
     case done
     case failed
+    case interrupted
 
     public var isTerminal: Bool {
         self != .running
+    }
+
+    public var isClearable: Bool {
+        self == .done || self == .interrupted
+    }
+
+    public var shouldNotifyCompletion: Bool {
+        self == .done || self == .failed
     }
 }
 
@@ -84,6 +93,7 @@ public struct TaskStatusParser: Sendable {
     private static let archiveLimit = 50
     private static let tailByteLimit = 64 * 1024
     private static let rolloutMatchTolerance: TimeInterval = 10 * 60
+    private static let interruptionThreshold: TimeInterval = 10 * 60
 
     public let tasksDirectory: URL
     public let workingDirectory: URL
@@ -107,7 +117,7 @@ public struct TaskStatusParser: Sendable {
             ?? Self.tmuxSessionIsRunning(named:)
     }
 
-    public func snapshots() -> [TaskStatusSnapshot] {
+    public func snapshots(now: Date = Date()) -> [TaskStatusSnapshot] {
         let sessionEntries = Self.sessionEntries(
             from: Self.readTail(
                 tasksDirectory.appendingPathComponent("sessions.log")
@@ -135,7 +145,9 @@ public struct TaskStatusParser: Sendable {
         let tmuxSessionName = Self.tmuxSessionName(
             forWorkingDirectoryPath: workingDirectory.path
         )
-        let needsTmuxCheck = unfinishedEventID != nil
+        let needsTmuxCheck = archives.contains {
+            $0.exitCode == nil && $0.lastLogActivityAt != nil
+        }
             || sessionEntries.contains { $0.mode == .status }
         let tmuxIsRunning = needsTmuxCheck
             && tmuxStatusProvider(tmuxSessionName)
@@ -175,6 +187,13 @@ public struct TaskStatusParser: Sendable {
             let status: TaskExecutionStatus
             if let exitCode {
                 status = exitCode == 0 ? .done : .failed
+            } else if
+                !tmuxIsRunning,
+                let lastLogActivityAt = archive.lastLogActivityAt,
+                now.timeIntervalSince(lastLogActivityAt)
+                    > Self.interruptionThreshold
+            {
+                status = .interrupted
             } else if archive.eventsURL != nil {
                 status = archive.id == unfinishedEventID && tmuxIsRunning
                     ? .running
@@ -199,7 +218,9 @@ public struct TaskStatusParser: Sendable {
                     status: status,
                     exitCode: exitCode,
                     lastMessage: archive.lastMessageURL.flatMap(readText),
-                    endedAt: status.isTerminal ? archive.completionDate : nil
+                    endedAt: status == .interrupted
+                        ? archive.lastLogActivityAt
+                        : (status.isTerminal ? archive.completionDate : nil)
                 )
             )
         }
@@ -384,6 +405,12 @@ public struct TaskStatusParser: Sendable {
                 return runLogModificationDate
             }
             return nil
+        }
+
+        var lastLogActivityAt: Date? {
+            [eventsModificationDate, runLogModificationDate]
+                .compactMap { $0 }
+                .max()
         }
     }
 

@@ -41,7 +41,9 @@ public enum TaskCompletionDetector {
             }
         )
         let terminalBySession = tasks
-            .filter { $0.status.isTerminal && $0.sessionUUID != nil }
+            .filter {
+                $0.status.shouldNotifyCompletion && $0.sessionUUID != nil
+            }
             .reduce(into: [String: TaskStatusSnapshot]()) { result, task in
                 guard let sessionUUID = task.sessionUUID else {
                     return

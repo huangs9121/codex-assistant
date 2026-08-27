@@ -5,11 +5,13 @@ import Foundation
 final class TaskStatusController {
     struct Result {
         let tasks: [TaskStatusSnapshot]
+        let desktopThreads: [CodexDesktopThreadSnapshot]
         let hasCompletedTasks: Bool
         let completedTasks: [TaskStatusSnapshot]
     }
 
     private let parsers: [TaskStatusParser]
+    private let desktopSessionScanner: CodexDesktopSessionScanner
     private let store: TaskStatusStore
     private let queue = DispatchQueue(
         label: "CodexQuota.taskStatus",
@@ -78,6 +80,12 @@ final class TaskStatusController {
                 )
             )
         }
+        desktopSessionScanner = CodexDesktopSessionScanner(
+            sessionsDirectory: homeDirectory.appendingPathComponent(
+                ".codex/sessions",
+                isDirectory: true
+            )
+        )
         store = TaskStatusStore(defaults: defaults)
     }
 
@@ -87,10 +95,12 @@ final class TaskStatusController {
         }
         isChecking = true
         let parsers = parsers
+        let desktopSessionScanner = desktopSessionScanner
         queue.async { [weak self] in
             let tasks = TaskStatusSnapshotMerger.merge(
                 parsers.map { $0.snapshots() }
             )
+            let desktopThreads = desktopSessionScanner.snapshots()
             DispatchQueue.main.async { [weak self] in
                 guard let self, !invalidated else {
                     return
@@ -104,7 +114,10 @@ final class TaskStatusController {
                 completion(
                     Result(
                         tasks: Array(tasks.prefix(5)),
-                        hasCompletedTasks: tasks.contains { $0.status == .done },
+                        desktopThreads: desktopThreads,
+                        hasCompletedTasks: tasks.contains {
+                            $0.status.isClearable
+                        },
                         completedTasks: detection.completedTasks
                     )
                 )
@@ -120,6 +133,7 @@ final class TaskStatusController {
         }
         isChecking = true
         let parsers = parsers
+        let desktopSessionScanner = desktopSessionScanner
         queue.async { [weak self] in
             for parser in parsers {
                 TaskArchive.archiveCompletedRecords(
@@ -131,6 +145,7 @@ final class TaskStatusController {
             let tasks = TaskStatusSnapshotMerger.merge(
                 parsers.map { $0.snapshots() }
             )
+            let desktopThreads = desktopSessionScanner.snapshots()
             DispatchQueue.main.async { [weak self] in
                 guard let self, !invalidated else {
                     return
@@ -144,7 +159,10 @@ final class TaskStatusController {
                 completion(
                     Result(
                         tasks: Array(tasks.prefix(5)),
-                        hasCompletedTasks: tasks.contains { $0.status == .done },
+                        desktopThreads: desktopThreads,
+                        hasCompletedTasks: tasks.contains {
+                            $0.status.isClearable
+                        },
                         completedTasks: detection.completedTasks
                     )
                 )
@@ -161,6 +179,7 @@ final class TaskStatusController {
         }
         isChecking = true
         let parsers = parsers
+        let desktopSessionScanner = desktopSessionScanner
         queue.async { [weak self] in
             for parser in parsers {
                 guard
@@ -193,6 +212,7 @@ final class TaskStatusController {
             let tasks = TaskStatusSnapshotMerger.merge(
                 parsers.map { $0.snapshots() }
             )
+            let desktopThreads = desktopSessionScanner.snapshots()
             DispatchQueue.main.async { [weak self] in
                 guard let self, !invalidated else {
                     return
@@ -206,7 +226,10 @@ final class TaskStatusController {
                 completion(
                     Result(
                         tasks: Array(tasks.prefix(5)),
-                        hasCompletedTasks: tasks.contains { $0.status == .done },
+                        desktopThreads: desktopThreads,
+                        hasCompletedTasks: tasks.contains {
+                            $0.status.isClearable
+                        },
                         completedTasks: detection.completedTasks
                     )
                 )

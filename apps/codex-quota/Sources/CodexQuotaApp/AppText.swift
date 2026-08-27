@@ -96,6 +96,7 @@ struct AppText {
         choose("新周期额度已经生效。", "Your new quota cycle is now active.")
     }
     var scheduledTasks: String { choose("调度任务", "Scheduled Tasks") }
+    var codexClientThreads: String { choose("Codex 客户端", "Codex Desktop") }
     var clearCompletedTasks: String { choose("清理完成任务", "Clear Completed") }
     var continueTask: String { choose("继续", "Continue") }
     var deleteTask: String { choose("删除", "Delete") }
@@ -155,6 +156,16 @@ struct AppText {
             "{relative} · 退出码 {exitCode}",
             "{relative} · Exit code {exitCode}"
         )
+    }
+    var taskInterruptedSubtitle: String { choose("已中断", "Interrupted") }
+    func codexClientRunning(_ duration: String) -> String {
+        choose("已运行 \(duration)", "Running \(duration)")
+    }
+    func codexClientLastActive(_ time: String) -> String {
+        choose("最后活跃 \(time)", "Last active \(time)")
+    }
+    var copyResumeCommandHelp: String {
+        choose("点击复制恢复命令", "Click to copy the resume command")
     }
     var resumeSessionHelp: String {
         choose(
@@ -270,7 +281,8 @@ struct AppText {
             justNow: justNow,
             runningFormat: taskRunningSubtitleFormat,
             completedWithDurationFormat: taskCompletedSubtitleFormat,
-            failedWithExitCodeFormat: taskFailedSubtitleFormat
+            failedWithExitCodeFormat: taskFailedSubtitleFormat,
+            interrupted: taskInterruptedSubtitle
         )
     }
 

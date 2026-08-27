@@ -32,6 +32,10 @@ struct StatusPanelView: View {
             resetForecastSection
             Divider()
             taskSection
+            if !model.desktopThreads.isEmpty {
+                Divider()
+                codexDesktopSection
+            }
             Divider()
             toolbar
         }
@@ -208,6 +212,51 @@ struct StatusPanelView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 22)
         .padding(.top, 15)
+    }
+
+    private var codexDesktopSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Text(text.codexClientThreads)
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 8)
+                let runningCount = model.desktopThreads.count {
+                    $0.isRunning
+                }
+                if runningCount > 0 {
+                    Circle()
+                        .fill(Color(nsColor: .controlAccentColor))
+                        .frame(width: 6, height: 6)
+                    Text(text.runningTaskCount(runningCount))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(nsColor: .controlAccentColor))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 5)
+
+            ForEach(
+                Array(model.desktopThreads.enumerated()),
+                id: \.element.id
+            ) { index, thread in
+                CodexDesktopThreadRow(
+                    thread: thread,
+                    now: model.now,
+                    text: text,
+                    canResumeTaskSessions: canResumeTaskSessions,
+                    onCopyResumeCommand: { id in
+                        onResumeSession(id, true)
+                    }
+                )
+                if index < model.desktopThreads.count - 1 {
+                    Divider()
+                        .padding(.leading, 40)
+                }
+            }
+        }
+        .padding(.bottom, 5)
     }
 
     private var toolbar: some View {
@@ -548,6 +597,88 @@ private struct TaskStatusRow: View {
     }
 }
 
+private struct CodexDesktopThreadRow: View {
+    let thread: CodexDesktopThreadSnapshot
+    let now: Date
+    let text: AppText
+    let canResumeTaskSessions: Bool
+    let onCopyResumeCommand: (String) -> TaskResumeActionResult
+
+    @State private var isCopied = false
+
+    private var canCopyResumeCommand: Bool {
+        !thread.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && canResumeTaskSessions
+    }
+
+    var body: some View {
+        Button {
+            guard canCopyResumeCommand else {
+                return
+            }
+            let result = onCopyResumeCommand(thread.id)
+            if result == .copied || result == .copiedAfterLaunchFailure {
+                isCopied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    isCopied = false
+                }
+            }
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                TaskStatusIcon(
+                    status: thread.isRunning ? .running : .interrupted
+                )
+                .frame(width: 16, height: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(thread.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(
+                            thread.isRunning ? .primary : .secondary
+                        )
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+                Image(systemName: isCopied ? "checkmark" : "play.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 20, height: 20)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!canCopyResumeCommand)
+        .help(text.copyResumeCommandHelp)
+        .accessibilityLabel(thread.title)
+    }
+
+    private var subtitle: String {
+        if thread.isRunning {
+            return text.codexClientRunning(
+                TaskStatusPresentationFormatter.durationString(
+                    max(0, now.timeIntervalSince(thread.startedAt))
+                )
+            )
+        }
+        let formatter = DateFormatter()
+        formatter.locale = text.language.locale
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return text.codexClientLastActive(
+            formatter.string(from: thread.lastActiveAt)
+        )
+    }
+}
+
 private struct TaskStatusIcon: View {
     let status: TaskExecutionStatus
 
@@ -582,6 +713,9 @@ private struct TaskStatusIcon: View {
             case .failed:
                 Image(systemName: "xmark.circle")
                     .foregroundStyle(Color(nsColor: .systemRed))
+            case .interrupted:
+                Image(systemName: "minus.circle")
+                    .foregroundStyle(.tertiary)
             }
         }
         .font(.system(size: 12))

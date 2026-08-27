@@ -16,7 +16,7 @@ public enum TaskArchive {
         fileManager: FileManager = .default
     ) -> Set<String> {
         let completedIDs = Set(snapshots
-            .filter { $0.status == .done }
+            .filter { $0.status.isClearable }
             .map(\.id)
             .filter { $0.count == 15 })
 

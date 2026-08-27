@@ -13,6 +13,7 @@ enum TaskResumeActionResult: Equatable {
 final class StatusPanelModel: ObservableObject {
     @Published private(set) var snapshot: QuotaSnapshot?
     @Published private(set) var tasks: [TaskStatusSnapshot] = []
+    @Published private(set) var desktopThreads: [CodexDesktopThreadSnapshot] = []
     @Published private(set) var hasCompletedTasks = false
     @Published private(set) var currentResetSignal: TiboResetSignal?
     @Published private(set) var now = Date()
@@ -24,8 +25,13 @@ final class StatusPanelModel: ObservableObject {
         notifyContentChange()
     }
 
-    func update(tasks: [TaskStatusSnapshot], hasCompletedTasks: Bool) {
+    func update(
+        tasks: [TaskStatusSnapshot],
+        desktopThreads: [CodexDesktopThreadSnapshot],
+        hasCompletedTasks: Bool
+    ) {
         self.tasks = tasks
+        self.desktopThreads = desktopThreads
         self.hasCompletedTasks = hasCompletedTasks
         notifyContentChange()
     }

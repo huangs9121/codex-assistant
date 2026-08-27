@@ -1031,6 +1031,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             }
             panelModel.update(
                 tasks: result.tasks,
+                desktopThreads: result.desktopThreads,
                 hasCompletedTasks: result.hasCompletedTasks
             )
             for task in result.completedTasks {
@@ -1043,6 +1044,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         taskStatusController.archiveCompletedTasks { [weak self] result in
             self?.panelModel.update(
                 tasks: result.tasks,
+                desktopThreads: result.desktopThreads,
                 hasCompletedTasks: result.hasCompletedTasks
             )
         }
@@ -1052,6 +1054,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         taskStatusController.archiveTask(task) { [weak self] result in
             self?.panelModel.update(
                 tasks: result.tasks,
+                desktopThreads: result.desktopThreads,
                 hasCompletedTasks: result.hasCompletedTasks
             )
         }
