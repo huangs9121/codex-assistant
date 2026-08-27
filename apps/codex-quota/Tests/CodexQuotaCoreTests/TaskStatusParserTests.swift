@@ -49,6 +49,10 @@ enum TaskStatusParserTests {
             run: testTaskNameFallbackChain
         ),
         TaskStatusParserTestCase(
+            name: "task name falls back to run log user prompt heading",
+            run: testRunLogNameFallback
+        ),
+        TaskStatusParserTestCase(
             name: "task unmatched status session does not create snapshot",
             run: testUnmatchedStatusEntryIsHidden
         ),
@@ -272,6 +276,34 @@ enum TaskStatusParserTests {
                 .snapshots().first?.taskName == nil
         }
         return fallbackWorked && nilFallbackWorked
+    }
+
+    private static func testRunLogNameFallback() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let runLog = """
+            续派会话: 01a03d51-9e15-7981-9024-3df564a469ab
+            codex: /usr/local/bin/codex | workdir: /tmp/work
+            --------
+            user
+            # 续派：右键快捷操作 —— 选定方案 1
+
+            按原简报继续完成全部实现。
+            warning: resumed with another model
+            codex
+            exit code: 0
+            """
+            guard write(
+                runLog,
+                to: tasks.appendingPathComponent(
+                    "20260731-101747-run.log"
+                )
+            ) else {
+                return false
+            }
+            return makeParser(tasks: tasks, sessions: sessions)
+                .snapshots().first?.taskName
+                == "右键快捷操作 —— 选定方案 1"
+        }
     }
 
     private static func testUnmatchedStatusEntryIsHidden() -> Bool {

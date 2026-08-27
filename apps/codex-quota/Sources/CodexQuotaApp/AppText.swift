@@ -130,13 +130,6 @@ struct AppText {
             )
         )
     }
-    var noScheduledTasks: String { choose("暂无调度任务", "No scheduled tasks") }
-    var scheduledTasksEmptyDetail: String {
-        choose(
-            "在 Kimi 会话中派发任务后，可在这里跟踪进度",
-            "Tasks dispatched from Kimi sessions will appear here"
-        )
-    }
     var backgroundTask: String { choose("后台任务", "Background task") }
     var unknownTask: String { choose("未知任务", "Unknown task") }
     var settings: String { choose("设置", "Settings") }

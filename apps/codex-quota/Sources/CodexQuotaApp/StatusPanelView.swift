@@ -30,8 +30,10 @@ struct StatusPanelView: View {
         VStack(spacing: 0) {
             quotaSection
             resetForecastSection
-            Divider()
-            taskSection
+            if !model.tasks.isEmpty {
+                Divider()
+                taskSection
+            }
             if !model.desktopThreads.isEmpty {
                 Divider()
                 codexDesktopSection
@@ -170,48 +172,25 @@ struct StatusPanelView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
-            .padding(.bottom, model.tasks.isEmpty ? 0 : 5)
+            .padding(.bottom, 5)
 
-            if model.tasks.isEmpty {
-                emptyTasks
-            } else {
-                let tasks = Array(model.tasks.prefix(5))
-                ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
-                    TaskStatusRow(
-                        task: task,
-                        now: model.now,
-                        text: text,
-                        canResumeTaskSessions: canResumeTaskSessions,
-                        onResumeSession: onResumeSession,
-                        onArchiveTask: onArchiveTask
-                    )
-                    if index < tasks.count - 1 {
-                        Divider()
-                            .padding(.leading, 40)
-                    }
+            let tasks = Array(model.tasks.prefix(5))
+            ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
+                TaskStatusRow(
+                    task: task,
+                    now: model.now,
+                    text: text,
+                    canResumeTaskSessions: canResumeTaskSessions,
+                    onResumeSession: onResumeSession,
+                    onArchiveTask: onArchiveTask
+                )
+                if index < tasks.count - 1 {
+                    Divider()
+                        .padding(.leading, 40)
                 }
             }
         }
-        .padding(.bottom, model.tasks.isEmpty ? 14 : 5)
-    }
-
-    private var emptyTasks: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "tray")
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(.tertiary)
-            Text(text.noScheduledTasks)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            Text(text.scheduledTasksEmptyDetail)
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 22)
-        .padding(.top, 15)
+        .padding(.bottom, 5)
     }
 
     private var codexDesktopSection: some View {

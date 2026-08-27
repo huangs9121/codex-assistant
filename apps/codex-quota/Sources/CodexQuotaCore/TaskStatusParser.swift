@@ -213,7 +213,10 @@ public struct TaskStatusParser: Sendable {
                     taskName: archive.briefURL
                         .flatMap(readText)
                         .flatMap(Self.taskName(forBriefPath:))
-                        ?? entry.flatMap(Self.taskName),
+                        ?? entry.flatMap(Self.taskName)
+                        ?? archive.runLogURL
+                            .flatMap(readText)
+                            .flatMap(Self.taskName(forRunLogContents:)),
                     isBackgroundTask: isBackground,
                     status: status,
                     exitCode: exitCode,
@@ -602,6 +605,45 @@ public struct TaskStatusParser: Sendable {
             options: .regularExpression
         )
         return cleaned.isEmpty ? nil : cleaned
+    }
+
+    private static let runLogNameLimit = 60
+
+    private static func taskName(forRunLogContents contents: String) -> String? {
+        let lines = contents.split(
+            whereSeparator: \.isNewline
+        ).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        guard let userIndex = lines.firstIndex(of: "user") else {
+            return nil
+        }
+        for line in lines[(userIndex + 1)...] {
+            guard !line.isEmpty, !line.hasPrefix("warning:") else {
+                continue
+            }
+            var name = line
+            while name.hasPrefix("#") {
+                name = String(name.dropFirst())
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            if name.hasPrefix("续派：") || name.hasPrefix("续派:") {
+                name = String(name.dropFirst(3))
+                    .trimmingCharacters(
+                        in: CharacterSet.whitespaces.union(
+                            CharacterSet(charactersIn: "：:")
+                        )
+                    )
+            }
+            guard !name.isEmpty else {
+                continue
+            }
+            if name.count > runLogNameLimit {
+                name = String(name.prefix(runLogNameLimit))
+            }
+            return name
+        }
+        return nil
     }
 
     private static func normalizedUUID(_ value: String?) -> String? {
