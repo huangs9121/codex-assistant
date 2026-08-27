@@ -344,39 +344,41 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         let systemActions = NSTextField(labelWithString: text.systemActions)
         systemActions.font = .systemFont(ofSize: 12)
         systemActions.textColor = .secondaryLabelColor
-        systemActions.frame = NSRect(x: 20, y: 94, width: 130, height: 18)
+        systemActions.frame = NSRect(x: 20, y: 136, width: 130, height: 18)
         view.addSubview(systemActions)
-        let missionControl = NSButton(
-            title: text.missionControl,
-            target: self,
-            action: #selector(selectMissionControlAction)
-        )
-        missionControl.frame = NSRect(x: 20, y: 62, width: 130, height: 28)
-        view.addSubview(missionControl)
+        for (index, action) in SystemGestureAction.all.enumerated() {
+            let button = NSButton(
+                title: action.localizedName(language: text.language),
+                target: self,
+                action: #selector(selectSystemAction(_:))
+            )
+            button.tag = Int(action.keyCode)
+            button.frame = NSRect(x: 20, y: 104 - index * 32, width: 130, height: 28)
+            view.addSubview(button)
+        }
         let save = NSButton(title: text.save, target: self, action: #selector(saveManualShortcut)); save.bezelStyle = .rounded; save.frame = NSRect(x: 420, y: 16, width: 80, height: 28); view.addSubview(save)
         return view
     }
 
     @objc private func toggleManualModifier(_ sender: NSButton) {
-        if KeyboardShortcut.isMissionControl(keyCode: manualKeyCode, flags: manualFlags) {
-            manualKeyCode = 0
-            manualFlags = 0
-        }
+        clearSystemActionIfNeeded()
         let flags = [KeyboardShortcut.controlFlag, KeyboardShortcut.optionFlag, KeyboardShortcut.shiftFlag, KeyboardShortcut.commandFlag]
         manualFlags ^= flags[sender.tag]
         refreshManualPreview()
     }
 
     @objc private func selectManualKey(_ sender: NSButton) {
-        if KeyboardShortcut.isMissionControl(keyCode: manualKeyCode, flags: manualFlags) {
-            manualFlags = 0
-        }
+        clearSystemActionIfNeeded()
         manualKeyCode = UInt16(sender.tag)
         refreshManualPreview()
     }
 
-    @objc private func selectMissionControlAction() {
-        manualKeyCode = KeyboardShortcut.missionControlKeyCode
+    @objc private func selectSystemAction(_ sender: NSButton) {
+        guard let action = SystemGestureAction.action(
+            keyCode: UInt16(sender.tag),
+            modifierFlags: 0
+        ) else { return }
+        manualKeyCode = action.keyCode
         manualFlags = 0
         manualModifierButtons.forEach { $0.state = .off }
         refreshManualPreview()
@@ -386,10 +388,18 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
     private func refreshManualPreview() { manualPreview.stringValue = shortcutDisplayString(keyCode: manualKeyCode, flags: manualFlags) }
 
     private func shortcutDisplayString(keyCode: UInt16, flags: UInt64) -> String {
-        if KeyboardShortcut.isMissionControl(keyCode: keyCode, flags: flags) {
-            return text.missionControl
+        if let action = SystemGestureAction.action(keyCode: keyCode, modifierFlags: flags) {
+            return action.localizedName(language: text.language)
         }
         return KeyboardShortcut.displayString(keyCode: keyCode, flags: flags)
+    }
+
+    private func clearSystemActionIfNeeded() {
+        guard SystemGestureAction.action(keyCode: manualKeyCode, modifierFlags: manualFlags) != nil else {
+            return
+        }
+        manualKeyCode = 0
+        manualFlags = 0
     }
     private func manualKeys() -> [(String, UInt16)] {
         var keys: [(String, UInt16)] = [("Esc",53),("Space",49),("Tab",48),("Return",36),("Delete",51),("←",123),("↑",126),("→",124),("↓",125)]

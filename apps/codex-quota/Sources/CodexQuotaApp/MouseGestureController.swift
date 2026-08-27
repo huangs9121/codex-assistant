@@ -239,17 +239,32 @@ final class MouseGestureController: NSObject {
     }
 
     private func postShortcut(_ rule: MouseGestureRule, targetPID: pid_t?) {
-        if KeyboardShortcut.isMissionControl(keyCode: rule.keyCode, flags: rule.modifierFlags) {
-            DispatchQueue.main.async {
-                NSWorkspace.shared.open(
-                    URL(fileURLWithPath: "/System/Applications/Mission Control.app")
-                )
-            }
+        if let action = SystemGestureAction.action(
+            keyCode: rule.keyCode,
+            modifierFlags: rule.modifierFlags
+        ) {
+            runSystemAction(action)
             return
         }
         let source = shortcutEventSource
         shortcutPostingQueue.async {
             Self.postShortcut(rule, targetPID: targetPID, eventSource: source)
+        }
+    }
+
+    private func runSystemAction(_ action: SystemGestureAction.Definition) {
+        switch action.invocation {
+        case let .openApplication(path):
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            }
+        case let .runCommand(executablePath, arguments):
+            shortcutPostingQueue.async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: executablePath)
+                process.arguments = arguments
+                try? process.run()
+            }
         }
     }
 

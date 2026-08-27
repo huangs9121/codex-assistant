@@ -64,7 +64,6 @@ struct AppText {
     var cancel: String { choose("取消", "Cancel") }
     var save: String { choose("保存", "Save") }
     var none: String { choose("无", "None") }
-    var missionControl: String { choose("调度中心", "Mission Control") }
     var systemActions: String { choose("系统动作", "System Actions") }
     var checkingUpdates: String { choose("正在检查更新，请稍候。", "Checking for updates. Please wait.") }
     var cannotCheckUpdates: String { choose("无法检查更新", "Could Not Check for Updates") }

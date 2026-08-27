@@ -1,7 +1,9 @@
 import Foundation
 
 public enum KeyboardShortcut {
-    public static let missionControlKeyCode: UInt16 = 0xFFFF
+    public static var missionControlKeyCode: UInt16 {
+        SystemGestureAction.all.first { $0.id == "missionControl" }!.keyCode
+    }
     public static let controlFlag: UInt64 = 1 << 18
     public static let optionFlag: UInt64 = 1 << 19
     public static let shiftFlag: UInt64 = 1 << 17
@@ -12,12 +14,12 @@ public enum KeyboardShortcut {
     }
 
     public static func isMissionControl(keyCode: UInt16, flags: UInt64) -> Bool {
-        keyCode == missionControlKeyCode && flags == 0
+        SystemGestureAction.action(keyCode: keyCode, modifierFlags: flags)?.id == "missionControl"
     }
 
     public static func displayString(keyCode: UInt16, flags: UInt64) -> String {
-        if isMissionControl(keyCode: keyCode, flags: flags) {
-            return "Mission Control"
+        if let action = SystemGestureAction.action(keyCode: keyCode, modifierFlags: flags) {
+            return action.localizedName(language: .english)
         }
         return modifierSymbols(flags: flags) + keyName(for: keyCode)
     }

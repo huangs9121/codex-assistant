@@ -82,8 +82,9 @@ enum QuotaParserTests {
             ("keyboard shortcut formats modifiers in stable order", testKeyboardShortcutDisplay),
             ("keyboard shortcut names special keys", testKeyboardShortcutSpecialKeys),
             ("keyboard shortcut requires a modifier", testKeyboardShortcutValidation),
-            ("Mission Control sentinel is a valid gesture shortcut", testMissionControlShortcutValidation),
-            ("Mission Control sentinel has a display string", testMissionControlShortcutDisplay),
+            ("system actions keep stable definitions and display names", testSystemGestureActionDefinitions),
+            ("system action sentinels are valid gesture shortcuts", testSystemGestureActionShortcutValidation),
+            ("legacy Mission Control sentinel remains compatible", testLegacyMissionControlShortcutCompatibility),
             ("mouse gesture direction uses the dominant axis", testMouseGestureDirection),
             ("mouse gesture direction recognizes diagonal boundaries", testMouseGestureDiagonalBoundaries),
             ("mouse gesture recognizer waits for minimum distances", testMouseGestureMinimumDistances),
@@ -1099,30 +1100,75 @@ enum QuotaParserTests {
             && KeyboardShortcut.isValid(keyCode: 8, flags: KeyboardShortcut.commandFlag)
     }
 
-    private static func testMissionControlShortcutValidation() -> Bool {
-        let rule = MouseGestureRule(
-            gesture: [.up],
-            keyCode: KeyboardShortcut.missionControlKeyCode,
-            modifierFlags: 0
-        )
-        let malformedRule = MouseGestureRule(
-            gesture: [.up],
-            keyCode: KeyboardShortcut.missionControlKeyCode,
-            modifierFlags: KeyboardShortcut.commandFlag
-        )
-        return KeyboardShortcut.isMissionControl(keyCode: rule.keyCode, flags: rule.modifierFlags)
-            && rule.hasValidShortcut
-            && !malformedRule.hasValidShortcut
+    private static func testSystemGestureActionDefinitions() -> Bool {
+        let expected: [SystemGestureAction.Definition] = [
+            SystemGestureAction.Definition(
+                id: "missionControl",
+                keyCode: 0xFFFF,
+                chineseName: "调度中心",
+                englishName: "Mission Control",
+                invocation: .openApplication(path: "/System/Applications/Mission Control.app")
+            ),
+            SystemGestureAction.Definition(
+                id: "screenSaver",
+                keyCode: 0xFFFE,
+                chineseName: "屏幕保护程序",
+                englishName: "Screen Saver",
+                invocation: .openApplication(path: "/System/Library/CoreServices/ScreenSaverEngine.app")
+            ),
+            SystemGestureAction.Definition(
+                id: "sleepDisplay",
+                keyCode: 0xFFFD,
+                chineseName: "关闭显示器",
+                englishName: "Sleep Display",
+                invocation: .runCommand(
+                    executablePath: "/usr/bin/pmset",
+                    arguments: ["displaysleepnow"]
+                )
+            )
+        ]
+        return SystemGestureAction.all == expected
+            && KeyboardShortcut.missionControlKeyCode == 0xFFFF
+            && SystemGestureAction.all.allSatisfy { action in
+                KeyboardShortcut.displayString(keyCode: action.keyCode, flags: 0) == action.englishName
+                    && action.localizedName(language: .simplifiedChinese) == action.chineseName
+                    && action.localizedName(language: .english) == action.englishName
+            }
     }
 
-    private static func testMissionControlShortcutDisplay() -> Bool {
-        expect(
-            KeyboardShortcut.displayString(
-                keyCode: KeyboardShortcut.missionControlKeyCode,
-                flags: 0
-            ),
-            equals: "Mission Control"
-        )
+    private static func testSystemGestureActionShortcutValidation() -> Bool {
+        SystemGestureAction.all.allSatisfy { action in
+            let validRule = MouseGestureRule(
+                gesture: [.up],
+                keyCode: action.keyCode,
+                modifierFlags: 0
+            )
+            let malformedRule = MouseGestureRule(
+                gesture: [.up],
+                keyCode: action.keyCode,
+                modifierFlags: KeyboardShortcut.commandFlag
+            )
+            return validRule.hasValidShortcut
+                && !malformedRule.hasValidShortcut
+                && SystemGestureAction.action(
+                    keyCode: action.keyCode,
+                    modifierFlags: 0
+                ) == action
+        }
+    }
+
+    private static func testLegacyMissionControlShortcutCompatibility() -> Bool {
+        let json = "{\"id\":\"00000000-0000-0000-0000-000000000002\",\"gesture\":\"U\",\"appFilter\":\"*\",\"keyCode\":65535,\"modifierFlags\":0,\"note\":\"\",\"isEnabled\":true}"
+        guard let rule = try? JSONDecoder().decode(MouseGestureRule.self, from: Data(json.utf8)) else {
+            return false
+        }
+        return rule.gesture == [.up]
+            && rule.hasValidShortcut
+            && KeyboardShortcut.isMissionControl(keyCode: rule.keyCode, flags: rule.modifierFlags)
+            && SystemGestureAction.action(
+                keyCode: rule.keyCode,
+                modifierFlags: rule.modifierFlags
+            )?.id == "missionControl"
     }
 
     private static func testMouseGestureDirection() -> Bool {

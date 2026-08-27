@@ -118,8 +118,11 @@ public struct MouseGestureRule: Codable, Equatable, Identifiable, Sendable {
     }
 
     public var hasValidShortcut: Bool {
-        if keyCode == KeyboardShortcut.missionControlKeyCode {
-            return KeyboardShortcut.isMissionControl(keyCode: keyCode, flags: modifierFlags)
+        if SystemGestureAction.isSystemActionKeyCode(keyCode) {
+            return SystemGestureAction.action(
+                keyCode: keyCode,
+                modifierFlags: modifierFlags
+            ) != nil
         }
         return KeyboardShortcut.isValid(keyCode: keyCode, flags: modifierFlags)
     }
