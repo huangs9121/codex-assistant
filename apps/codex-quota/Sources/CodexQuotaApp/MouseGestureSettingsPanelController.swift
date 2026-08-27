@@ -2,6 +2,17 @@ import AppKit
 import CodexQuotaCore
 import CoreGraphics
 
+private final class SingleClickTextField: NSTextField {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        super.mouseDown(with: event)
+    }
+}
+
 @MainActor
 final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private enum Column: String {
@@ -132,8 +143,8 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         tableView.rowHeight = 34
         tableView.usesAlternatingRowBackgroundColors = true
         for (column, width) in [
-            (Column.gesture, 90.0), (Column.filter, 185.0), (Column.action, 140.0),
-            (Column.note, 220.0), (Column.enabled, 70.0)
+            (Column.gesture, 130.0), (Column.filter, 145.0), (Column.action, 155.0),
+            (Column.note, 170.0), (Column.enabled, 60.0)
         ] {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
             tableColumn.title = columnTitle(column)
@@ -141,7 +152,6 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
             tableColumn.minWidth = width
             tableView.addTableColumn(tableColumn)
         }
-        tableView.sizeLastColumnToFit()
     }
 
     private func columnTitle(_ column: Column) -> String {
@@ -170,11 +180,13 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         case .gesture:
             return gestureControls(row: row)
         case .filter, .note:
-            let field = NSTextField(string: value(for: column, rule: rules[row]))
+            let field = SingleClickTextField(string: value(for: column, rule: rules[row]))
             field.tag = row
             field.identifier = tableColumn.identifier
             field.delegate = self
             field.font = .systemFont(ofSize: 14)
+            field.isEditable = true
+            field.isSelectable = true
             field.isBordered = false
             field.drawsBackground = false
             return field
@@ -213,12 +225,12 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
 
     @objc private func addRule() {
         stopRecording()
-        rules.append(MouseGestureRule())
+        rules.append(MouseGestureRule(gesture: [.down]))
         saveRules()
         tableView.reloadData()
         let row = rules.count - 1
         tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        tableView.editColumn(0, row: row, with: nil, select: true)
+        tableView.editColumn(1, row: row, with: nil, select: true)
     }
 
     @objc private func removeRule() {
@@ -365,6 +377,16 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
     private func reloadRules() {
         stopRecording()
         rules = MouseGestureController.loadRules(from: defaults)
+        let needsDefaultGesture = rules.indices.filter { rules[$0].gesture.isEmpty }
+        for index in needsDefaultGesture {
+            rules[index].gesture = [.down]
+        }
+        if !needsDefaultGesture.isEmpty {
+            MouseGestureController.saveRules(rules, to: defaults)
+            controller.reloadRules()
+            _ = controller.startIfPermitted()
+            onRulesChanged()
+        }
         tableView.reloadData()
     }
 
