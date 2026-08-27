@@ -29,6 +29,10 @@ enum StatusPanelPresentationTests {
             run: testRunningCount
         ),
         TaskStatusParserTestCase(
+            name: "status panel duration string switches to hours and days",
+            run: testDurationStringTiers
+        ),
+        TaskStatusParserTestCase(
             name: "status panel falls back to one quota window",
             run: testSingleWindowFallback
         ),
@@ -194,6 +198,21 @@ enum StatusPanelPresentationTests {
             justNow: "Just now"
         )
         return justNow == "刚刚" && minutes == "2 minutes ago"
+    }
+
+    private static func testDurationStringTiers() -> Bool {
+        let formatter = TaskStatusPresentationFormatter.self
+        return formatter.durationString(30, language: .simplifiedChinese)
+            == "0:30"
+            && formatter.durationString(599, language: .english) == "9:59"
+            && formatter.durationString(3_600, language: .simplifiedChinese)
+                == "1 小时 0 分钟"
+            && formatter.durationString(5_430, language: .simplifiedChinese)
+                == "1 小时 30 分钟"
+            && formatter.durationString(5_430, language: .english) == "1h 30m"
+            && formatter.durationString(90_306, language: .simplifiedChinese)
+                == "1 天 1 小时"
+            && formatter.durationString(90_306, language: .english) == "1d 1h"
     }
 
     private static func testRunningCount() -> Bool {

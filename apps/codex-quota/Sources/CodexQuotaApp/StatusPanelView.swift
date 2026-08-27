@@ -267,19 +267,26 @@ struct StatusPanelView: View {
             )
             .frame(width: 24, height: 24)
             Spacer(minLength: 8)
-            Text(
-                text.updatedAt(
-                    UpdateTimeFormatter.string(
-                        observedAt: quotaData.observedAt
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(
+                    text.updatedAt(
+                        UpdateTimeFormatter.string(
+                            observedAt: quotaData.observedAt
+                        )
                     )
                 )
-            )
-            .font(.system(size: 11))
-            .foregroundStyle(.tertiary)
-            .monospacedDigit()
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                Text(text.moveHint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
         .padding(.horizontal, 12)
-        .frame(height: 38)
+        .frame(height: 50)
     }
 
     private func windowLabel(for duration: TimeInterval?) -> String {
@@ -665,7 +672,8 @@ private struct CodexDesktopThreadRow: View {
         if thread.isRunning {
             return text.codexClientRunning(
                 TaskStatusPresentationFormatter.durationString(
-                    max(0, now.timeIntervalSince(thread.startedAt))
+                    max(0, now.timeIntervalSince(thread.startedAt)),
+                    language: text.language
                 )
             )
         }

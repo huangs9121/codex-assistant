@@ -245,7 +245,8 @@ public enum TaskStatusPresentationFormatter {
                 text.runningFormat,
                 values: [
                     "duration": durationString(
-                        max(0, now.timeIntervalSince(task.startedAt))
+                        max(0, now.timeIntervalSince(task.startedAt)),
+                        language: language
                     ),
                     "relative": relativeTime(
                         from: task.startedAt,
@@ -270,7 +271,7 @@ public enum TaskStatusPresentationFormatter {
                 text.completedWithDurationFormat,
                 values: [
                     "relative": relative,
-                    "duration": durationString(duration)
+                    "duration": durationString(duration, language: language)
                 ]
             )
         case .failed:
@@ -313,13 +314,33 @@ public enum TaskStatusPresentationFormatter {
         return formatter.localizedString(for: date, relativeTo: now)
     }
 
-    public static func durationString(_ interval: TimeInterval) -> String {
+    public static func durationString(
+        _ interval: TimeInterval,
+        language: AppLanguage
+    ) -> String {
         let totalSeconds = Int(max(0, interval).rounded(.down))
-        return String(
-            format: "%d:%02d",
-            totalSeconds / 60,
-            totalSeconds % 60
-        )
+        if totalSeconds < 3_600 {
+            return String(
+                format: "%d:%02d",
+                totalSeconds / 60,
+                totalSeconds % 60
+            )
+        }
+        let totalMinutes = totalSeconds / 60
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        switch language {
+        case .simplifiedChinese:
+            if hours >= 24 {
+                return "\(hours / 24) 天 \(hours % 24) 小时"
+            }
+            return "\(hours) 小时 \(minutes) 分钟"
+        case .english:
+            if hours >= 24 {
+                return "\(hours / 24)d \(hours % 24)h"
+            }
+            return "\(hours)h \(minutes)m"
+        }
     }
 
     public static func runningCount(in tasks: [TaskStatusSnapshot]) -> Int {

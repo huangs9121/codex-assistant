@@ -3,7 +3,7 @@ import CodexQuotaCore
 import CoreGraphics
 
 @MainActor
-final class CodexInvocationSettingsPanelController: NSObject, NSWindowDelegate {
+final class CodexInvocationSettingsPanelController: NSObject {
     private let defaults: UserDefaults
     private let text: AppText
     private let doubleCommandTapController: DoubleCommandTapController
@@ -28,7 +28,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSWindowDelegate {
     private let accessibilityStatusLabel = NSTextField(labelWithString: "")
     private let inputMonitoringSettingsButton = NSButton(title: "", target: nil, action: nil)
     private let accessibilitySettingsButton = NSButton(title: "", target: nil, action: nil)
-    private lazy var panel = makePanel()
+    private lazy var embeddedContentView = makeContentView()
 
     init(
         defaults: UserDefaults = .standard,
@@ -47,37 +47,28 @@ final class CodexInvocationSettingsPanelController: NSObject, NSWindowDelegate {
         super.init()
     }
 
-    func show() {
+    var contentView: NSView {
+        embeddedContentView
+    }
+
+    func didBecomeVisible() {
         refreshConfiguration()
         refreshPermissionStatus()
         startPermissionPolling()
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func didHide() {
         stopRecording()
         stopPermissionPolling()
     }
 
-    func windowDidResignKey(_ notification: Notification) {
+    func hostWindowDidResignKey() {
         stopRecording()
     }
 
-    private func makePanel() -> NSPanel {
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 480),
-            styleMask: [.titled, .closable, .utilityWindow],
-            backing: .buffered,
-            defer: false
-        )
-        panel.title = text.globalShortcutSettings
-        panel.isReleasedWhenClosed = false
-        panel.delegate = self
-
-        let content = NSView(frame: panel.contentView?.bounds ?? .zero)
+    private func makeContentView() -> NSView {
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 480))
         content.translatesAutoresizingMaskIntoConstraints = false
-        panel.contentView = content
 
         enabledButton.title = text.enableModifierTapOpenCodex
         enabledButton.target = self
@@ -182,7 +173,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSWindowDelegate {
             shortcutDivider.widthAnchor.constraint(equalTo: root.widthAnchor),
             permissionsDivider.widthAnchor.constraint(equalTo: root.widthAnchor)
         ])
-        return panel
+        return content
     }
 
     @objc private func toggleEnabled() {
@@ -195,7 +186,9 @@ final class CodexInvocationSettingsPanelController: NSObject, NSWindowDelegate {
         stopRecording()
         gestureRecordButton.title = text.recordingTriggerGesture
         gestureMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
-            guard let self, self.panel.isKeyWindow else { return event }
+            guard let self, self.contentView.window?.isKeyWindow == true else {
+                return event
+            }
             if event.type == .keyDown, event.keyCode == 53 {
                 self.stopRecording()
                 return nil
@@ -211,7 +204,9 @@ final class CodexInvocationSettingsPanelController: NSObject, NSWindowDelegate {
         stopRecording()
         shortcutRecordButton.title = text.recordingCodexShortcut
         shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.panel.isKeyWindow else { return event }
+            guard let self, self.contentView.window?.isKeyWindow == true else {
+                return event
+            }
             if event.keyCode == 53 {
                 self.stopRecording()
                 return nil

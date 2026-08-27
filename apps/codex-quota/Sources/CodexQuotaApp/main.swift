@@ -31,7 +31,6 @@ private final class MenuChoiceRow: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let preview = NSImageView()
     private let actionButton = NSButton()
-    private let trailingButton: NSButton?
     private let selectedAccessibilityValue: String
     private let notSelectedAccessibilityValue: String
 
@@ -50,20 +49,12 @@ private final class MenuChoiceRow: NSView {
         tag: Int,
         target: AnyObject,
         action: Selector,
-        trailingButtonImage: NSImage? = nil,
-        trailingButtonAccessibilityLabel: String? = nil,
-        trailingButtonAction: Selector? = nil,
         selectedAccessibilityValue: String,
         notSelectedAccessibilityValue: String,
         width: CGFloat
     ) {
         self.selectedAccessibilityValue = selectedAccessibilityValue
         self.notSelectedAccessibilityValue = notSelectedAccessibilityValue
-        if trailingButtonImage != nil, trailingButtonAction != nil {
-            self.trailingButton = NSButton()
-        } else {
-            self.trailingButton = nil
-        }
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 32))
 
         checkmarkLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -92,27 +83,6 @@ private final class MenuChoiceRow: NSView {
         addSubview(titleLabel)
         addSubview(preview)
         addSubview(actionButton)
-        if let trailingButton {
-            trailingButton.translatesAutoresizingMaskIntoConstraints = false
-            trailingButton.title = ""
-            trailingButton.isBordered = false
-            trailingButton.bezelStyle = .shadowlessSquare
-            trailingButton.focusRingType = .exterior
-            trailingButton.image = trailingButtonImage
-            trailingButton.image?.isTemplate = true
-            trailingButton.symbolConfiguration = NSImage.SymbolConfiguration(
-                pointSize: 15,
-                weight: .regular
-            )
-            trailingButton.contentTintColor = .secondaryLabelColor
-            trailingButton.target = target
-            trailingButton.action = trailingButtonAction
-            trailingButton.setAccessibilityRole(.button)
-            trailingButton.setAccessibilityLabel(
-                trailingButtonAccessibilityLabel ?? title
-            )
-            addSubview(trailingButton)
-        }
         NSLayoutConstraint.activate([
             checkmarkLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 11),
             checkmarkLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -121,25 +91,12 @@ private final class MenuChoiceRow: NSView {
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             preview.centerYAnchor.constraint(equalTo: centerYAnchor),
             preview.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: 10),
+            preview.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             actionButton.leadingAnchor.constraint(equalTo: leadingAnchor),
             actionButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             actionButton.topAnchor.constraint(equalTo: topAnchor),
             actionButton.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-        if let trailingButton {
-            NSLayoutConstraint.activate([
-                trailingButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
-                trailingButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-                trailingButton.widthAnchor.constraint(equalToConstant: 26),
-                trailingButton.heightAnchor.constraint(equalToConstant: 26),
-                preview.trailingAnchor.constraint(
-                    equalTo: trailingButton.leadingAnchor,
-                    constant: -4
-                )
-            ])
-        } else {
-            preview.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12).isActive = true
-        }
         updateTitle(title)
         isSelected = false
     }
@@ -189,8 +146,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var identityItems: [StatusIdentityMode: NSMenuItem] = [:]
     private var resetToggleItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
-    private var mouseScrollReversalItem: NSMenuItem?
-    private var doubleCommandTapItem: NSMenuItem?
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
     private var refreshTimer: Timer?
@@ -230,6 +185,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         onRulesChanged: { [weak self] in
             self?.refreshAccessibilityControllers()
             self?.syncMenuState()
+        }
+    )
+    private lazy var quickToolsPanelController = QuickToolsPanelController(
+        text: text,
+        mouseScrollReversalController: mouseScrollReversalController,
+        codexInvocationSettingsController: codexInvocationSettingsPanelController,
+        mouseGestureSettingsController: mouseGestureSettingsPanelController,
+        onScrollReversalEnabledChanged: { [weak self] isEnabled in
+            self?.setMouseScrollReversalEnabled(isEnabled)
         }
     )
     private let rateLimitController = CodexRateLimitController()
@@ -340,15 +304,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         styleItems.removeAll()
         identityItems.removeAll()
 
-        let moveHintItem = NSMenuItem(
-            title: text.moveHint,
-            action: nil,
-            keyEquivalent: ""
-        )
-        moveHintItem.isEnabled = false
-        settingsMenu.addItem(moveHintItem)
-        settingsMenu.addItem(.separator())
-
         let styleItem = NSMenuItem(
             title: text.displayStyle,
             action: nil,
@@ -397,35 +352,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
         settingsMenu.addItem(.separator())
 
-        let mouseScrollItem = makeChoiceItem(
-            title: text.mouseScrollReversal,
-            tag: 0,
-            action: #selector(toggleMouseScrollReversal(_:))
-        )
-        mouseScrollReversalItem = mouseScrollItem
-        settingsMenu.addItem(mouseScrollItem)
-
-        let doubleCommandTapItem = makeChoiceItem(
-            title: text.globalShortcutSettings,
-            tag: 0,
-            action: #selector(toggleDoubleCommandTap(_:)),
-            trailingButtonImage: NSImage(
-                systemSymbolName: "gearshape",
-                accessibilityDescription: text.globalShortcutSettings
-            ),
-            trailingButtonAccessibilityLabel: text.globalShortcutSettings,
-            trailingButtonAction: #selector(showCodexInvocationSettings)
-        )
-        self.doubleCommandTapItem = doubleCommandTapItem
-        settingsMenu.addItem(doubleCommandTapItem)
-
-        let mouseGestureItem = NSMenuItem(
-            title: text.rightClickShortcutOperationsMenu,
-            action: #selector(showMouseGestureSettings),
+        let quickToolsItem = NSMenuItem(
+            title: text.quickToolsMenu,
+            action: #selector(showQuickTools),
             keyEquivalent: ""
         )
-        mouseGestureItem.target = self
-        settingsMenu.addItem(mouseGestureItem)
+        quickToolsItem.target = self
+        settingsMenu.addItem(quickToolsItem)
 
         settingsMenu.addItem(.separator())
 
@@ -527,10 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         title: String,
         previewImage: NSImage? = nil,
         tag: Int,
-        action: Selector,
-        trailingButtonImage: NSImage? = nil,
-        trailingButtonAccessibilityLabel: String? = nil,
-        trailingButtonAction: Selector? = nil
+        action: Selector
     ) -> NSMenuItem {
         let row = MenuChoiceRow(
             title: title,
@@ -538,9 +468,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             tag: tag,
             target: self,
             action: action,
-            trailingButtonImage: trailingButtonImage,
-            trailingButtonAccessibilityLabel: trailingButtonAccessibilityLabel,
-            trailingButtonAction: trailingButtonAction,
             selectedAccessibilityValue: text.selected,
             notSelectedAccessibilityValue: text.notSelected,
             width: menuWidth
@@ -604,20 +531,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         launchAtLoginItem?.state = launchSelected ? .on : .off
         (launchAtLoginItem?.view as? MenuChoiceRow)?.isSelected = launchSelected
         (launchAtLoginItem?.view as? MenuChoiceRow)?.updateTitle(launchTitle)
-
-        let mouseScrollEnabled = mouseScrollReversalController.isEnabled
-        mouseScrollReversalItem?.state = mouseScrollEnabled ? .on : .off
-        (mouseScrollReversalItem?.view as? MenuChoiceRow)?.isSelected = mouseScrollEnabled
-        (mouseScrollReversalItem?.view as? MenuChoiceRow)?.setWarning(
-            !AXIsProcessTrusted()
-        )
-        let doubleCommandTapEnabled = doubleCommandTapController.isEnabled
-        doubleCommandTapItem?.state = doubleCommandTapEnabled ? .on : .off
-        (doubleCommandTapItem?.view as? MenuChoiceRow)?.isSelected = doubleCommandTapEnabled
-        (doubleCommandTapItem?.view as? MenuChoiceRow)?.setWarning(
-            !doubleCommandTapController.isInputMonitoringTrusted
-                || !doubleCommandTapController.isAccessibilityTrusted
-        )
 
         if isUpdateInstallInFlight {
             updateMenuItem?.title = text.downloadingUpdate
@@ -707,19 +620,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
     }
 
-    @objc private func toggleMouseScrollReversal(_ sender: NSButton) {
-        mouseScrollReversalController.isEnabled.toggle()
-        if mouseScrollReversalController.isEnabled,
+    private func setMouseScrollReversalEnabled(_ isEnabled: Bool) {
+        mouseScrollReversalController.isEnabled = isEnabled
+        if isEnabled,
            !mouseScrollReversalController.startIfPermitted() {
             mouseScrollReversalController.requestAccessibilityPermission()
-        } else if !mouseScrollReversalController.isEnabled {
+        } else if !isEnabled {
             mouseScrollReversalController.stop()
         }
         syncMenuState()
-    }
-
-    @objc private func toggleDoubleCommandTap(_ sender: NSButton) {
-        setDoubleCommandTapEnabled(!doubleCommandTapController.isEnabled)
     }
 
     private func setDoubleCommandTapEnabled(_ isEnabled: Bool) {
@@ -734,14 +643,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         syncMenuState()
     }
 
-    @objc private func showCodexInvocationSettings() {
+    @objc private func showQuickTools() {
         settingsMenu.cancelTracking()
-        codexInvocationSettingsPanelController.show()
-    }
-
-    @objc private func showMouseGestureSettings() {
-        settingsMenu.cancelTracking()
-        mouseGestureSettingsPanelController.show()
+        quickToolsPanelController.show()
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {

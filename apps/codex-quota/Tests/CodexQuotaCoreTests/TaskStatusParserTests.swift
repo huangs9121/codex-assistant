@@ -73,6 +73,10 @@ enum TaskStatusParserTests {
             run: testInterruptedZombieTask
         ),
         TaskStatusParserTestCase(
+            name: "task stale run log without events is interrupted despite live tmux",
+            run: testStaleRunLogInterruptedWithLiveTmux
+        ),
+        TaskStatusParserTestCase(
             name: "task orphan events recover nearest rollout UUID",
             run: testRolloutRecovery
         ),
@@ -628,6 +632,35 @@ enum TaskStatusParserTests {
             )
             return archived == Set([id])
                 && !FileManager.default.fileExists(atPath: eventsURL.path)
+        }
+    }
+
+    private static func testStaleRunLogInterruptedWithLiveTmux() -> Bool {
+        withTemporaryDirectories { tasks, sessions in
+            let id = "20260731-101747"
+            let runLogURL = tasks.appendingPathComponent(
+                "\(id)-run.log"
+            )
+            let lastActivity = date("2026-07-31 10:00:00")
+            let now = lastActivity.addingTimeInterval(10 * 60 + 1)
+            guard
+                write("task output without exit code\n", to: runLogURL),
+                setModificationDate(lastActivity, for: runLogURL)
+            else {
+                return false
+            }
+            let parser = TaskStatusParser(
+                tasksDirectory: tasks,
+                workingDirectory: tasks.deletingLastPathComponent(),
+                codexSessionsDirectory: sessions,
+                timeZone: shanghai,
+                tmuxStatusProvider: { _ in true }
+            )
+            guard let task = parser.snapshots(now: now).first else {
+                return false
+            }
+            return task.status == .interrupted
+                && task.endedAt == lastActivity
         }
     }
 

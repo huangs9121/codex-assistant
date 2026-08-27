@@ -22,10 +22,12 @@ struct AppText {
     var launchAtLoginApproval: String { choose("开机自动启动（需系统确认）", "Launch at Login (Approval Required)") }
     var launchAtLoginUnavailable: String { choose("开机自动启动（不可用）", "Launch at Login (Unavailable)") }
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
+    var mouseScrollReversalHint: String { choose("反转外接鼠标滚轮方向；启用时需要辅助功能权限。", "Reverse external mouse-wheel direction. Accessibility permission is required when enabled.") }
     var enableModifierTapOpenCodex: String { choose("启用修饰键呼出", "Enable Modifier Gesture") }
     var globalShortcutSettings: String { choose("全局快捷键设置", "Global Shortcut Settings") }
     var rightClickShortcutOperations: String { choose("右键快捷操作", "Right-Click Shortcuts") }
-    var rightClickShortcutOperationsMenu: String { choose("右键快捷操作…", "Right-Click Shortcuts…") }
+    var quickTools: String { choose("便捷工具", "Quick Tools") }
+    var quickToolsMenu: String { choose("便捷工具…", "Quick Tools…") }
     var gesture: String { choose("手势", "Gesture") }
     var filter: String { choose("过滤", "Filter") }
     var action: String { choose("行为", "Action") }

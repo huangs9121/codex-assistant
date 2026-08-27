@@ -188,7 +188,7 @@ public struct TaskStatusParser: Sendable {
             if let exitCode {
                 status = exitCode == 0 ? .done : .failed
             } else if
-                !tmuxIsRunning,
+                (!tmuxIsRunning || archive.eventsURL == nil),
                 let lastLogActivityAt = archive.lastLogActivityAt,
                 now.timeIntervalSince(lastLogActivityAt)
                     > Self.interruptionThreshold

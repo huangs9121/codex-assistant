@@ -14,7 +14,7 @@ private final class SingleClickTextField: NSTextField {
 }
 
 @MainActor
-final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private enum Column: String {
         case gesture, filter, action, note, immediate, enabled
     }
@@ -36,7 +36,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
     private let tableView = NSTableView()
     private let permissionLabel = NSTextField(labelWithString: "")
     private let accessibilityButton = NSButton(title: "", target: nil, action: nil)
-    private lazy var panel = makePanel()
+    private lazy var embeddedContentView = makeContentView()
 
     init(
         defaults: UserDefaults = .standard,
@@ -51,34 +51,26 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         super.init()
     }
 
-    func show() {
+    var contentView: NSView {
+        embeddedContentView
+    }
+
+    func didBecomeVisible() {
         reloadRules()
         refreshPermissionStatus()
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func didHide() {
+        stopRecording()
+        manualPopover.close()
+    }
+
+    func hostWindowDidResignKey() {
         stopRecording()
     }
 
-    func windowDidResignKey(_ notification: Notification) {
-        stopRecording()
-    }
-
-    private func makePanel() -> NSPanel {
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 430),
-            styleMask: [.titled, .closable, .utilityWindow],
-            backing: .buffered,
-            defer: false
-        )
-        panel.title = text.rightClickShortcutOperations
-        panel.isReleasedWhenClosed = false
-        panel.delegate = self
-
-        let content = NSView(frame: panel.contentView?.bounds ?? .zero)
-        panel.contentView = content
+    private func makeContentView() -> NSView {
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 430))
 
         let hint = NSTextField(wrappingLabelWithString: text.rightClickShortcutHint)
         hint.font = .systemFont(ofSize: 13)
@@ -132,7 +124,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
             accessibilityButton.topAnchor.constraint(equalTo: tableActions.bottomAnchor, constant: 14),
             accessibilityButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18)
         ])
-        return panel
+        return content
     }
 
     private func configureTable() {
@@ -272,7 +264,13 @@ final class MouseGestureSettingsPanelController: NSObject, NSWindowDelegate, NST
         recordingRow = sender.tag
         tableView.reloadData(forRowIndexes: IndexSet(integer: sender.tag), columnIndexes: IndexSet(integer: 2))
         shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.panel.isKeyWindow, let row = self.recordingRow else { return event }
+            guard
+                let self,
+                self.contentView.window?.isKeyWindow == true,
+                let row = self.recordingRow
+            else {
+                return event
+            }
             if event.keyCode == 53 {
                 self.stopRecording()
                 self.tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 2))
