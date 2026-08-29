@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1440px; overflow: hidden; position: relative;
+    font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background: #0b0b14;
+    background-image:
+      radial-gradient(ellipse 700px 500px at 15% 5%, rgba(124,77,255,.32), transparent 60%),
+      radial-gradient(ellipse 650px 480px at 88% 18%, rgba(0,229,255,.20), transparent 60%),
+      radial-gradient(ellipse 800px 600px at 50% 108%, rgba(124,77,255,.25), transparent 65%);
+    color: #fff;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 56px 64px 0;
+  }
+  .badge {
+    align-self: flex-start;
+    display: inline-flex; align-items: center; gap: 14px;
+    padding: 13px 26px; border-radius: 999px;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18);
+    font-size: 28px; color: rgba(255,255,255,.85); letter-spacing: 2px;
+  }
+  .badge .dot { width: 13px; height: 13px; border-radius: 50%; background: #00e5ff; box-shadow: 0 0 14px #00e5ff; }
+  .title { align-self: flex-start; margin-top: 64px; }
+  .title .line { font-size: 108px; font-weight: 800; line-height: 1.3; letter-spacing: 4px; }
+  .title .hl {
+    background: linear-gradient(90deg, #00e5ff, #7c4dff);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .subtitle { align-self: flex-start; margin-top: 34px; font-size: 42px; color: rgba(255,255,255,.78); font-weight: 500; letter-spacing: 2px; }
+  .subtitle b { color: #00e5ff; font-weight: 700; }
+  .wheel {
+    margin-top: 66px;
+    width: 500px; height: 500px; border-radius: 50%;
+    position: relative;
+    background: radial-gradient(circle, rgba(124,77,255,.18), rgba(11,11,20,.4) 70%);
+    border: 2px solid rgba(124,77,255,.5);
+    box-shadow: 0 0 90px rgba(124,77,255,.35), inset 0 0 60px rgba(0,229,255,.08);
+  }
+  .wheel .dir {
+    position: absolute; width: 78px; height: 78px; border-radius: 20px;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.22);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 38px; color: #b3e5ff;
+  }
+  .wheel .dir.sm { width: 66px; height: 66px; font-size: 30px; border-radius: 17px; }
+  .wheel .center {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 150px; height: 150px; border-radius: 50%;
+    background: linear-gradient(135deg, #7c4dff, #00e5ff);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 27px; font-weight: 700; color: #0b0b14; letter-spacing: 2px;
+    box-shadow: 0 0 50px rgba(0,229,255,.55);
+  }
+  .wheel .center small { font-size: 20px; font-weight: 500; opacity: .75; }
+  .wheel .trace {
+    position: absolute; left: 50%; top: 50%; width: 295px; height: 5px;
+    background: linear-gradient(90deg, transparent, #00e5ff);
+    transform-origin: left center; transform: rotate(-45deg);
+    border-radius: 3px; opacity: .9;
+  }
+  .pills { margin-top: 62px; display: flex; justify-content: center; gap: 26px; }
+  .pill {
+    padding: 18px 36px; border-radius: 999px; font-size: 32px; font-weight: 600;
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.2); letter-spacing: 1px;
+  }
+  .pill.em { background: rgba(0,229,255,.14); border-color: rgba(0,229,255,.5); color: #8df3ff; }
+</style>
+</head>
+<body>
+  <div class="badge"><span class="dot"></span>Codex Quota · 免费开源</div>
+
+  <div class="title">
+    <div class="line">我给 Mac 装了<br>一套<span class="hl">连招系统</span></div>
+    <div class="subtitle">右键<b>画个方向</b> = 触发<b>任意快捷键</b></div>
+  </div>
+
+  <div class="wheel">
+    <div class="trace"></div>
+    <div class="dir" style="left:211px; top:32px;">⬆️</div>
+    <div class="dir" style="left:211px; top:390px;">⬇️</div>
+    <div class="dir" style="left:32px;  top:211px;">⬅️</div>
+    <div class="dir" style="left:390px; top:211px;">➡️</div>
+    <div class="dir sm" style="left:79px;  top:79px;">↖️</div>
+    <div class="dir sm" style="left:355px; top:79px;">↗️</div>
+    <div class="dir sm" style="left:79px;  top:355px;">↙️</div>
+    <div class="dir sm" style="left:355px; top:355px;">↘️</div>
+    <div class="center">右键<small>按住拖动</small></div>
+  </div>
+
+  <div class="pills">
+    <div class="pill em">⚡️ 立即触发</div>
+    <div class="pill">双段 8 方向</div>
+    <div class="pill">按 App 生效</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1440px; overflow: hidden;
+    font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background: linear-gradient(180deg, #fff8ef 0%, #ffeede 100%);
+    color: #2b2118;
+    padding: 56px 64px 44px;
+    display: flex; flex-direction: column;
+  }
+  .head .t { font-size: 58px; white-space: nowrap; font-weight: 800; letter-spacing: 3px; }
+  .head .t span { color: #e5621c; }
+  .scenes { margin-top: 36px; display: flex; flex-direction: column; gap: 22px; }
+  .scene {
+    background: rgba(255,255,255,.92); border-radius: 30px; padding: 30px 40px;
+    box-shadow: 0 14px 40px rgba(160,99,44,.12);
+  }
+  .scene .q { font-size: 35px; font-weight: 700; color: #a0632c; display: flex; align-items: center; gap: 18px; }
+  .scene .q .n {
+    width: 52px; height: 52px; border-radius: 50%; background: #e5621c; color: #fff;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 30px; flex-shrink: 0;
+  }
+  .scene .a { margin-top: 18px; font-size: 31px; line-height: 1.55; color: #4a3826; }
+  .scene .a b { color: #e5621c; }
+  .shotrow {
+    margin-top: 22px;
+    background: rgba(255,255,255,.92); border-radius: 30px; padding: 30px 40px;
+    box-shadow: 0 14px 40px rgba(160,99,44,.12);
+    display: flex; gap: 36px; align-items: center;
+  }
+  .shotrow .txt { flex: 1; }
+  .shotrow .t { font-size: 34px; font-weight: 700; }
+  .shotrow .d { margin-top: 12px; font-size: 28px; color: #8a6a4f; line-height: 1.5; }
+  .shotrow img { width: 275px; border-radius: 18px; box-shadow: 0 10px 30px rgba(160,99,44,.2); }
+  .foot { margin-top: auto; text-align: center; font-size: 29px; color: #a0632c; }
+  .foot .p { background: rgba(255,255,255,.8); padding: 15px 34px; border-radius: 999px; font-weight: 600; display: inline-block; }
+</style>
+</head>
+<body>
+  <div class="head"><div class="t">装完之后，<span>我的日常</span>变成了这样</div></div>
+
+  <div class="scenes">
+    <div class="scene">
+      <div class="q"><span class="n">1</span>改 bug 到一半，想看还剩多少额度</div>
+      <div class="a">以前切出去敲命令，思路全断；现在<b>抬眼看一眼菜单栏</b>，重置前还会推送提醒。</div>
+    </div>
+    <div class="scene">
+      <div class="q"><span class="n">2</span>十几个标签页，想开新的 / 换下一个</div>
+      <div class="a">以前精准瞄准那个小 + 号；现在<b>右键往左下一画</b>，⌘T 直接出来，⚡️不用松手。</div>
+    </div>
+    <div class="scene">
+      <div class="q"><span class="n">3</span>鼠标换回触控板，滚轮方向打架</div>
+      <div class="a">只反转<b>鼠标滚轮</b>方向，触控板保持自然滚动，互不打架。</div>
+    </div>
+  </div>
+
+  <div class="shotrow">
+    <div class="txt">
+      <div class="t">连招只在自己的地盘生效</div>
+      <div class="d">点「选取应用」，从正在运行的应用里直接选，比如只让浏览器响应手势连招。</div>
+    </div>
+    <img src="real-picker.png">
+  </div>
+
+  <div class="foot"><div class="p">免费开源 · M 芯片 · macOS 13+ · 下载方式见评论区</div></div>
+</body>
+</html>

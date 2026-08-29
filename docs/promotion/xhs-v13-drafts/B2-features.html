@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1440px; overflow: hidden;
+    font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background: #f4f6fb; color: #14192b;
+    padding: 70px 64px 56px;
+    display: flex; flex-direction: column;
+  }
+  .head .t { font-size: 78px; font-weight: 800; letter-spacing: 3px; line-height: 1.32; }
+  .head .t span { color: #2563eb; }
+  .head .s { margin-top: 16px; font-size: 34px; color: #5b6478; }
+  .grid { margin-top: 44px; display: flex; flex-direction: column; gap: 26px; }
+  .card {
+    background: #ffffff; border-radius: 28px; padding: 32px 42px;
+    box-shadow: 0 12px 40px rgba(20,25,43,.08); display: flex; gap: 30px; align-items: center;
+  }
+  .card .ico {
+    width: 88px; height: 88px; border-radius: 24px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 46px;
+  }
+  .card .t { font-size: 39px; font-weight: 700; }
+  .card .d { margin-top: 10px; font-size: 29px; color: #5b6478; line-height: 1.45; }
+  .card .d b { color: #2563eb; }
+  .shotrow {
+    margin-top: 26px;
+    background: #ffffff; border-radius: 28px; padding: 30px 42px;
+    box-shadow: 0 12px 40px rgba(20,25,43,.08);
+    display: flex; gap: 38px; align-items: center;
+  }
+  .shotrow .txt { flex: 1; }
+  .shotrow .t { font-size: 35px; font-weight: 700; }
+  .shotrow .d { margin-top: 12px; font-size: 28px; color: #5b6478; line-height: 1.5; }
+  .shotrow img { width: 275px; border-radius: 18px; border: 1px solid #e3e7f0; box-shadow: 0 10px 30px rgba(20,25,43,.14); }
+  .foot { margin-top: auto; display: flex; justify-content: center; gap: 20px; font-size: 26px; color: #5b6478; }
+  .foot .p { background: #e8ebf3; padding: 13px 27px; border-radius: 999px; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div class="t">额度<span>看得见</span>，招式<span>出得来</span></div>
+    <div class="s">Codex Quota · 一个菜单栏工具，三件套全齐</div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="ico" style="background:#e8f0fe;">📊</div>
+      <div>
+        <div class="t">额度常驻菜单栏</div>
+        <div class="d">剩余额度、重置倒计时<b>抬眼可见</b>，重置第一时间系统通知</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ico" style="background:#ede9fe;">✋</div>
+      <div>
+        <div class="t">右键手势出招</div>
+        <div class="d">画方向触发任意快捷键，<b>双段 8 方向</b>、⚡️立即触发</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ico" style="background:#e0f2f1;">🔄</div>
+      <div>
+        <div class="t">滚轮方向反转</div>
+        <div class="d">鼠标滚轮与触控板<b>互不打架</b>，双设备党福音</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="shotrow">
+    <div class="txt">
+      <div class="t">按应用生效，选一下就行</div>
+      <div class="d">从正在运行的应用里直接选，自动填入<br>过滤条件，不用手敲 Bundle ID</div>
+    </div>
+    <img src="real-picker.png">
+  </div>
+
+  <div class="foot">
+    <div class="p">免费开源</div>
+    <div class="p">macOS 13+</div>
+    <div class="p">github.com/huangs9121/codex-assistant</div>
+  </div>
+</body>
+</html>

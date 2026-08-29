@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1440px; overflow: hidden;
+    font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background: #0b0b14;
+    background-image:
+      radial-gradient(ellipse 700px 500px at 85% 0%, rgba(124,77,255,.25), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 5% 100%, rgba(0,229,255,.14), transparent 60%);
+    color: #fff;
+    padding: 64px;
+    display: flex; flex-direction: column;
+  }
+  .head { display: flex; align-items: baseline; justify-content: space-between; }
+  .head .t { font-size: 72px; font-weight: 800; letter-spacing: 4px; }
+  .head .t span { background: linear-gradient(90deg, #00e5ff, #7c4dff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .head .s { font-size: 28px; color: rgba(255,255,255,.55); letter-spacing: 2px; }
+  .moves { margin-top: 40px; display: flex; flex-direction: column; gap: 22px; }
+  .move {
+    display: flex; align-items: center; gap: 28px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 26px; padding: 26px 34px;
+  }
+  .move .seq { font-size: 38px; font-weight: 800; color: rgba(0,229,255,.9); width: 48px; }
+  .move .gest { display: flex; align-items: center; gap: 10px; }
+  .move .key {
+    width: 80px; height: 80px; border-radius: 19px; display: flex; align-items: center; justify-content: center;
+    font-size: 40px; background: rgba(124,77,255,.22); border: 1px solid rgba(124,77,255,.55);
+  }
+  .move .plus { font-size: 32px; color: rgba(255,255,255,.5); }
+  .move .arrow2 { font-size: 34px; color: rgba(255,255,255,.45); }
+  .move .effect {
+    font-family: "SF Mono", Menlo, monospace; font-size: 36px; font-weight: 700; color: #ffe082;
+    background: rgba(255,224,130,.1); border: 1px solid rgba(255,224,130,.35);
+    padding: 10px 22px; border-radius: 15px; white-space: nowrap;
+  }
+  .move .name { font-size: 33px; font-weight: 600; color: rgba(255,255,255,.92); letter-spacing: 1px; white-space: nowrap; }
+  .move .zap { margin-left: auto; font-size: 27px; color: #8df3ff; background: rgba(0,229,255,.12); border: 1px solid rgba(0,229,255,.4); padding: 9px 19px; border-radius: 999px; white-space: nowrap; }
+  .shot { margin-top: 36px; }
+  .shot .cap { font-size: 28px; color: rgba(255,255,255,.55); margin-bottom: 16px; letter-spacing: 2px; }
+  .shot .frame { border-radius: 22px; overflow: hidden; border: 1px solid rgba(0,229,255,.4); box-shadow: 0 24px 70px rgba(0,0,0,.6), 0 0 40px rgba(124,77,255,.18); }
+  .shot img { width: 100%; display: block; }
+  .foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; font-size: 31px; color: rgba(255,255,255,.75); }
+  .foot .l b { color: #00e5ff; }
+  .foot .r { background: linear-gradient(90deg, #7c4dff, #00e5ff); color: #0b0b14; font-weight: 800; padding: 17px 36px; border-radius: 999px; font-size: 31px; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div class="t">我的<span>出招表</span></div>
+    <div class="s">右键手势 · 全部自定义</div>
+  </div>
+
+  <div class="moves">
+    <div class="move">
+      <div class="seq">1</div>
+      <div class="gest"><div class="key">⬇️</div><div class="plus">+</div><div class="key">⬅️</div></div>
+      <div class="arrow2">→</div>
+      <div class="effect">⌘T</div>
+      <div class="name">新建标签页</div>
+      <div class="zap">⚡️ 立即触发</div>
+    </div>
+    <div class="move">
+      <div class="seq">2</div>
+      <div class="gest"><div class="key">⬇️</div><div class="plus">+</div><div class="key">➡️</div></div>
+      <div class="arrow2">→</div>
+      <div class="effect">^Tab</div>
+      <div class="name">下一个标签</div>
+      <div class="zap">⚡️ 立即触发</div>
+    </div>
+    <div class="move">
+      <div class="seq">3</div>
+      <div class="gest"><div class="key">⬆️</div></div>
+      <div class="arrow2">→</div>
+      <div class="effect">调度中心</div>
+      <div class="name">鸟瞰全部窗口</div>
+    </div>
+    <div class="move">
+      <div class="seq">4</div>
+      <div class="gest"><div class="key">⬇️</div></div>
+      <div class="arrow2">→</div>
+      <div class="effect">⌘W</div>
+      <div class="name">关闭窗口</div>
+    </div>
+  </div>
+
+  <div class="shot">
+    <div class="cap">▾ 真实设置界面：下拉选方向，不用记</div>
+    <div class="frame"><img src="real-table.png"></div>
+  </div>
+
+  <div class="foot">
+    <div class="l">还能<b>按 App 生效</b>：只在指定应用里出招</div>
+    <div class="r">免费开源 ↗</div>
+  </div>
+</body>
+</html>

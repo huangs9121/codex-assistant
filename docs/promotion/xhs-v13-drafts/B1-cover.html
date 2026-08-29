@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1440px; overflow: hidden;
+    font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background: #f4f6fb; color: #14192b;
+    padding: 64px 64px 72px;
+    display: flex; flex-direction: column;
+  }
+  .tag { align-self: flex-start; font-size: 29px; color: #5b6478; background: #e8ebf3; padding: 13px 26px; border-radius: 999px; letter-spacing: 2px; }
+  .old {
+    margin-top: 46px;
+    background: #ffffff; border: 2px dashed #c9cfdc; border-radius: 30px;
+    padding: 38px 48px; color: #9aa2b5;
+  }
+  .old .h { font-size: 34px; font-weight: 600; display: flex; align-items: center; gap: 16px; }
+  .old .keys { margin-top: 26px; display: flex; gap: 15px; flex-wrap: wrap; }
+  .old .k {
+    font-family: "SF Mono", Menlo, monospace; font-size: 36px; font-weight: 600;
+    background: #eef0f6; border-radius: 13px; padding: 11px 20px; text-decoration: line-through;
+  }
+  .old .mood { margin-top: 26px; font-size: 32px; }
+  .mid { display: flex; align-items: center; gap: 26px; margin: 30px 0; }
+  .mid .line { flex: 1; height: 2px; background: #dfe3ec; }
+  .mid .arrowbig {
+    width: 84px; height: 84px; border-radius: 50%;
+    background: linear-gradient(135deg, #2563eb, #06b6d4);
+    color: #fff; font-size: 46px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 14px 36px rgba(37,99,235,.35);
+  }
+  .new {
+    background: linear-gradient(135deg, #2563eb, #06b6d4);
+    border-radius: 34px; padding: 50px 52px; color: #fff;
+    box-shadow: 0 30px 70px rgba(37,99,235,.35);
+  }
+  .new .h { font-size: 36px; font-weight: 600; opacity: .92; }
+  .new .big { margin-top: 22px; font-size: 88px; font-weight: 800; letter-spacing: 4px; line-height: 1.25; }
+  .new .sub { margin-top: 28px; font-size: 35px; opacity: .96; display: flex; align-items: center; gap: 18px; flex-wrap: nowrap; }
+  .new .sub b { background: rgba(255,255,255,.2); padding: 5px 18px; border-radius: 12px; white-space: nowrap; font-weight: 700; }
+  .gesture {
+    margin-top: 44px; align-self: center;
+    display: flex; align-items: center; gap: 20px;
+    background: #ffffff; border-radius: 999px; padding: 24px 44px;
+    box-shadow: 0 14px 40px rgba(20,25,43,.12); font-size: 41px; font-weight: 700;
+  }
+  .gesture .a { color: #2563eb; white-space: nowrap; }
+  .gesture .dots { letter-spacing: 5px; color: #c9cfdc; font-size: 26px; }
+  .bottom { margin-top: auto; display: flex; justify-content: center; gap: 22px; }
+  .b-pill { font-size: 25px; white-space: nowrap; color: #5b6478; background: #e8ebf3; padding: 14px 28px; border-radius: 999px; }
+</style>
+</head>
+<body>
+  <div class="tag">Codex Quota · 免费开源 · M 系列</div>
+
+  <div class="old">
+    <div class="h">😩 以前，触发一个动作要……</div>
+    <div class="keys">
+      <div class="k">⌃⌥⇧⌘</div><div class="k">⌘⌥1</div><div class="k">⌘⇧T</div><div class="k">^⌘C</div><div class="k">F11</div>
+    </div>
+    <div class="mood">手忙脚乱，还老记混 ——</div>
+  </div>
+
+  <div class="mid"><div class="line"></div><div class="arrowbig">↓</div><div class="line"></div></div>
+
+  <div class="new">
+    <div class="h">现在，右键按住，</div>
+    <div class="big">画个方向，<br>快捷键到手</div>
+    <div class="sub">八方向 · 双段连招 · <b>⚡️ 画到就触发</b> · 按 App 生效</div>
+  </div>
+
+  <div class="gesture">
+    <span class="a">✋ 按住右键</span>
+    <span class="dots">••••</span>
+    <span class="a">↓+←</span>
+    <span class="dots">••••</span>
+    <span class="a">⌘T！</span>
+  </div>
+
+  <div class="bottom">
+    <div class="b-pill">macOS 13+</div>
+    <div class="b-pill">Apple Silicon</div>
+    <div class="b-pill">github.com/huangs9121/codex-assistant</div>
+  </div>
+</body>
+</html>

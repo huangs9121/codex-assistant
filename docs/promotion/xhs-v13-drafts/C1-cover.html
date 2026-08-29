@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1080px; height: 1440px; overflow: hidden; position: relative;
+    font-family: "PingFang SC", "Hiragino Sans GB", sans-serif;
+    background: linear-gradient(180deg, #fff8ef 0%, #ffeede 60%, #ffe7d6 100%);
+    color: #2b2118;
+    padding: 66px 64px 60px;
+    display: flex; flex-direction: column;
+  }
+  .deco1 { position: absolute; top: -120px; right: -120px; width: 400px; height: 400px; border-radius: 50%; background: radial-gradient(circle, rgba(255,138,76,.22), transparent 70%); }
+  .deco2 { position: absolute; bottom: -140px; left: -100px; width: 440px; height: 440px; border-radius: 50%; background: radial-gradient(circle, rgba(255,196,110,.28), transparent 70%); }
+  .tag {
+    align-self: flex-start; font-size: 29px; color: #a0632c; background: rgba(255,255,255,.75);
+    padding: 13px 26px; border-radius: 999px; letter-spacing: 2px; font-weight: 600;
+  }
+  .title { margin-top: 46px; }
+  .title .l1 { font-size: 92px; font-weight: 800; line-height: 1.36; letter-spacing: 3px; }
+  .title .l1 .hl { color: #e5621c; }
+  .title .l2 { margin-top: 26px; font-size: 37px; color: #8a6a4f; line-height: 1.5; }
+  .items { margin-top: 48px; display: grid; grid-template-columns: 1fr 1fr; gap: 26px; }
+  .item {
+    background: rgba(255,255,255,.88); border-radius: 28px; padding: 36px 36px;
+    box-shadow: 0 14px 40px rgba(160,99,44,.14);
+  }
+  .item .ico { font-size: 54px; }
+  .item .t { margin-top: 16px; font-size: 39px; font-weight: 800; letter-spacing: 1px; }
+  .item .d { margin-top: 12px; font-size: 28px; color: #8a6a4f; line-height: 1.5; }
+  .bottom { margin-top: auto; display: flex; justify-content: center; }
+  .bottom .p {
+    font-size: 30px; color: #a0632c; background: rgba(255,255,255,.8);
+    padding: 16px 38px; border-radius: 999px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="deco1"></div><div class="deco2"></div>
+  <div class="tag">Codex Quota · 免费开源</div>
+
+  <div class="title">
+    <div class="l1">用 Mac <span class="hl">玩 AI</span>，<br>这 4 件我先锁死了</div>
+    <div class="l2">全是菜单栏小工具，装完 Mac 灵活了十倍<br>（第 2 个是我用过最上头的）</div>
+  </div>
+
+  <div class="items">
+    <div class="item">
+      <div class="ico">📊</div>
+      <div class="t">额度监控</div>
+      <div class="d">剩余额度 + 重置倒计时抬眼可见，重置秒通知</div>
+    </div>
+    <div class="item">
+      <div class="ico">✋</div>
+      <div class="t">右键手势</div>
+      <div class="d">画方向触发任意快捷键，双段连招⚡️</div>
+    </div>
+    <div class="item">
+      <div class="ico">⌘</div>
+      <div class="t">全局快捷键</div>
+      <div class="d">双击修饰键直接呼出 Codex 窗口</div>
+    </div>
+    <div class="item">
+      <div class="ico">🔄</div>
+      <div class="t">滚轮反转</div>
+      <div class="d">鼠标和触控板不打架，双设备党狂喜</div>
+    </div>
+  </div>
+
+  <div class="bottom"><div class="p">↓ 下载方式放在评论区 · 免费开源 · M 芯片</div></div>
+</body>
+</html>
