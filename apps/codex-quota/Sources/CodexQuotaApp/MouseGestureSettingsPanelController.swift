@@ -13,6 +13,10 @@ private final class SingleClickTextField: NSTextField {
     }
 }
 
+// 列宽总和按最小可视宽度（竖向滚动条占位后的窄边 743pt）设置，
+// 任何滚动条样式下都不会溢出；不要在布局期动态改列宽或表格 frame——
+// AppKit 的延迟 tile 会按过宽的表格重排列，把最后的「启用」列挤出可视区。
+
 @MainActor
 final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private enum Column: String {
@@ -32,6 +36,20 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     private var manualFlags: UInt64 = 0
     private let manualPreview = NSTextField(labelWithString: "")
     private var manualModifierButtons: [NSButton] = []
+    private let appPickerPopover = NSPopover()
+    private var appPickerRow: Int?
+    private var appPickerTable: NSTableView?
+    private var appPickerEmptyLabel: NSTextField?
+    private var appSearchText = ""
+    var availableAppsForPicker: [(name: String, bundleID: String)] = []
+
+    private var filteredAppsForPicker: [(name: String, bundleID: String)] {
+        let query = appSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return availableAppsForPicker }
+        return availableAppsForPicker.filter {
+            $0.name.lowercased().contains(query) || $0.bundleID.lowercased().contains(query)
+        }
+    }
 
     private let tableView = NSTableView()
     private let permissionLabel = NSTextField(labelWithString: "")
@@ -63,6 +81,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     func didHide() {
         stopRecording()
         manualPopover.close()
+        appPickerPopover.close()
     }
 
     func hostWindowDidResignKey() {
@@ -81,6 +100,8 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
@@ -128,16 +149,17 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     private func configureTable() {
-        tableView.frame = NSRect(x: 0, y: 0, width: 720, height: 230)
-        tableView.autoresizingMask = [.width]
+        tableView.frame = NSRect(x: 0, y: 0, width: 650, height: 230)
         tableView.delegate = self
         tableView.dataSource = self
         tableView.headerView = NSTableHeaderView()
         tableView.rowHeight = 34
         tableView.usesAlternatingRowBackgroundColors = true
+        // 列宽总和 650：系统新表格样式会按列累加约 11-17pt 装饰宽度，
+        // 膨胀后约 720-752pt，仍小于最窄可视区（竖向滚动条占位后的 743pt）。
         for (column, width) in [
-            (Column.gesture, 130.0), (Column.filter, 145.0), (Column.action, 155.0),
-            (Column.note, 170.0), (Column.immediate, 45.0), (Column.enabled, 60.0)
+            (Column.gesture, 127.0), (Column.filter, 158.0), (Column.action, 144.0),
+            (Column.note, 143.0), (Column.immediate, 36.0), (Column.enabled, 42.0)
         ] {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
             tableColumn.title = columnTitle(column)
@@ -159,7 +181,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        rules.count
+        tableView === appPickerTable ? filteredAppsForPicker.count : rules.count
     }
 
     func tableView(
@@ -167,14 +189,44 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
+        if tableView === appPickerTable {
+            return appPickerRowView(row: row)
+        }
         guard let tableColumn,
               let column = Column(rawValue: tableColumn.identifier.rawValue),
               rules.indices.contains(row) else { return nil }
         switch column {
         case .gesture:
             return gestureControls(row: row)
-        case .filter, .note:
-            let field = SingleClickTextField(string: value(for: column, rule: rules[row]))
+        case .filter:
+            let field = SingleClickTextField(string: rules[row].appFilter)
+            field.tag = row
+            field.identifier = tableColumn.identifier
+            field.delegate = self
+            field.font = .systemFont(ofSize: 14)
+            field.isEditable = true
+            field.isSelectable = true
+            field.isBordered = false
+            field.drawsBackground = false
+            field.setContentHuggingPriority(.init(1), for: .horizontal)
+            let picker = NSButton(
+                image: NSImage(
+                    systemSymbolName: "macwindow.on.rectangle",
+                    accessibilityDescription: text.appPickerButton
+                ) ?? NSImage(),
+                target: self,
+                action: #selector(showAppPicker(_:))
+            )
+            picker.tag = row
+            picker.bezelStyle = .rounded
+            picker.toolTip = text.appPickerTooltip
+            picker.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let stack = NSStackView(views: [field, picker])
+            stack.orientation = .horizontal
+            stack.spacing = 4
+            return stack
+        case .note:
+            let field = SingleClickTextField(string: rules[row].note)
             field.tag = row
             field.identifier = tableColumn.identifier
             field.delegate = self
@@ -206,6 +258,13 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             button.setAccessibilityLabel(text.enabled)
             return button
         }
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard let field = notification.object as? NSTextField,
+              field.identifier?.rawValue == "appPickerSearch" else { return }
+        appSearchText = field.stringValue
+        refreshAppPickerResults()
     }
 
     func controlTextDidEndEditing(_ notification: Notification) {
@@ -335,6 +394,136 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         manualPopover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
     }
 
+    // MARK: - 应用选择器（过滤列）
+
+    @objc private func showAppPicker(_ sender: NSButton) {
+        guard rules.indices.contains(sender.tag) else { return }
+        stopRecording()
+        appPickerRow = sender.tag
+        appSearchText = ""
+        availableAppsForPicker = Self.runningApps()
+        appPickerPopover.contentViewController = NSViewController()
+        appPickerPopover.contentViewController?.view = makeAppPickerView()
+        appPickerPopover.behavior = .transient
+        appPickerPopover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
+
+    static func runningApps() -> [(name: String, bundleID: String)] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> (name: String, bundleID: String)? in
+                guard let name = app.localizedName,
+                      let bundleID = app.bundleIdentifier,
+                      !bundleID.isEmpty else { return nil }
+                return (name: name, bundleID: bundleID)
+            }
+            .reduce(into: [(name: String, bundleID: String)]()) { result, item in
+                guard !result.contains(where: { $0.bundleID == item.bundleID }) else { return }
+                result.append(item)
+            }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func makeAppPickerView() -> NSView {
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 340))
+
+        let search = NSTextField(string: "")
+        search.identifier = NSUserInterfaceItemIdentifier("appPickerSearch")
+        search.placeholderString = text.appPickerSearchPlaceholder
+        search.delegate = self
+        search.frame = NSRect(x: 12, y: 302, width: 276, height: 26)
+        view.addSubview(search)
+
+        let table = NSTableView()
+        table.headerView = nil
+        table.rowHeight = 36
+        table.delegate = self
+        table.dataSource = self
+        table.frame = NSRect(x: 0, y: 0, width: 276, height: 282)
+        table.autoresizingMask = [.width]
+        table.target = self
+        table.action = #selector(pickAppFromList(_:))
+        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("app")))
+        appPickerTable = table
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = table
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .bezelBorder
+        scrollView.frame = NSRect(x: 12, y: 12, width: 276, height: 282)
+        scrollView.autoresizingMask = [.width, .height]
+        view.addSubview(scrollView)
+
+        let emptyLabel = NSTextField(labelWithString: text.appPickerEmptyHint)
+        emptyLabel.font = .systemFont(ofSize: 12)
+        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.alignment = .center
+        emptyLabel.frame = NSRect(x: 12, y: 143, width: 276, height: 20)
+        emptyLabel.autoresizingMask = [.width]
+        emptyLabel.isHidden = true
+        view.addSubview(emptyLabel)
+        appPickerEmptyLabel = emptyLabel
+
+        refreshAppPickerResults()
+        return view
+    }
+
+    private func appPickerRowView(row: Int) -> NSView? {
+        guard filteredAppsForPicker.indices.contains(row) else { return nil }
+        let app = filteredAppsForPicker[row]
+        let nameLabel = NSTextField(labelWithString: app.name)
+        nameLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        nameLabel.lineBreakMode = .byTruncatingTail
+        let bundleLabel = NSTextField(labelWithString: app.bundleID)
+        bundleLabel.font = .systemFont(ofSize: 11)
+        bundleLabel.textColor = .secondaryLabelColor
+        bundleLabel.lineBreakMode = .byTruncatingMiddle
+        let stack = NSStackView(views: [nameLabel, bundleLabel])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 1
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+        return container
+    }
+
+    private func refreshAppPickerResults() {
+        appPickerTable?.reloadData()
+        appPickerEmptyLabel?.isHidden = !filteredAppsForPicker.isEmpty
+    }
+
+    @objc private func pickAppFromList(_ sender: NSTableView) {
+        let row = sender.clickedRow
+        guard filteredAppsForPicker.indices.contains(row),
+              let target = appPickerRow,
+              rules.indices.contains(target) else { return }
+        let bundleID = filteredAppsForPicker[row].bundleID
+        let trimmed = rules[target].appFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "*" {
+            rules[target].appFilter = bundleID
+        } else {
+            var patterns = trimmed.split(separator: "|", omittingEmptySubsequences: true).map(String.init)
+            if !patterns.contains(bundleID) {
+                patterns.append(bundleID)
+            }
+            rules[target].appFilter = patterns.joined(separator: "|")
+        }
+        saveRules()
+        appPickerPopover.close()
+        tableView.reloadData(
+            forRowIndexes: IndexSet(integer: target),
+            columnIndexes: IndexSet(integer: 1)
+        )
+    }
+
     private func makeManualShortcutView() -> NSView {
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
         manualPreview.stringValue = shortcutDisplayString(keyCode: manualKeyCode, flags: manualFlags)
@@ -429,15 +618,6 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         return rule.hasValidShortcut
             ? shortcutDisplayString(keyCode: rule.keyCode, flags: rule.modifierFlags)
             : text.recordShortcut
-    }
-
-    private func value(for column: Column, rule: MouseGestureRule) -> String {
-        switch column {
-        case .gesture: rule.displayGesture
-        case .filter: rule.appFilter
-        case .note: rule.note
-        default: ""
-        }
     }
 
     private func reloadRules() {

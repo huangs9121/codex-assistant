@@ -104,25 +104,16 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         pageControl.trackingMode = .selectOne
         pageControl.target = self
         pageControl.action = #selector(changePage(_:))
-        pageControl.setImage(
-            pageImage(
-                named: "arrow.up.arrow.down",
-                description: text.mouseScrollReversal
-            ),
+        pageControl.setLabel(
+            text.mouseScrollReversal,
             forSegment: Page.scrollReversal.rawValue
         )
-        pageControl.setImage(
-            pageImage(
-                named: "command",
-                description: text.globalShortcutSettings
-            ),
+        pageControl.setLabel(
+            text.globalShortcutSettings,
             forSegment: Page.globalShortcut.rawValue
         )
-        pageControl.setImage(
-            pageImage(
-                named: "hand.draw",
-                description: text.rightClickShortcutOperations
-            ),
+        pageControl.setLabel(
+            text.rightClickShortcutOperations,
             forSegment: Page.rightClickGesture.rawValue
         )
         pageControl.setToolTip(
@@ -137,19 +128,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
             text.rightClickShortcutOperations,
             forSegment: Page.rightClickGesture.rawValue
         )
-        for page in [Page.scrollReversal, .globalShortcut, .rightClickGesture] {
-            pageControl.setWidth(54, forSegment: page.rawValue)
-        }
         pageControl.setAccessibilityLabel(text.quickTools)
-    }
-
-    private func pageImage(named name: String, description: String) -> NSImage {
-        let image = NSImage(
-            systemSymbolName: name,
-            accessibilityDescription: description
-        ) ?? NSImage()
-        image.isTemplate = true
-        return image
     }
 
     @objc private func changePage(_ sender: NSSegmentedControl) {

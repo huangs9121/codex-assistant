@@ -39,6 +39,11 @@ struct AppText {
     var rightClickShortcutHint: String { choose("按住右键拖出方向后松开，触发匹配的快捷键。", "Hold the right mouse button, draw a direction, then release to trigger a shortcut.") }
     var rightClickShortcutPermissionGranted: String { choose("辅助功能权限：已授权", "Accessibility: Authorized") }
     var rightClickShortcutPermissionRequired: String { choose("辅助功能权限：未授权，右键快捷操作不可用。", "Accessibility permission is required; right-click shortcuts are unavailable.") }
+    var appPickerButton: String { choose("选择应用", "Pick App") }
+    var appPickerTooltip: String { choose("选取当前运行的应用，插入其 Bundle ID 到过滤条件", "Pick a running app to insert its bundle ID into the filter") }
+    var appPickerSearchPlaceholder: String { choose("搜索应用", "Search Apps") }
+    var appPickerEmptyHint: String { choose("没有找到匹配的应用", "No Matching Apps") }
+    var appPickerColumnTitle: String { choose("应用", "App") }
     var triggerGestureSection: String { choose("触发手势", "Trigger Gesture") }
     var targetShortcutSection: String { choose("目标快捷键", "Target Shortcut") }
     var permissionsSection: String { choose("权限", "Permissions") }
