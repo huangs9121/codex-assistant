@@ -29,6 +29,10 @@ enum StatusPanelPresentationTests {
             run: testRunningCount
         ),
         TaskStatusParserTestCase(
+            name: "desktop threads hide cleared ended threads but keep running ones",
+            run: testDesktopThreadHiddenIDs
+        ),
+        TaskStatusParserTestCase(
             name: "status panel duration string switches to hours and days",
             run: testDurationStringTiers
         ),
@@ -223,6 +227,35 @@ enum StatusPanelPresentationTests {
             snapshot(startedAt: now, status: .failed, exitCode: 1)
         ]
         return TaskStatusPresentationFormatter.runningCount(in: tasks) == 2
+    }
+
+    private static func testDesktopThreadHiddenIDs() -> Bool {
+        let timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let ended = CodexDesktopThreadSnapshot(
+            id: "ended-1",
+            title: "ended",
+            source: .user,
+            startedAt: now,
+            lastActiveAt: now,
+            status: .ended
+        )
+        let running = CodexDesktopThreadSnapshot(
+            id: "running-1",
+            title: "running",
+            source: .user,
+            startedAt: now,
+            lastActiveAt: now,
+            status: .running
+        )
+        let hidden: Set<String> = ["ended-1", "running-1", "gone-1"]
+        let visible = CodexDesktopSessionScanner.visibleSnapshots(
+            [ended, running],
+            now: now,
+            timeZone: timeZone,
+            hiddenIDs: hidden
+        )
+        // 被清理的已结束线程不再显示；曾被清理但重新运行的线程恢复显示
+        return visible.map(\.id) == ["running-1"]
     }
 
     private static func testSingleWindowFallback() -> Bool {

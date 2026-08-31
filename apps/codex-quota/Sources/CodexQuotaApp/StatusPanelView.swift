@@ -13,6 +13,7 @@ struct StatusPanelView: View {
     let onResumeSession: (String, Bool) -> TaskResumeActionResult
     let onArchiveTask: (TaskStatusSnapshot) -> Void
     let onClearCompletedTasks: () -> Void
+    let onClearFinishedThreads: () -> Void
 
     private var quotaData: StatusPanelQuotaData {
         StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
@@ -199,6 +200,12 @@ struct StatusPanelView: View {
                 Text(text.codexClientThreads)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 8)
+                Button(text.clearFinishedThreads) {
+                    onClearFinishedThreads()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!model.desktopThreads.contains { !$0.isRunning })
                 let runningCount = model.desktopThreads.count {
                     $0.isRunning
                 }

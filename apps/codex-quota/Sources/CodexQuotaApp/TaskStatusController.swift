@@ -89,6 +89,75 @@ final class TaskStatusController {
         store = TaskStatusStore(defaults: defaults)
     }
 
+    /// 应用「清理已完成」隐藏集合；被隐藏的线程若重新活跃则从集合移除（恢复显示）。
+    private func visibleDesktopThreads(
+        _ scanner: CodexDesktopSessionScanner
+    ) -> [CodexDesktopThreadSnapshot] {
+        let snapshots = scanner.snapshots()
+        var hidden = store.hiddenDesktopThreadIDs
+        let runningHidden = snapshots
+            .filter { $0.isRunning && hidden.contains($0.id) }
+            .map(\.id)
+        if !runningHidden.isEmpty {
+            hidden.subtract(runningHidden)
+            store.hiddenDesktopThreadIDs = hidden
+        }
+        return CodexDesktopSessionScanner.visibleSnapshots(
+            snapshots,
+            hiddenIDs: hidden
+        )
+    }
+
+    func clearEndedDesktopThreads(
+        completion: @escaping @MainActor (Result) -> Void
+    ) {
+        guard !invalidated, !isChecking else {
+            return
+        }
+        isChecking = true
+        let desktopSessionScanner = desktopSessionScanner
+        queue.async { [weak self] in
+            let snapshots = desktopSessionScanner.snapshots()
+            var hiddenIDs = Set<String>()
+            if let self {
+                let endedIDs = snapshots
+                    .filter { !$0.isRunning }
+                    .map(\.id)
+                store.hiddenDesktopThreadIDs = store.hiddenDesktopThreadIDs
+                    .union(endedIDs)
+                hiddenIDs = store.hiddenDesktopThreadIDs
+            }
+            let desktopThreads = CodexDesktopSessionScanner.visibleSnapshots(
+                snapshots,
+                hiddenIDs: hiddenIDs
+            )
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !invalidated else {
+                    return
+                }
+                isChecking = false
+                let tasks = TaskStatusSnapshotMerger.merge(
+                    parsers.map { $0.snapshots() }
+                )
+                let detection = TaskCompletionDetector.evaluate(
+                    tasks,
+                    state: store.notificationState
+                )
+                store.notificationState = detection.state
+                completion(
+                    Result(
+                        tasks: Array(tasks.prefix(5)),
+                        desktopThreads: desktopThreads,
+                        hasCompletedTasks: tasks.contains {
+                            $0.status.isClearable
+                        },
+                        completedTasks: detection.completedTasks
+                    )
+                )
+            }
+        }
+    }
+
     func check(completion: @escaping @MainActor (Result) -> Void) {
         guard !invalidated, !isChecking else {
             return
@@ -100,7 +169,9 @@ final class TaskStatusController {
             let tasks = TaskStatusSnapshotMerger.merge(
                 parsers.map { $0.snapshots() }
             )
-            let desktopThreads = desktopSessionScanner.snapshots()
+            let desktopThreads = self?.visibleDesktopThreads(
+                desktopSessionScanner
+            ) ?? []
             DispatchQueue.main.async { [weak self] in
                 guard let self, !invalidated else {
                     return
@@ -145,7 +216,9 @@ final class TaskStatusController {
             let tasks = TaskStatusSnapshotMerger.merge(
                 parsers.map { $0.snapshots() }
             )
-            let desktopThreads = desktopSessionScanner.snapshots()
+            let desktopThreads = self?.visibleDesktopThreads(
+                desktopSessionScanner
+            ) ?? []
             DispatchQueue.main.async { [weak self] in
                 guard let self, !invalidated else {
                     return
@@ -212,7 +285,9 @@ final class TaskStatusController {
             let tasks = TaskStatusSnapshotMerger.merge(
                 parsers.map { $0.snapshots() }
             )
-            let desktopThreads = desktopSessionScanner.snapshots()
+            let desktopThreads = self?.visibleDesktopThreads(
+                desktopSessionScanner
+            ) ?? []
             DispatchQueue.main.async { [weak self] in
                 guard let self, !invalidated else {
                     return

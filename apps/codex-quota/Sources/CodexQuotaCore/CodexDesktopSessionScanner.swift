@@ -209,15 +209,17 @@ public struct CodexDesktopSessionScanner: Sendable {
     public static func visibleSnapshots(
         _ snapshots: [CodexDesktopThreadSnapshot],
         now: Date = Date(),
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        hiddenIDs: Set<String> = []
     ) -> [CodexDesktopThreadSnapshot] {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         return snapshots
             .filter {
-                $0.isRunning || calendar.isDate(
-                    $0.lastActiveAt,
-                    inSameDayAs: now
+                // 运行中的线程始终可见：被清理过的会话重新活跃即恢复显示
+                $0.isRunning || (
+                    calendar.isDate($0.lastActiveAt, inSameDayAs: now)
+                        && !hiddenIDs.contains($0.id)
                 )
             }
             .sorted {

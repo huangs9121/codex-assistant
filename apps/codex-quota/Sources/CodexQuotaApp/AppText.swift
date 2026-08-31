@@ -105,6 +105,7 @@ struct AppText {
     var scheduledTasks: String { choose("调度任务", "Scheduled Tasks") }
     var codexClientThreads: String { choose("Codex 客户端", "Codex Desktop") }
     var clearCompletedTasks: String { choose("清理完成任务", "Clear Completed") }
+    var clearFinishedThreads: String { choose("清理已完成", "Clear Finished") }
     var continueTask: String { choose("继续", "Continue") }
     var deleteTask: String { choose("删除", "Delete") }
     var quotaTitle: String { choose("Codex 配额", "Codex Quota") }

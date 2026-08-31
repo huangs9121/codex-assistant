@@ -96,11 +96,28 @@ public enum TaskCompletionDetector {
 
 public struct TaskStatusStore {
     public static let notificationStateKey = "taskStatusNotificationState"
+    public static let hiddenDesktopThreadIDsKey = "desktopHiddenThreadIDs"
 
     private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+    }
+
+    /// 被用户「清理已完成」隐藏的 Codex 客户端线程 ID。
+    /// 只影响展示，不删除会话文件；线程重新活跃（运行中）时恢复显示。
+    public var hiddenDesktopThreadIDs: Set<String> {
+        get {
+            Set(defaults.stringArray(forKey: Self.hiddenDesktopThreadIDsKey) ?? [])
+        }
+        nonmutating set {
+            let sorted = newValue.sorted()
+            if sorted.isEmpty {
+                defaults.removeObject(forKey: Self.hiddenDesktopThreadIDsKey)
+            } else {
+                defaults.set(sorted, forKey: Self.hiddenDesktopThreadIDsKey)
+            }
+        }
     }
 
     public var notificationState: TaskNotificationState? {

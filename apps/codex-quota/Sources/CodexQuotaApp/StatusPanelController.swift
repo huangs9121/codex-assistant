@@ -71,7 +71,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         canResumeTaskSessions: Bool,
         onResumeSession: @escaping (String, Bool) -> TaskResumeActionResult,
         onArchiveTask: @escaping (TaskStatusSnapshot) -> Void,
-        onClearCompletedTasks: @escaping () -> Void
+        onClearCompletedTasks: @escaping () -> Void,
+        onClearFinishedThreads: @escaping () -> Void
     ) {
         self.model = model
         hostingController = NSHostingController(
@@ -83,7 +84,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 canResumeTaskSessions: canResumeTaskSessions,
                 onResumeSession: onResumeSession,
                 onArchiveTask: onArchiveTask,
-                onClearCompletedTasks: onClearCompletedTasks
+                onClearCompletedTasks: onClearCompletedTasks,
+                onClearFinishedThreads: onClearFinishedThreads
             )
         )
         super.init()

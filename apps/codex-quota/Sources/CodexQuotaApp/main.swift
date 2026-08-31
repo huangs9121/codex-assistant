@@ -219,6 +219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         },
         onClearCompletedTasks: { [weak self] in
             self?.archiveCompletedTasks()
+        },
+        onClearFinishedThreads: { [weak self] in
+            self?.clearFinishedDesktopThreads()
         }
     )
 
@@ -941,6 +944,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             for task in result.completedTasks {
                 sendTaskCompletionNotification(for: task)
             }
+        }
+    }
+
+    private func clearFinishedDesktopThreads() {
+        taskStatusController.clearEndedDesktopThreads { [weak self] result in
+            self?.panelModel.update(
+                tasks: result.tasks,
+                desktopThreads: result.desktopThreads,
+                hasCompletedTasks: result.hasCompletedTasks
+            )
         }
     }
 
