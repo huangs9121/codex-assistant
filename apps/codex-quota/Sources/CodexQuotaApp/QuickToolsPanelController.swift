@@ -65,14 +65,16 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         mouseGestureSettingsController.hostWindowDidResignKey()
     }
 
-    private func makePanel() -> NSPanel {
-        let panel = NSPanel(
+    private func makePanel() -> NSWindow {
+        let panel = QuickToolsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 540),
-            styleMask: [.titled, .closable, .utilityWindow],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = text.quickTools
+        panel.contentMinSize = NSSize(width: 800, height: 540)
+        panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         panel.delegate = self
 

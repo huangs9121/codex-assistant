@@ -69,8 +69,27 @@ enum TaskStatusParserTests {
             run: testDesktopSessionFilteringAndFreshness
         ),
         TaskStatusParserTestCase(
+            name: "shared session history keeps cross-day CLI-created sessions",
+            run: testCrossDayCLIHistory
+        ),
+        TaskStatusParserTestCase(name: "shared history treats creation sources equally and reconciles stale activity", run: testSharedHistoryOwnership),
+        TaskStatusParserTestCase(name: "CLI processes require a real terminal owner and disappear after exit", run: testCLIProcessOwners),
+        TaskStatusParserTestCase(name: "shared history cache observes changed lifecycle files", run: testSharedHistoryCache),
+        TaskStatusParserTestCase(
             name: "Codex desktop scanner reads only today and yesterday directories",
             run: testDesktopSessionDirectoryScan
+        ),
+        TaskStatusParserTestCase(
+            name: "Codex desktop scanner recovers old active files modified after client launch",
+            run: testDesktopSessionSinceScan
+        ),
+        TaskStatusParserTestCase(
+            name: "Codex desktop scanner follows explicit lifecycle events",
+            run: testDesktopSessionLifecycleEvents
+        ),
+        TaskStatusParserTestCase(
+            name: "Codex desktop scanner expands a verbose log through the latest lifecycle start",
+            run: testDesktopSessionLargeLifecycleLog
         ),
         TaskStatusParserTestCase(
             name: "task stale log without tmux is marked interrupted and clearable",
@@ -441,6 +460,7 @@ enum TaskStatusParserTests {
         let mainID = sessionUUID
         let subagentID = "019fb5f6-40d1-7383-ac0d-48b797170e08"
         let fallbackID = "019fb5f6-40d1-7383-ac0d-48b797170e09"
+        let cliID = "019fb5f6-40d1-7383-ac0d-48b797170e10"
         let main = CodexDesktopSessionScanner.snapshot(
             fromSessionMetaLine: """
             {"type":"session_meta","payload":{"originator":"codex_work_desktop","thread_source":"user","id":"\(mainID)","cwd":"/Users/openclaw/Projects/MXDT"}}
@@ -452,7 +472,7 @@ enum TaskStatusParserTests {
         )
         let subagent = CodexDesktopSessionScanner.snapshot(
             fromSessionMetaLine: """
-            {"type":"session_meta","payload":{"originator":"codex_work_desktop","thread_source":"subagent","id":"\(subagentID)","cwd":"/Users/openclaw/Projects/codex助手","agent_nickname":"Averroes","agent_path":"/root/prd_copy_flow_audit"}}
+            {"type":"session_meta","payload":{"originator":"codex_work_desktop","thread_source":"subagent","id":"\(subagentID)","parent_thread_id":"\(mainID)","cwd":"/Users/openclaw/Projects/codex助手","agent_nickname":"Averroes","agent_path":"/root/prd_copy_flow_audit"}}
             """,
             fileURL: rolloutURL(id: subagentID),
             modificationDate: now.addingTimeInterval(-60),
@@ -468,14 +488,25 @@ enum TaskStatusParserTests {
             now: now,
             timeZone: shanghai
         )
+        let cli = CodexDesktopSessionScanner.snapshot(
+            fromSessionMetaLine: """
+            {"type":"session_meta","payload":{"originator":"codex-tui","source":"cli","id":"\(cliID)","cwd":"/Users/openclaw/Projects/CLI"}}
+            """,
+            fileURL: rolloutURL(id: cliID),
+            modificationDate: now,
+            now: now,
+            timeZone: shanghai
+        )
         return main?.title == "MXDT"
             && main?.source == .user
-            && main?.status == .running
             && main?.startedAt == date("2026-07-31 10:00:00")
             && subagent?.title == "Averroes · prd_copy_flow_audit"
             && subagent?.source == .subagent
+            && subagent?.parentThreadID == mainID
             && missingFields?.title == "Codex"
             && missingFields?.source == .user
+            && cli?.createdByCLI == true
+            && cli?.title == "CLI"
     }
 
     private static func testDesktopSessionFilteringAndFreshness() -> Bool {
@@ -483,25 +514,21 @@ enum TaskStatusParserTests {
         let runningID = sessionUUID
         let endedID = "019fb5f6-40d1-7383-ac0d-48b797170e08"
         let cliID = "019fb5f6-40d1-7383-ac0d-48b797170e09"
-        let running = CodexDesktopSessionScanner.snapshot(
-            fromSessionMetaLine: desktopSessionMeta(
-                id: runningID,
-                originator: "codex_work_desktop"
-            ),
-            fileURL: rolloutURL(id: runningID),
-            modificationDate: now.addingTimeInterval(-119),
-            now: now,
-            timeZone: shanghai
+        let running = CodexDesktopThreadSnapshot(
+            id: runningID,
+            title: "Codex",
+            source: .user,
+            startedAt: now.addingTimeInterval(-119),
+            lastActiveAt: now.addingTimeInterval(-119),
+            status: .running
         )
-        let ended = CodexDesktopSessionScanner.snapshot(
-            fromSessionMetaLine: desktopSessionMeta(
-                id: endedID,
-                originator: "codex_work_desktop"
-            ),
-            fileURL: rolloutURL(id: endedID),
-            modificationDate: now.addingTimeInterval(-120),
-            now: now,
-            timeZone: shanghai
+        let ended = CodexDesktopThreadSnapshot(
+            id: endedID,
+            title: "Codex",
+            source: .user,
+            startedAt: now.addingTimeInterval(-120),
+            lastActiveAt: now.addingTimeInterval(-120),
+            status: .ended
         )
         let cliSession = CodexDesktopSessionScanner.snapshot(
             fromSessionMetaLine: desktopSessionMeta(
@@ -513,11 +540,7 @@ enum TaskStatusParserTests {
             now: now,
             timeZone: shanghai
         )
-        guard
-            let running,
-            let ended,
-            cliSession == nil
-        else {
+        guard cliSession == nil else {
             return false
         }
 
@@ -549,6 +572,63 @@ enum TaskStatusParserTests {
             && visible.count == CodexDesktopSessionScanner.displayLimit
             && visible.first?.id == runningID
             && !visible.contains(where: { $0.id == "previous-day" })
+    }
+
+    private static func testSharedHistoryCache() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let now = date("2026-07-31 10:30:00")
+            let file = sessions.appendingPathComponent(rolloutURL(id: sessionUUID).lastPathComponent)
+            let meta = desktopSessionMeta(id: sessionUUID, originator: "codex_work_desktop")
+            let started = "{\"timestamp\":\"2026-07-31T02:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"cache-test\"}}"
+            let ended = "{\"timestamp\":\"2026-07-31T02:05:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"cache-test\"}}"
+            guard write(meta + "\n" + started + "\n", to: file), setModificationDate(now, for: file) else { return false }
+            let scanner = CodexDesktopSessionScanner(sessionsDirectory: sessions)
+            guard scanner.candidateSnapshots(since: .distantPast).first?.status == .running else { return false }
+            guard write(meta + "\n" + started + "\n" + ended + "\n", to: file), setModificationDate(now.addingTimeInterval(1), for: file) else { return false }
+            return scanner.candidateSnapshots(since: .distantPast).first?.status == .ended
+        }
+    }
+
+    private static func testSharedHistoryOwnership() -> Bool {
+        let now = date("2026-07-31 10:30:00")
+        let old = now.addingTimeInterval(-3 * 86_400)
+        let desktop = CodexDesktopThreadSnapshot(id: "desktop", title: "Desktop", source: .user, startedAt: old, lastActiveAt: old, status: .ended)
+        let cli = CodexDesktopThreadSnapshot(id: "cli", title: "CLI", source: .user, startedAt: old, lastActiveAt: old, status: .running, createdByCLI: true)
+        let released = cli.reconcilingOwner(isOwned: false)
+        let history = [desktop, released]
+        return released.status == .unknown && released.createdByCLI
+            && cli.reconcilingOwner(isOwned: true).status == .running
+            && Set(CodexDesktopSessionScanner.visibleSnapshots(history, now: now).map(\.id)) == ["desktop", "cli"]
+            && Set(CodexDesktopThreadTree.groups(candidates: history, now: now).map(\.id)) == ["desktop", "cli"]
+            && !TaskSleepActivity.hasRunningTasks(cliTasks: [], desktopThreads: history, codexDesktopLaunchDate: old.addingTimeInterval(-1))
+    }
+
+    private static func testCLIProcessOwners() -> Bool {
+        let processList = """
+          100 ttys001 /opt/homebrew/bin/codex codex resume sample
+          200 ?? /Applications/ChatGPT.app/Contents/Resources/codex codex app-server
+          300 ttys002 /usr/bin/python3 python3 codex-helper.py
+          400 ?? /opt/homebrew/bin/codex codex exec sample
+        """
+        let owners = ["desktop-created-cli-owned": 100, "cli-created-desktop-owned": 200, "other": 300, "exec": 400, "exited": 500]
+        let active = CodexCLIProcess.sessions(owners: owners, processList: processList)
+        return active == ["desktop-created-cli-owned": CodexCLIProcess(pid: 100, tty: "ttys001")]
+            && CodexCLIProcess.sessions(owners: owners, processList: "").isEmpty
+            && CodexCLIProcess.sessions(owners: [:], processList: processList).isEmpty
+    }
+
+    private static func testCrossDayCLIHistory() -> Bool {
+        let now = date("2026-07-31 10:30:00")
+        let cli = CodexDesktopThreadSnapshot(
+            id: sessionUUID,
+            title: "CLI history",
+            source: .user,
+            startedAt: now.addingTimeInterval(-86_400),
+            lastActiveAt: now.addingTimeInterval(-86_400),
+            status: .ended,
+            createdByCLI: true
+        )
+        return CodexDesktopSessionScanner.visibleSnapshots([cli], now: now).map(\.id) == [sessionUUID]
     }
 
     private static func testDesktopSessionDirectoryScan() -> Bool {
@@ -627,6 +707,165 @@ enum TaskStatusParserTests {
                 timeZone: shanghai
             ).snapshots(now: now)
             return snapshots.map(\.id) == [todayID, yesterdayID]
+        }
+    }
+
+    private static func testDesktopSessionLifecycleEvents() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let now = date("2026-07-31 10:30:00")
+            let directory = CodexDesktopSessionScanner.sessionDirectories(
+                in: sessions,
+                now: now,
+                timeZone: shanghai
+            )[0]
+            try? FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+
+            let endedID = "019fb5f6-40d1-7383-ac0d-48b797170e08"
+            let runningID = "019fb5f6-40d1-7383-ac0d-48b797170e09"
+            let unknownID = "019fb5f6-40d1-7383-ac0d-48b797170e10"
+            let endedURL = directory.appendingPathComponent(
+                rolloutURL(id: endedID).lastPathComponent
+            )
+            let runningURL = directory.appendingPathComponent(
+                rolloutURL(id: runningID).lastPathComponent
+            )
+            let unknownURL = directory.appendingPathComponent(
+                rolloutURL(id: unknownID).lastPathComponent
+            )
+            let meta = { (id: String) in desktopSessionMeta(id: id, originator: "codex_work_desktop") }
+            let endedEvents = """
+            {"timestamp":"2026-07-31T02:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-ended"}}
+            {"timestamp":"2026-07-31T02:05:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-ended"}}
+            """
+            let runningEvents = """
+            {"timestamp":"2026-07-31T02:00:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-old"}}
+            {"timestamp":"2026-07-31T02:05:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-old"}}
+            {"timestamp":"2026-07-31T02:20:00.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-new"}}
+            {"timestamp":"2026-07-31T02:21:00.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-old"}}
+            """
+            guard
+                write(meta(endedID) + "\n" + endedEvents, to: endedURL),
+                write(meta(runningID) + "\n" + runningEvents, to: runningURL),
+                write(meta(unknownID) + "\n", to: unknownURL),
+                setModificationDate(now.addingTimeInterval(-10), for: endedURL),
+                setModificationDate(now.addingTimeInterval(-10), for: runningURL),
+                setModificationDate(now.addingTimeInterval(-10), for: unknownURL)
+            else {
+                return false
+            }
+
+            let snapshots = CodexDesktopSessionScanner(
+                sessionsDirectory: sessions,
+                timeZone: shanghai
+            ).snapshots(now: now)
+            guard
+                let ended = snapshots.first(where: { $0.id == endedID }),
+                let running = snapshots.first(where: { $0.id == runningID }),
+                let unknown = snapshots.first(where: { $0.id == unknownID })
+            else {
+                return false
+            }
+            return ended.status == .ended
+                && ended.lastActiveAt == date("2026-07-31 10:05:00")
+                && running.status == .running
+                && running.startedAt == date("2026-07-31 10:20:00")
+                && unknown.status == .unknown
+                && unknown.lastActiveAt == now.addingTimeInterval(-10)
+        }
+    }
+
+    private static func testDesktopSessionSinceScan() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let now = date("2026-07-31 10:30:00")
+            let since = now.addingTimeInterval(-60)
+            let oldDirectory = sessions.appendingPathComponent(
+                "2026/07/28",
+                isDirectory: true
+            )
+            let activeID = "019fb5f6-40d1-7383-ac0d-48b797170e11"
+            let staleID = "019fb5f6-40d1-7383-ac0d-48b797170e12"
+            let activeURL = oldDirectory.appendingPathComponent(
+                rolloutURL(id: activeID).lastPathComponent
+            )
+            let staleURL = oldDirectory.appendingPathComponent(
+                rolloutURL(id: staleID).lastPathComponent
+            )
+            try? FileManager.default.createDirectory(
+                at: oldDirectory,
+                withIntermediateDirectories: true
+            )
+            guard
+                write(
+                    desktopSessionMeta(id: activeID, originator: "codex_work_desktop")
+                        + "\n{\"timestamp\":\"2026-07-31T02:20:00.000Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"active\"}}",
+                    to: activeURL
+                ),
+                write(
+                    desktopSessionMeta(id: staleID, originator: "codex_work_desktop"),
+                    to: staleURL
+                ),
+                setModificationDate(now.addingTimeInterval(-30), for: activeURL),
+                setModificationDate(now.addingTimeInterval(-61), for: staleURL)
+            else {
+                return false
+            }
+
+            let scanner = CodexDesktopSessionScanner(
+                sessionsDirectory: sessions,
+                timeZone: shanghai
+            )
+            let defaultIDs = scanner.candidateSnapshots(now: now).map(\.id)
+            let recovered = scanner.candidateSnapshots(now: now, since: since)
+            return defaultIDs.isEmpty
+                && recovered.map(\.id) == [activeID]
+                && recovered.first?.status == .running
+        }
+    }
+
+    private static func testDesktopSessionLargeLifecycleLog() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let now = date("2026-07-31 10:30:00")
+            let directory = CodexDesktopSessionScanner.sessionDirectories(
+                in: sessions,
+                now: now,
+                timeZone: shanghai
+            )[0]
+            let runningID = "019fb5f6-40d1-7383-ac0d-48b797170e13"
+            let endedID = "019fb5f6-40d1-7383-ac0d-48b797170e14"
+            let noise = String(repeating: "x", count: 600_000)
+            let lifecycle = "{\"timestamp\":\"2026-07-31T02:20:00.000Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"large\"}}"
+            let completed = "{\"timestamp\":\"2026-07-31T02:25:00.000Z\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"large\"}}"
+            let runningURL = directory.appendingPathComponent(rolloutURL(id: runningID).lastPathComponent)
+            let endedURL = directory.appendingPathComponent(rolloutURL(id: endedID).lastPathComponent)
+            try? FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+            guard
+                write(
+                    desktopSessionMeta(id: runningID, originator: "codex_work_desktop")
+                        + "\n" + lifecycle + "\n" + noise,
+                    to: runningURL
+                ),
+                write(
+                    desktopSessionMeta(id: endedID, originator: "codex_work_desktop")
+                        + "\n" + lifecycle + "\n" + noise + "\n" + completed,
+                    to: endedURL
+                ),
+                setModificationDate(now.addingTimeInterval(-10), for: runningURL),
+                setModificationDate(now.addingTimeInterval(-10), for: endedURL)
+            else {
+                return false
+            }
+            let snapshots = CodexDesktopSessionScanner(
+                sessionsDirectory: sessions,
+                timeZone: shanghai
+            ).candidateSnapshots(now: now)
+            return snapshots.first(where: { $0.id == runningID })?.status == .running
+                && snapshots.first(where: { $0.id == endedID })?.status == .ended
         }
     }
 

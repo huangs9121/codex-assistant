@@ -9,16 +9,38 @@ enum TaskResumeActionResult: Equatable {
     case unavailable
 }
 
+enum CodexThreadOpenActionResult: Equatable {
+    case openRequested
+    case unavailable
+}
+
+enum CodexCLIProcessOpenActionResult: Equatable { case opened, unavailable }
+
 @MainActor
 final class StatusPanelModel: ObservableObject {
     @Published private(set) var snapshot: QuotaSnapshot?
     @Published private(set) var tasks: [TaskStatusSnapshot] = []
     @Published private(set) var desktopThreads: [CodexDesktopThreadSnapshot] = []
+    @Published private(set) var desktopThreadGroups: [CodexDesktopThreadGroup] = []
+    @Published private(set) var cliProcesses: [String: CodexCLIProcess] = [:]
+    @Published private(set) var expandedDesktopThreadGroupIDs: Set<String>
     @Published private(set) var hasCompletedTasks = false
     @Published private(set) var currentResetSignal: TiboResetSignal?
     @Published private(set) var now = Date()
 
+    var canClearCompletedSessions: Bool {
+        !CodexDesktopThreadTree.clearableThreadIDs(
+            in: desktopThreads, hiddenIDs: store.hiddenDesktopThreadIDs
+        ).isEmpty
+    }
+
     var onContentChange: (() -> Void)?
+
+    private let store = TaskStatusStore()
+
+    init() {
+        expandedDesktopThreadGroupIDs = store.expandedDesktopThreadGroupIDs
+    }
 
     func update(snapshot: QuotaSnapshot?) {
         self.snapshot = snapshot
@@ -28,11 +50,25 @@ final class StatusPanelModel: ObservableObject {
     func update(
         tasks: [TaskStatusSnapshot],
         desktopThreads: [CodexDesktopThreadSnapshot],
+        desktopThreadGroups: [CodexDesktopThreadGroup],
+        cliProcesses: [String: CodexCLIProcess],
         hasCompletedTasks: Bool
     ) {
         self.tasks = tasks
         self.desktopThreads = desktopThreads
+        self.desktopThreadGroups = desktopThreadGroups
+        self.cliProcesses = cliProcesses
         self.hasCompletedTasks = hasCompletedTasks
+        notifyContentChange()
+    }
+
+    func toggleDesktopThreadGroup(_ id: String) {
+        if expandedDesktopThreadGroupIDs.contains(id) {
+            expandedDesktopThreadGroupIDs.remove(id)
+        } else {
+            expandedDesktopThreadGroupIDs.insert(id)
+        }
+        store.expandedDesktopThreadGroupIDs = expandedDesktopThreadGroupIDs
         notifyContentChange()
     }
 
@@ -67,22 +103,32 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         model: StatusPanelModel,
         text: AppText,
         onSettingsMenu: @escaping (NSView) -> Void,
+        onQuickTools: @escaping () -> Void,
         onOpenResetAnnouncement: @escaping () -> Void,
         canResumeTaskSessions: Bool,
         onResumeSession: @escaping (String, Bool) -> TaskResumeActionResult,
+        onOpenCodexThread: @escaping (CodexDesktopThreadSnapshot) -> CodexThreadOpenActionResult,
+        onOpenCLIProcess: @escaping (String, CodexCLIProcess) -> CodexCLIProcessOpenActionResult,
         onArchiveTask: @escaping (TaskStatusSnapshot) -> Void,
         onClearCompletedTasks: @escaping () -> Void,
         onClearFinishedThreads: @escaping () -> Void
     ) {
         self.model = model
+        let panelPopover = popover
         hostingController = NSHostingController(
             rootView: StatusPanelView(
                 model: model,
                 text: text,
                 onSettingsMenu: onSettingsMenu,
+                onQuickTools: {
+                    panelPopover.performClose(nil)
+                    onQuickTools()
+                },
                 onOpenResetAnnouncement: onOpenResetAnnouncement,
                 canResumeTaskSessions: canResumeTaskSessions,
                 onResumeSession: onResumeSession,
+                onOpenCodexThread: onOpenCodexThread,
+                onOpenCLIProcess: onOpenCLIProcess,
                 onArchiveTask: onArchiveTask,
                 onClearCompletedTasks: onClearCompletedTasks,
                 onClearFinishedThreads: onClearFinishedThreads
@@ -118,6 +164,11 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
             of: button,
             preferredEdge: .minY
         )
+        // AppKit otherwise assigns first responder to the first toolbar button.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.popover.isShown else { return }
+            self.hostingController.view.window?.makeFirstResponder(nil)
+        }
         DispatchQueue.main.async { [weak self] in
             self?.resizeToFit()
         }

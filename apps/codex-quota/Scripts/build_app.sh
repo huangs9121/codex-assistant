@@ -75,12 +75,13 @@ cleanup() {
 
 trap cleanup EXIT
 rm -rf "$TEMP_DIR"
-mkdir -p "$STAGING_APP/Contents/MacOS" "$STAGING_APP/Contents/Resources" "$ICONSET"
+mkdir -p "$STAGING_APP/Contents/MacOS" "$STAGING_APP/Contents/Resources" "$STAGING_APP/Contents/Library/LaunchServices" "$ICONSET"
 
 swift run --disable-sandbox --package-path "$PACKAGE_ROOT" CodexQuotaCoreTests
 swift build --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64
 BIN_DIR="$(swift build --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64 --show-bin-path)"
 cp "$BIN_DIR/CodexQuotaApp" "$STAGING_APP/Contents/MacOS/CodexQuotaApp"
+cp "$BIN_DIR/CodexQuotaSleepHelper" "$STAGING_APP/Contents/Library/LaunchServices/CodexQuotaSleepHelper"
 
 swift "$SCRIPT_DIR/generate_icon.swift" "$SOURCE_ICON"
 while IFS=: read -r size name; do
@@ -131,6 +132,8 @@ cat > "$STAGING_APP/Contents/Info.plist" <<PLIST
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Codex Quota opens the selected Codex CLI session in Terminal.</string>
     <key>LSUIElement</key>
     <true/>
 </dict>
@@ -139,6 +142,7 @@ PLIST
 
 chmod -R u=rwX,go=rX "$STAGING_APP"
 chmod 755 "$STAGING_APP/Contents/MacOS/CodexQuotaApp"
+chmod 755 "$STAGING_APP/Contents/Library/LaunchServices/CodexQuotaSleepHelper"
 xattr -cr "$STAGING_APP"
 plutil -lint "$STAGING_APP/Contents/Info.plist"
 test "$(plutil -extract CFBundleShortVersionString raw "$STAGING_APP/Contents/Info.plist")" = "$APP_VERSION"
@@ -190,6 +194,7 @@ ditto -x -k "$STAGING_ZIP" "$VERIFY_ZIP_DIR"
 VERIFY_ZIP_APP="$VERIFY_ZIP_DIR/Codex Quota.app"
 test -d "$VERIFY_ZIP_APP"
 test -x "$VERIFY_ZIP_APP/Contents/MacOS/CodexQuotaApp"
+test -x "$VERIFY_ZIP_APP/Contents/Library/LaunchServices/CodexQuotaSleepHelper"
 test -f "$VERIFY_ZIP_APP/Contents/Resources/icon.icns"
 plutil -lint "$VERIFY_ZIP_APP/Contents/Info.plist"
 test "$(plutil -extract CFBundlePackageType raw "$VERIFY_ZIP_APP/Contents/Info.plist")" = "APPL"

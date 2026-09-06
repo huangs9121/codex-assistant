@@ -5,12 +5,16 @@ import SwiftUI
 
 struct StatusPanelView: View {
     @ObservedObject var model: StatusPanelModel
+    @FocusState private var isClearFinishedThreadsFocused: Bool
 
     let text: AppText
     let onSettingsMenu: (NSView) -> Void
+    let onQuickTools: () -> Void
     let onOpenResetAnnouncement: () -> Void
     let canResumeTaskSessions: Bool
     let onResumeSession: (String, Bool) -> TaskResumeActionResult
+    let onOpenCodexThread: (CodexDesktopThreadSnapshot) -> CodexThreadOpenActionResult
+    let onOpenCLIProcess: (String, CodexCLIProcess) -> CodexCLIProcessOpenActionResult
     let onArchiveTask: (TaskStatusSnapshot) -> Void
     let onClearCompletedTasks: () -> Void
     let onClearFinishedThreads: () -> Void
@@ -35,9 +39,13 @@ struct StatusPanelView: View {
                 Divider()
                 taskSection
             }
-            if !model.desktopThreads.isEmpty {
+            if !model.desktopThreadGroups.isEmpty {
                 Divider()
                 codexDesktopSection
+            }
+            if !model.cliProcesses.isEmpty {
+                Divider()
+                cliSection
             }
             Divider()
             toolbar
@@ -200,15 +208,8 @@ struct StatusPanelView: View {
                 Text(text.codexClientThreads)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 8)
-                Button(text.clearFinishedThreads) {
-                    onClearFinishedThreads()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(!model.desktopThreads.contains { !$0.isRunning })
-                let runningCount = model.desktopThreads.count {
-                    $0.isRunning
-                }
+                clearFinishedThreadsButton
+                let runningCount = model.desktopThreadGroups.reduce(0) { $0 + $1.runningCount }
                 if runningCount > 0 {
                     Circle()
                         .fill(Color(nsColor: .controlAccentColor))
@@ -223,33 +224,87 @@ struct StatusPanelView: View {
             .padding(.top, 12)
             .padding(.bottom, 5)
 
-            ForEach(
-                Array(model.desktopThreads.enumerated()),
-                id: \.element.id
-            ) { index, thread in
-                CodexDesktopThreadRow(
-                    thread: thread,
-                    now: model.now,
-                    text: text,
-                    canResumeTaskSessions: canResumeTaskSessions,
-                    onCopyResumeCommand: { id in
-                        onResumeSession(id, true)
+            ScrollView(.vertical) {
+                VStack(spacing: 0) {
+                    ForEach(model.desktopThreadGroups) { group in
+                        CodexDesktopThreadGroupView(
+                            group: group,
+                            isCollapsed: !model.expandedDesktopThreadGroupIDs.contains(group.id),
+                            now: model.now,
+                            text: text,
+                            onToggle: { model.toggleDesktopThreadGroup(group.id) },
+                            onOpenCodexThread: onOpenCodexThread
+                        )
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
                     }
-                )
-                if index < model.desktopThreads.count - 1 {
-                    Divider()
-                        .padding(.leading, 40)
+                }
+            }
+            .frame(maxHeight: 260)
+        }
+        .padding(.bottom, 5)
+    }
+
+    private var cliSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Text(text.codexCLIProcesses).font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 8)
+                let count = model.cliProcesses.count
+                if count > 0 {
+                    Circle().fill(Color(nsColor: .controlAccentColor)).frame(width: 6, height: 6)
+                    Text(text.cliOccupiedCount(count)).font(.system(size: 12)).foregroundStyle(Color(nsColor: .controlAccentColor)).monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 5)
+            ForEach(model.cliProcesses.keys.sorted(), id: \.self) { id in
+                if let process = model.cliProcesses[id] {
+                    CodexCLIProcessRow(id: id, title: model.desktopThreads.first(where: { $0.id == id })?.title ?? text.codexCLIProcesses, process: process, text: text, onOpen: onOpenCLIProcess)
                 }
             }
         }
         .padding(.bottom, 5)
     }
 
+    @ViewBuilder
+    private var clearFinishedThreadsButton: some View {
+        let button = Button {
+            onClearFinishedThreads()
+        } label: {
+            Image(systemName: "eraser")
+                .font(.system(size: 12))
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color(nsColor: .controlAccentColor))
+        .help(text.clearFinishedThreads)
+        .accessibilityLabel(text.clearFinishedThreads)
+        .focused($isClearFinishedThreadsFocused)
+        .overlay(alignment: .bottom) {
+            Color(nsColor: .controlAccentColor)
+                .frame(height: 1)
+                .opacity(isClearFinishedThreadsFocused ? 0.7 : 0)
+        }
+        .disabled(!model.canClearCompletedSessions)
+
+        if #available(macOS 14.0, *) {
+            button.focusEffectDisabled()
+        } else {
+            button
+        }
+    }
+
+
     private var toolbar: some View {
         HStack(spacing: 8) {
             SettingsMenuButton(
                 accessibilityLabel: text.settings,
                 action: onSettingsMenu
+            )
+            .frame(width: 24, height: 24)
+            QuickToolsButton(
+                accessibilityLabel: text.quickTools,
+                action: onQuickTools
             )
             .frame(width: 24, height: 24)
             Spacer(minLength: 8)
@@ -457,6 +512,36 @@ private struct QuotaProgressBar: View {
     }
 }
 
+private struct CodexCLIProcessRow: View {
+    let id: String
+    let title: String
+    let process: CodexCLIProcess
+    let text: AppText
+    let onOpen: (String, CodexCLIProcess) -> CodexCLIProcessOpenActionResult
+
+    var body: some View {
+        Button { _ = onOpen(id, process) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal.fill")
+                    .font(.system(size: 12)).foregroundStyle(Color(nsColor: .controlAccentColor))
+                    .frame(width: 16, height: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.tertiary).frame(width: 20, height: 20)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 7).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).help(text.openCLIProcessHelp).accessibilityLabel(text.codexCLIProcesses)
+    }
+
+    private var subtitle: String {
+        text.cliOccupied(process.pid, tty: process.tty)
+    }
+}
+
 private struct TaskStatusRow: View {
     let task: TaskStatusSnapshot
     let now: Date
@@ -590,32 +675,234 @@ private struct TaskStatusRow: View {
     }
 }
 
+private struct CodexDesktopThreadGroupView: View {
+    let group: CodexDesktopThreadGroup
+    let isCollapsed: Bool
+    let now: Date
+    let text: AppText
+    let onToggle: () -> Void
+    let onOpenCodexThread: (CodexDesktopThreadSnapshot) -> CodexThreadOpenActionResult
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                if group.descendantCount > 0 {
+                    Button(action: onToggle) {
+                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 18, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .help(isCollapsed ? "展开子任务" : "折叠子任务")
+                } else {
+                    Color.clear.frame(width: 18, height: 24)
+                }
+                if let root = group.root {
+                    CodexDesktopThreadSummary(thread: root.thread, now: now, text: text, childCount: group.descendantCount, showsMainTaskLabel: root.thread.source == .user, statusIcon: aggregateStatus)
+                } else {
+                    Text("所属聊天不可用")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 4)
+                }
+                Spacer(minLength: 4)
+                if let root = group.root {
+                    CodexDesktopThreadOpenButton(thread: root.thread, text: text, onOpenCodexThread: onOpenCodexThread)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 5)
+            if !isCollapsed {
+                CodexDesktopThreadChildren(nodes: childNodes, depth: group.root == nil ? 0 : 1, now: now, text: text, onOpenCodexThread: onOpenCodexThread)
+                    .padding(.vertical, 4)
+                    .background(
+                        Color(nsColor: .separatorColor).opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
+            }
+        }
+        .background(
+            Color(nsColor: .separatorColor).opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+    }
+
+    private var childNodes: [CodexDesktopThreadNode] {
+        group.root?.children ?? group.orphanNodes
+    }
+
+    private var aggregateStatus: CodexDesktopThreadStatus {
+        let nodes = group.root.map { [$0] } ?? group.orphanNodes
+        let statuses = nodes.flatMap(allStatuses)
+        if statuses.contains(.running) { return .running }
+        if statuses.contains(.unknown) { return .unknown }
+        return .ended
+    }
+
+    private func allStatuses(_ node: CodexDesktopThreadNode) -> [CodexDesktopThreadStatus] {
+        [node.thread.status] + node.children.flatMap(allStatuses)
+    }
+}
+
+private struct CodexDesktopThreadChildren: View {
+    let nodes: [CodexDesktopThreadNode]
+    let depth: Int
+    let now: Date
+    let text: AppText
+    let onOpenCodexThread: (CodexDesktopThreadSnapshot) -> CodexThreadOpenActionResult
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
+                HStack(spacing: 8) {
+                    DesktopThreadStatusIcon(status: node.thread.status)
+                        .frame(width: 16, height: 18)
+                    CodexDesktopThreadSummary(thread: node.thread, now: now, text: text)
+                    Spacer(minLength: 4)
+                    CodexDesktopThreadOpenButton(thread: node.thread, text: text, onOpenCodexThread: onOpenCodexThread)
+                }
+                .padding(.leading, CGFloat(34 + depth * 18))
+                .padding(.trailing, 16)
+                .padding(.vertical, 5)
+                if !node.children.isEmpty {
+                    CodexDesktopThreadChildren(nodes: node.children, depth: depth + 1, now: now, text: text, onOpenCodexThread: onOpenCodexThread)
+                }
+                if index < nodes.count - 1 {
+                    Divider().padding(.leading, CGFloat(34 + depth * 18))
+                }
+            }
+        }
+    }
+}
+
+private struct CodexDesktopThreadSummary: View {
+    let thread: CodexDesktopThreadSnapshot
+    let now: Date
+    let text: AppText
+    var childCount = 0
+    var showsMainTaskLabel = false
+    var statusIcon: CodexDesktopThreadStatus? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(thread.title)
+                    .font(.system(size: 13, weight: childCount > 0 ? .semibold : .regular))
+                    .foregroundStyle(thread.isRunning ? .primary : .secondary)
+                    .lineLimit(1)
+                if showsMainTaskLabel {
+                    Text("主任务")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize()
+                }
+                if let statusIcon {
+                    DesktopThreadStatusIcon(status: statusIcon)
+                }
+            }
+            Text(subtitle)
+                .font(.system(size: 12))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var subtitle: String {
+        let base: String
+        if thread.isRunning {
+            base = text.codexClientRunning(TaskStatusPresentationFormatter.durationString(max(0, now.timeIntervalSince(thread.startedAt)), language: text.language))
+        } else {
+            let formatter = DateFormatter()
+            formatter.locale = text.language.locale
+            formatter.timeStyle = .short
+            formatter.dateStyle = .none
+            base = text.codexClientLastActive(formatter.string(from: thread.lastActiveAt))
+        }
+        let origin = thread.createdByCLI ? text.createdByCLI : text.createdByDesktop
+        let summary = "\(origin) · \(base)"
+        guard childCount > 0 else { return summary }
+        return "\(summary) · \(childCount) 子 Agent"
+    }
+}
+
+private struct DesktopThreadStatusIcon: View {
+    let status: CodexDesktopThreadStatus
+
+    var body: some View {
+        switch status {
+        case .running:
+            Circle().fill(Color(nsColor: .controlAccentColor)).frame(width: 8, height: 8)
+                .accessibilityLabel("运行中")
+                .help("任务运行中")
+        case .ended:
+            Circle().fill(Color.secondary.opacity(0.55)).frame(width: 8, height: 8)
+                .accessibilityLabel("已结束")
+                .help("已收到明确的完成事件")
+        case .unknown:
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .help("状态未知，尚未收到明确的完成事件")
+                .accessibilityLabel("状态未知")
+        }
+    }
+}
+
+private struct CodexDesktopThreadOpenButton: View {
+    let thread: CodexDesktopThreadSnapshot
+    let text: AppText
+    let onOpenCodexThread: (CodexDesktopThreadSnapshot) -> CodexThreadOpenActionResult
+
+    private var canOpen: Bool {
+        let id = thread.source == .subagent ? thread.parentThreadID : thread.id
+        return id.flatMap(UUID.init(uuidString:)) != nil
+    }
+
+    var body: some View {
+        Button { if canOpen { _ = onOpenCodexThread(thread) } } label: {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canOpen)
+        .help(thread.source == .subagent ? text.openParentCodexThreadHelp : text.openCodexThreadHelp)
+    }
+}
+
 private struct CodexDesktopThreadRow: View {
     let thread: CodexDesktopThreadSnapshot
     let now: Date
     let text: AppText
-    let canResumeTaskSessions: Bool
-    let onCopyResumeCommand: (String) -> TaskResumeActionResult
+    let onOpenCodexThread: (CodexDesktopThreadSnapshot) -> CodexThreadOpenActionResult
 
-    @State private var isCopied = false
+    private var targetThreadID: String? {
+        switch thread.source {
+        case .user:
+            return thread.id
+        case .subagent:
+            return thread.parentThreadID
+        }
+    }
 
-    private var canCopyResumeCommand: Bool {
-        !thread.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && canResumeTaskSessions
+    private var canOpenThread: Bool {
+        guard let targetThreadID else {
+            return false
+        }
+        return UUID(uuidString: targetThreadID) != nil
     }
 
     var body: some View {
         Button {
-            guard canCopyResumeCommand else {
+            guard canOpenThread else {
                 return
             }
-            let result = onCopyResumeCommand(thread.id)
-            if result == .copied || result == .copiedAfterLaunchFailure {
-                isCopied = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    isCopied = false
-                }
-            }
+            _ = onOpenCodexThread(thread)
         } label: {
             HStack(alignment: .center, spacing: 8) {
                 TaskStatusIcon(
@@ -639,7 +926,7 @@ private struct CodexDesktopThreadRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
-                Image(systemName: isCopied ? "checkmark" : "play.fill")
+                Image(systemName: "chevron.right")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .frame(width: 20, height: 20)
@@ -649,9 +936,18 @@ private struct CodexDesktopThreadRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!canCopyResumeCommand)
-        .help(text.copyResumeCommandHelp)
+        .disabled(!canOpenThread)
+        .help(threadHelp)
         .accessibilityLabel(thread.title)
+    }
+
+    private var threadHelp: String {
+        guard canOpenThread else {
+            return text.subagentThreadUnavailableHelp
+        }
+        return thread.source == .subagent
+            ? text.openParentCodexThreadHelp
+            : text.openCodexThreadHelp
     }
 
     private var subtitle: String {
@@ -776,6 +1072,98 @@ private struct SettingsMenuButton: NSViewRepresentable {
 
         @objc func performAction(_ sender: NSButton) {
             action(sender)
+        }
+    }
+}
+
+private final class HoverButton: NSButton {
+    private var isPointerInside = false
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(
+            NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+        )
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isPointerInside = true
+        needsDisplay = true
+        super.mouseEntered(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isPointerInside = false
+        needsDisplay = true
+        super.mouseExited(with: event)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isPointerInside {
+            NSColor.controlAccentColor.withAlphaComponent(0.14).setFill()
+            NSBezierPath(
+                roundedRect: bounds.insetBy(dx: 1, dy: 1),
+                xRadius: 6,
+                yRadius: 6
+            ).fill()
+        }
+        super.draw(dirtyRect)
+    }
+}
+
+private struct QuickToolsButton: NSViewRepresentable {
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = HoverButton()
+        button.title = ""
+        button.isBordered = false
+        button.bezelStyle = .shadowlessSquare
+        button.focusRingType = .exterior
+        button.image = NSImage(
+            systemSymbolName: "briefcase",
+            accessibilityDescription: accessibilityLabel
+        )
+        button.image?.isTemplate = true
+        button.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: 15,
+            weight: .regular
+        )
+        button.contentTintColor = .secondaryLabelColor
+        button.toolTip = accessibilityLabel
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.performAction(_:))
+        button.setAccessibilityLabel(accessibilityLabel)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.toolTip = accessibilityLabel
+        button.setAccessibilityLabel(accessibilityLabel)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        @objc func performAction(_ sender: NSButton) {
+            action()
         }
     }
 }

@@ -146,6 +146,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var identityItems: [StatusIdentityMode: NSMenuItem] = [:]
     private var resetToggleItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
+    private var taskSleepItem: NSMenuItem?
+    private var isChangingTaskSleep = false
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
     private var refreshTimer: Timer?
@@ -162,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let automaticUpdateInstaller = AutomaticUpdateInstaller()
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
+    private let taskSleepController = TaskSleepController()
     private let mouseScrollReversalController = MouseScrollReversalController()
     private let mouseGestureController = MouseGestureController()
     private let doubleCommandTapController = DoubleCommandTapController()
@@ -204,6 +207,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         onSettingsMenu: { [weak self] view in
             self?.showSettingsMenu(relativeTo: view)
         },
+        onQuickTools: { [weak self] in
+            self?.quickToolsPanelController.show()
+        },
         onOpenResetAnnouncement: { [weak self] in
             self?.openCurrentResetAnnouncement()
         },
@@ -213,6 +219,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                 sessionUUID: sessionUUID,
                 copyOnly: copyOnly
             ) ?? .copiedAfterLaunchFailure
+        },
+        onOpenCodexThread: { [weak self] thread in
+            self?.openCodexThread(thread) ?? .unavailable
+        },
+        onOpenCLIProcess: { [weak self] id, process in
+            self?.openCLIProcess(id: id, process: process) ?? .unavailable
         },
         onArchiveTask: { [weak self] task in
             self?.archiveTask(task)
@@ -227,6 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        taskSleepController.onChange = { [weak self] in self?.syncMenuState() }
         currentResetSignal = preferences.latestResetSignal
         panelModel.update(resetSignal: currentResetSignal)
         configureStatusItem()
@@ -276,6 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        taskSleepController.stop()
         refreshTimer?.invalidate()
         updatePolicyTimer?.invalidate()
         resetMonitorTimer?.invalidate()
@@ -353,15 +367,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         launchAtLoginItem = loginItem
         settingsMenu.addItem(loginItem)
 
-        settingsMenu.addItem(.separator())
-
-        let quickToolsItem = NSMenuItem(
-            title: text.quickToolsMenu,
-            action: #selector(showQuickTools),
-            keyEquivalent: ""
+        let sleepItem = makeChoiceItem(
+            title: text.taskSleep,
+            tag: 0,
+            action: #selector(toggleTaskSleep(_:))
         )
-        quickToolsItem.target = self
-        settingsMenu.addItem(quickToolsItem)
+        taskSleepItem = sleepItem
+        settingsMenu.addItem(sleepItem)
 
         settingsMenu.addItem(.separator())
 
@@ -514,6 +526,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         resetToggleItem?.state = showsReset ? .on : .off
         (resetToggleItem?.view as? MenuChoiceRow)?.isSelected = showsReset
 
+        taskSleepItem?.state = taskSleepController.isEnabled ? .on : .off
+        (taskSleepItem?.view as? MenuChoiceRow)?.isSelected = taskSleepController.isEnabled
+        taskSleepItem?.view?.toolTip = taskSleepController.statusDescription
+
         let launchState = launchAtLoginController.state
         let launchTitle: String
         let launchSelected: Bool
@@ -623,6 +639,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
     }
 
+    @objc private func toggleTaskSleep(_ sender: NSButton) {
+        guard !isChangingTaskSleep else { return }
+        settingsMenu.cancelTracking()
+        let enable = !taskSleepController.isEnabled
+        if enable {
+            let alert = NSAlert()
+            alert.messageText = text.taskSleepConfirm
+            alert.informativeText = text.taskSleepExplanation
+            alert.addButton(withTitle: text.enabled)
+            alert.addButton(withTitle: language == .simplifiedChinese ? "取消" : "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        isChangingTaskSleep = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                isChangingTaskSleep = false
+                syncMenuState()
+            }
+            do {
+                try await taskSleepController.setEnabled(enable)
+                refreshTaskStatuses()
+            } catch {
+                showAlert(message: text.taskSleepFailed, informativeText: error.localizedDescription)
+            }
+        }
+    }
+
     private func setMouseScrollReversalEnabled(_ isEnabled: Bool) {
         mouseScrollReversalController.isEnabled = isEnabled
         if isEnabled,
@@ -644,11 +689,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             doubleCommandTapController.stop()
         }
         syncMenuState()
-    }
-
-    @objc private func showQuickTools() {
-        settingsMenu.cancelTracking()
-        quickToolsPanelController.show()
     }
 
     private func setLaunchAtLogin(_ enabled: Bool) {
@@ -936,9 +976,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             guard let self else {
                 return
             }
+            taskSleepController.update(hasRunningTasks: result.hasRunningTasks)
             panelModel.update(
                 tasks: result.tasks,
                 desktopThreads: result.desktopThreads,
+                desktopThreadGroups: result.desktopThreadGroups,
+                cliProcesses: result.cliProcesses,
                 hasCompletedTasks: result.hasCompletedTasks
             )
             for task in result.completedTasks {
@@ -952,6 +995,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             self?.panelModel.update(
                 tasks: result.tasks,
                 desktopThreads: result.desktopThreads,
+                desktopThreadGroups: result.desktopThreadGroups,
+                cliProcesses: result.cliProcesses,
                 hasCompletedTasks: result.hasCompletedTasks
             )
         }
@@ -962,6 +1007,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             self?.panelModel.update(
                 tasks: result.tasks,
                 desktopThreads: result.desktopThreads,
+                desktopThreadGroups: result.desktopThreadGroups,
+                cliProcesses: result.cliProcesses,
                 hasCompletedTasks: result.hasCompletedTasks
             )
         }
@@ -972,6 +1019,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             self?.panelModel.update(
                 tasks: result.tasks,
                 desktopThreads: result.desktopThreads,
+                desktopThreadGroups: result.desktopThreadGroups,
+                cliProcesses: result.cliProcesses,
                 hasCompletedTasks: result.hasCompletedTasks
             )
         }
@@ -1111,6 +1160,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
         copyTaskResumeCommand(command)
         return .copiedAfterLaunchFailure
+    }
+
+    private func openCLIProcess(id: String, process: CodexCLIProcess) -> CodexCLIProcessOpenActionResult {
+        guard TaskStatusController.cliProcesses()[id] == process else { return .unavailable }
+        if let tty = process.tty, activateTerminalTab(tty) { return .opened }
+        if activateOwningApplication(for: process) {
+            showAlert(message: text.cliOwningAppOpened)
+            return .unavailable
+        }
+        showAlert(message: text.cliOccupiedElsewhere)
+        return .unavailable
+    }
+
+    private func activateTerminalTab(_ tty: String) -> Bool {
+        guard NSWorkspace.shared.runningApplications.contains(where: {
+            $0.bundleIdentifier == "com.apple.Terminal"
+        }) else { return false }
+        let escapedTTY = appleScriptEscaped(tty)
+        let source = """
+        tell application "Terminal"
+            activate
+            repeat with w in windows
+                repeat with t in tabs of w
+                    if (tty of t as text) ends with "\(escapedTTY)" then
+                        set selected tab of w to t
+                        set index of w to 1
+                        return "opened"
+                    end if
+                end repeat
+            end repeat
+        end tell
+        return "missing"
+        """
+        guard let script = NSAppleScript(source: source) else { return false }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        return error == nil && result.stringValue == "opened"
+    }
+
+    private func activateOwningApplication(for process: CodexCLIProcess) -> Bool {
+        var currentPID = process.pid
+        for _ in 0..<4 {
+            guard let output = processOutput("/bin/ps", ["-o", "ppid=", "-p", String(currentPID)]), let parent = Int(output.trimmingCharacters(in: .whitespacesAndNewlines)), parent > 1 else { return false }
+            currentPID = parent
+            if let application = NSRunningApplication(processIdentifier: pid_t(currentPID)) {
+                return application.activate(options: [.activateIgnoringOtherApps])
+            }
+        }
+        return false
+    }
+
+    private func processOutput(_ executable: String, _ arguments: [String]) -> String? {
+        let process = Process(); let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable); process.arguments = arguments
+        process.standardOutput = pipe; process.standardError = Pipe()
+        do { try process.run(); process.waitUntilExit() } catch { return nil }
+        guard process.terminationStatus == 0 else { return nil }
+        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    }
+
+    private func openCodexThread(
+        _ thread: CodexDesktopThreadSnapshot
+    ) -> CodexThreadOpenActionResult {
+        let threadID: String?
+        switch thread.source {
+        case .user:
+            threadID = thread.id
+        case .subagent:
+            threadID = thread.parentThreadID
+        }
+        guard
+            let threadID,
+            UUID(uuidString: threadID) != nil,
+            let url = URL(string: "codex://threads/\(threadID)"),
+            let application = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: "com.openai.codex"
+            )
+        else {
+            return .unavailable
+        }
+
+        NSWorkspace.shared.open(
+            [url],
+            withApplicationAt: application,
+            configuration: NSWorkspace.OpenConfiguration()
+        ) { [weak self] _, error in
+            guard let error else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let alert = NSAlert()
+                alert.messageText = self.text.codexThreadOpenFailedTitle
+                alert.informativeText = error.localizedDescription
+                alert.runModal()
+            }
+        }
+        return .openRequested
     }
 
     private func copyTaskResumeCommand(_ command: String) {

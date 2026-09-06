@@ -19,6 +19,10 @@ struct AppText {
     var identityStyle: String { choose("标识形式", "Identity") }
     var showResetTime: String { choose("显示重置时间", "Show Reset Time") }
     var launchAtLogin: String { choose("开机自动启动", "Launch at Login") }
+    var taskSleep: String { choose("任务运行时合盖不睡眠", "Keep Awake During Tasks (Lid Closed)") }
+    var taskSleepConfirm: String { choose("启用任务期间合盖不睡眠？", "Keep the Mac awake during tasks?") }
+    var taskSleepExplanation: String { choose("仅检测到 Codex 任务运行时阻止睡眠；任务结束、关闭此开关或退出应用后恢复允许睡眠。此功能会接管系统的全局禁止睡眠设置（包括已有设置），首次启用需要 macOS 管理员授权。状态约每 15 秒检查一次；审批等待可能仍按运行中处理。合盖运行时请保持通风。", "Sleep is prevented only while Codex tasks are detected as running. Sleep is allowed again when tasks finish, this option is disabled, or the app exits. This takes control of the system-wide sleep override, including any existing override, and requires macOS administrator authorization on first use. Status is checked about every 15 seconds; tasks awaiting approval may still count as running. Keep the Mac ventilated when running with the lid closed.") }
+    var taskSleepFailed: String { choose("合盖防睡眠未能生效", "Could Not Enable Task Sleep Protection") }
     var launchAtLoginApproval: String { choose("开机自动启动（需系统确认）", "Launch at Login (Approval Required)") }
     var launchAtLoginUnavailable: String { choose("开机自动启动（不可用）", "Launch at Login (Unavailable)") }
     var mouseScrollReversal: String { choose("鼠标滚轮方向反转", "Reverse Mouse Scroll Direction") }
@@ -103,9 +107,17 @@ struct AppText {
         choose("新周期额度已经生效。", "Your new quota cycle is now active.")
     }
     var scheduledTasks: String { choose("调度任务", "Scheduled Tasks") }
-    var codexClientThreads: String { choose("Codex 客户端", "Codex Desktop") }
+    var codexClientThreads: String { choose("Codex 会话", "Codex Sessions") }
+    var codexCLIProcesses: String { choose("CLI 进程", "CLI Processes") }
+    var openCLIProcessHelp: String { choose("定位当前 CLI 终端", "Locate the active CLI terminal") }
+    var createdByCLI: String { choose("CLI 创建", "Created by CLI") }
+    var createdByDesktop: String { choose("桌面端创建", "Created by Desktop") }
+    func cliOccupiedCount(_ count: Int) -> String { choose("\(count) 个占用", "\(count) occupied") }
+    func cliOccupied(_ pid: Int, tty: String?) -> String { choose("占用中 · PID \(pid)\(tty.map { " · \($0)" } ?? "")", "Occupied · PID \(pid)\(tty.map { " · \($0)" } ?? "")") }
+    var cliOccupiedElsewhere: String { choose("该 CLI 会话正在其它终端中占用，未创建重复会话", "This CLI session is occupied in another terminal; no duplicate session was created") }
+    var cliOwningAppOpened: String { choose("已打开所属应用；请在原终端继续，或关闭会话后再在终端恢复", "The owning app was opened. Continue in the original terminal, or close the session before resuming in Terminal.") }
     var clearCompletedTasks: String { choose("清理完成任务", "Clear Completed") }
-    var clearFinishedThreads: String { choose("清理已完成", "Clear Finished") }
+    var clearFinishedThreads: String { choose("清除完成任务", "Clear completed tasks") }
     var continueTask: String { choose("继续", "Continue") }
     var deleteTask: String { choose("删除", "Delete") }
     var quotaTitle: String { choose("Codex 配额", "Codex Quota") }
@@ -167,6 +179,21 @@ struct AppText {
     }
     var copyResumeCommandHelp: String {
         choose("点击复制恢复命令", "Click to copy the resume command")
+    }
+    var openCodexThreadHelp: String {
+        choose("打开 Codex 聊天", "Open Codex conversation")
+    }
+    var openParentCodexThreadHelp: String {
+        choose("打开所属聊天", "Open parent conversation")
+    }
+    var subagentThreadUnavailableHelp: String {
+        choose(
+            "子 Agent 聊天需从父任务打开",
+            "Subagent conversations must be opened from their parent task"
+        )
+    }
+    var codexThreadOpenFailedTitle: String {
+        choose("无法打开 Codex 聊天", "Could Not Open Codex Conversation")
     }
     var resumeSessionHelp: String {
         choose(

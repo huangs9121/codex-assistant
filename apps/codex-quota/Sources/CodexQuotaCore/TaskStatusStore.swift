@@ -97,6 +97,8 @@ public enum TaskCompletionDetector {
 public struct TaskStatusStore {
     public static let notificationStateKey = "taskStatusNotificationState"
     public static let hiddenDesktopThreadIDsKey = "desktopHiddenThreadIDs"
+    public static let collapsedDesktopThreadGroupIDsKey = "desktopCollapsedThreadGroupIDs"
+    public static let expandedDesktopThreadGroupIDsKey = "desktopExpandedThreadGroupIDs"
 
     private let defaults: UserDefaults
 
@@ -117,6 +119,27 @@ public struct TaskStatusStore {
             } else {
                 defaults.set(sorted, forKey: Self.hiddenDesktopThreadIDsKey)
             }
+        }
+    }
+
+    public var collapsedDesktopThreadGroupIDs: Set<String> {
+        get { Set(defaults.stringArray(forKey: Self.collapsedDesktopThreadGroupIDsKey) ?? []) }
+        nonmutating set {
+            let sorted = newValue.sorted()
+            if sorted.isEmpty {
+                defaults.removeObject(forKey: Self.collapsedDesktopThreadGroupIDsKey)
+            } else {
+                defaults.set(sorted, forKey: Self.collapsedDesktopThreadGroupIDsKey)
+            }
+        }
+    }
+
+    public var expandedDesktopThreadGroupIDs: Set<String> {
+        get { Set(defaults.stringArray(forKey: Self.expandedDesktopThreadGroupIDsKey) ?? []) }
+        nonmutating set {
+            let sorted = newValue.sorted()
+            if sorted.isEmpty { defaults.removeObject(forKey: Self.expandedDesktopThreadGroupIDsKey) }
+            else { defaults.set(sorted, forKey: Self.expandedDesktopThreadGroupIDsKey) }
         }
     }
 

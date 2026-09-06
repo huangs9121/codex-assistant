@@ -10,7 +10,8 @@ let package = Package(
     products: [
         .library(name: "CodexQuotaCore", targets: ["CodexQuotaCore"]),
         .library(name: "CodexQuotaUI", targets: ["CodexQuotaUI"]),
-        .executable(name: "CodexQuotaApp", targets: ["CodexQuotaApp"])
+        .executable(name: "CodexQuotaApp", targets: ["CodexQuotaApp"]),
+        .executable(name: "CodexQuotaSleepHelper", targets: ["CodexQuotaSleepHelper"])
     ],
     targets: [
         .target(name: "CodexQuotaCore"),
@@ -21,6 +22,10 @@ let package = Package(
         .executableTarget(
             name: "CodexQuotaApp",
             dependencies: ["CodexQuotaCore", "CodexQuotaUI"]
+        ),
+        .executableTarget(
+            name: "CodexQuotaSleepHelper",
+            dependencies: ["CodexQuotaCore"]
         ),
         .executableTarget(
             name: "CodexQuotaCoreTests",
