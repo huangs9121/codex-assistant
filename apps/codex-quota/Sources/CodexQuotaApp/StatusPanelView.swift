@@ -18,6 +18,7 @@ struct StatusPanelView: View {
     let onArchiveTask: (TaskStatusSnapshot) -> Void
     let onClearCompletedTasks: () -> Void
     let onClearFinishedThreads: () -> Void
+    let onToggleSleep: () -> Void
 
     private var quotaData: StatusPanelQuotaData {
         StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
@@ -307,6 +308,7 @@ struct StatusPanelView: View {
                 action: onQuickTools
             )
             .frame(width: 24, height: 24)
+            manualSleepButton
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 1) {
                 Text(
@@ -328,6 +330,59 @@ struct StatusPanelView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 50)
+    }
+
+    private var manualSleepButton: some View {
+        Button(action: onToggleSleep) {
+            Group {
+                switch model.sleepState {
+                case .off:
+                    Image(systemName: "moon.zzz")
+                        .foregroundStyle(.secondary)
+                case .on:
+                    Image(systemName: "sun.max.fill")
+                        .foregroundStyle(.orange)
+                        .frame(width: 24, height: 24)
+                        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                case .pending:
+                    ProgressView()
+                        .controlSize(.small)
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .font(.system(size: 15, weight: .medium))
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(model.sleepState == .pending)
+        .help(manualSleepStatusText)
+        .accessibilityLabel(manualSleepStatusText)
+    }
+
+    private var manualSleepStatusText: String {
+        let stateText: String
+        switch model.sleepState {
+        case .off:
+            stateText = text.language == .simplifiedChinese
+                ? "手动防睡眠已关"
+                : "Manual keep-awake is off"
+        case .on:
+            stateText = text.language == .simplifiedChinese
+                ? "手动防睡眠已开"
+                : "Manual keep-awake is on"
+        case .pending:
+            stateText = text.language == .simplifiedChinese
+                ? "手动防睡眠处理中"
+                : "Manual keep-awake is processing"
+        case .failed:
+            stateText = text.language == .simplifiedChinese
+                ? "手动防睡眠错误"
+                : "Manual keep-awake error"
+        }
+        return stateText
     }
 
     private func windowLabel(for duration: TimeInterval?) -> String {

@@ -183,6 +183,7 @@ enum QuotaParserTests {
             + TaskStatusParserTests.all.map { ($0.name, $0.run) }
             + TaskSleepActivityTests.all.map { ($0.name, $0.run) }
             + TaskSleepLeaseTests.all.map { ($0.name, $0.run) }
+            + ManualSleepAcknowledgementTests.all.map { ($0.name, $0.run) }
             + ThreadTreeTests.all.map { ($0.name, $0.run) }
             + StatusPanelPresentationTests.all.map { ($0.name, $0.run) }
 

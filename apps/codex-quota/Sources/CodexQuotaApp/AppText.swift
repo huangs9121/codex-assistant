@@ -19,9 +19,9 @@ struct AppText {
     var identityStyle: String { choose("标识形式", "Identity") }
     var showResetTime: String { choose("显示重置时间", "Show Reset Time") }
     var launchAtLogin: String { choose("开机自动启动", "Launch at Login") }
-    var taskSleep: String { choose("任务运行时合盖不睡眠", "Keep Awake During Tasks (Lid Closed)") }
-    var taskSleepConfirm: String { choose("启用任务期间合盖不睡眠？", "Keep the Mac awake during tasks?") }
-    var taskSleepExplanation: String { choose("仅检测到 Codex 任务运行时阻止睡眠；任务结束、关闭此开关或退出应用后恢复允许睡眠。此功能会接管系统的全局禁止睡眠设置（包括已有设置），首次启用需要 macOS 管理员授权。状态约每 15 秒检查一次；审批等待可能仍按运行中处理。合盖运行时请保持通风。", "Sleep is prevented only while Codex tasks are detected as running. Sleep is allowed again when tasks finish, this option is disabled, or the app exits. This takes control of the system-wide sleep override, including any existing override, and requires macOS administrator authorization on first use. Status is checked about every 15 seconds; tasks awaiting approval may still count as running. Keep the Mac ventilated when running with the lid closed.") }
+    var taskSleep: String { choose("手动合盖不睡眠", "Keep Awake Manually (Lid Closed)") }
+    var taskSleepConfirm: String { choose("启用手动合盖不睡眠？", "Keep the Mac awake manually?") }
+    var taskSleepExplanation: String { choose("开启后会一直阻止合盖睡眠，直到手动关闭或退出应用。此功能会接管系统的全局禁止睡眠设置（包括已有设置），首次启用需要 macOS 管理员授权。合盖运行时请保持通风。", "When enabled, sleep remains blocked until you turn it off or quit the app. This takes control of the system-wide sleep override, including any existing override, and requires macOS administrator authorization on first use. Keep the Mac ventilated when running with the lid closed.") }
     var taskSleepFailed: String { choose("合盖防睡眠未能生效", "Could Not Enable Task Sleep Protection") }
     var launchAtLoginApproval: String { choose("开机自动启动（需系统确认）", "Launch at Login (Approval Required)") }
     var launchAtLoginUnavailable: String { choose("开机自动启动（不可用）", "Launch at Login (Unavailable)") }

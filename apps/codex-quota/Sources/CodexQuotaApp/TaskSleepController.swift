@@ -31,9 +31,13 @@ final class TaskSleepController {
 
     private let defaults: UserDefaults
     private let fileManager: FileManager
+    private let language: AppLanguage
     private let uid: UInt32
     private let ownerPID: Int32
-    private var hasFreshRunningTasks = false
+    private var renewalTimer: Timer?
+    private var lastRequestedAt: Int64 = 0
+    private var operationGeneration = 0
+    private var state: ManualSleepState = .off
     private(set) var lastError: Error?
 
     var onChange: (() -> Void)?
@@ -42,92 +46,119 @@ final class TaskSleepController {
         defaults.bool(forKey: Self.enabledDefaultsKey)
     }
 
-    var statusDescription: String {
-        if let lastError {
-            return lastError.localizedDescription
-        }
-        guard isEnabled else {
-            return "合盖睡眠保护未启用。"
-        }
-        guard helperFilesAreSafe else {
-            return "合盖睡眠保护已启用，但受限服务文件不可用；未显示为已保护。"
-        }
-        guard daemonIsRunning else {
-            return "合盖睡眠保护已启用，但服务未运行；未显示为已保护。"
-        }
-        guard let helperStatus else {
-            return "合盖睡眠保护已启用，等待服务确认实际电源状态；未显示为已保护。"
-        }
-        guard helperStatus.success else {
-            return "合盖睡眠保护服务未确认电源设置；未显示为已保护。"
-        }
-        if hasFreshRunningTasks && (!helperStatus.active || !helperStatus.sleepDisabled) {
-            return "运行任务已发现，等待服务确认合盖睡眠已阻止；未显示为已保护。"
-        }
-        if !hasFreshRunningTasks && helperStatus.sleepDisabled {
-            return "任务已结束，等待服务恢复普通睡眠；未显示为已恢复。"
-        }
-        return hasFreshRunningTasks
-            ? "运行中的 Codex 任务正在临时阻止合盖睡眠；任务结束、扫描停止或一分钟未收到新扫描后恢复。"
-            : "合盖睡眠保护已接管为普通睡眠，等待本轮新扫描发现运行中的 Codex 任务。"
+    var manualState: ManualSleepState {
+        state
     }
 
-    init(defaults: UserDefaults = .standard, fileManager: FileManager = .default) {
+    var statusDescription: String {
+        switch state {
+        case .off: message("合盖睡眠保护已关闭。", "Manual sleep protection is off.")
+        case .on: message("合盖睡眠保护已启用，将保持到手动关闭或退出应用。", "Manual sleep protection is on until turned off or the app quits.")
+        case .pending: message("正在等待睡眠保护服务确认。", "Waiting for the sleep protection service to confirm.")
+        case .failed: message("未能确认电源状态；已停止续期，请检查系统状态或重试。", "Could not confirm the power state. Renewal stopped; check the system state or try again.")
+        }
+    }
+
+    init(defaults: UserDefaults = .standard, fileManager: FileManager = .default, language: AppLanguage = .current) {
         self.defaults = defaults
         self.fileManager = fileManager
+        self.language = language
         uid = getuid()
         ownerPID = getpid()
     }
 
     func setEnabled(_ enabled: Bool) async throws {
-        if !enabled {
-            defaults.set(false, forKey: Self.enabledDefaultsKey)
-            hasFreshRunningTasks = false
-            removeLease()
+        operationGeneration &+= 1
+        let generation = operationGeneration
+        do {
+            state = .pending
             lastError = nil
             onChange?()
-            return
-        }
-
-        do {
-            if !isInstalled {
+            if enabled && !isInstalled {
                 try await installHelper()
                 try await waitForInstalledService()
             }
-            defaults.set(true, forKey: Self.enabledDefaultsKey)
-            hasFreshRunningTasks = false
-            lastError = nil
+            guard isCurrent(generation) else { return }
+            renewalTimer?.invalidate()
+            renewalTimer = nil
+            defaults.set(enabled, forKey: Self.enabledDefaultsKey)
+            let requestedAt = try await writeFreshLease(active: enabled, generation: generation)
+            guard try await waitForAcknowledgement(scannedAt: requestedAt, active: enabled, generation: generation) else {
+                throw ControllerError.leaseWriteFailed
+            }
+            guard isCurrent(generation) else { return }
+            if enabled {
+                state = .on
+                startRenewalTimer()
+            } else {
+                removeLease()
+                state = .off
+            }
             onChange?()
         } catch {
+            guard isCurrent(generation) else { return }
             defaults.set(false, forKey: Self.enabledDefaultsKey)
-            hasFreshRunningTasks = false
+            renewalTimer?.invalidate()
+            renewalTimer = nil
             removeLease()
             lastError = error
+            state = .failed
             onChange?()
             throw error
         }
     }
 
-    /// Call only after a new task scan has completed. This method deliberately
-    /// has no timer: a stale scan cannot keep extending the privileged lease.
-    func update(hasRunningTasks: Bool) {
+    private func renewLease() async {
+        let generation = operationGeneration
         guard isEnabled else { return }
-        hasFreshRunningTasks = hasRunningTasks
         do {
-            try writeFreshLease(hasRunningTasks: hasRunningTasks)
+            let requestedAt = try await writeFreshLease(active: true, generation: generation)
+            guard try await waitForAcknowledgement(scannedAt: requestedAt, active: true, generation: generation) else {
+                throw ControllerError.leaseWriteFailed
+            }
+            guard isCurrent(generation) else { return }
             lastError = nil
+            state = .on
         } catch {
+            guard isCurrent(generation) else { return }
             lastError = ControllerError.leaseWriteFailed
             removeLease()
+            defaults.set(false, forKey: Self.enabledDefaultsKey)
+            state = .failed
         }
+        onChange?()
+    }
+
+    private func startRenewalTimer() {
+        renewalTimer?.invalidate()
+        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.renewLease()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        renewalTimer = timer
+    }
+
+    /// Manual protection never survives an app restart because task activity
+    /// does not provide an authoritative continuation signal.
+    func resetOnLaunch() {
+        operationGeneration &+= 1
+        defaults.set(false, forKey: Self.enabledDefaultsKey)
+        removeLease()
+        state = .off
         onChange?()
     }
 
     /// App termination and invalidation use the same narrow operation: remove
     /// this app's lease. The root daemon restores only a journal it created.
     func stop() {
-        hasFreshRunningTasks = false
+        operationGeneration &+= 1
+        defaults.set(false, forKey: Self.enabledDefaultsKey)
+        renewalTimer?.invalidate()
+        renewalTimer = nil
         removeLease()
+        state = .off
         onChange?()
     }
 
@@ -195,6 +226,31 @@ final class TaskSleepController {
         return HelperStatus(ownerPID: ownerPID, scannedAt: scannedAt, active: match.4 == "1", sleepDisabled: match.5 == "1", success: match.6 == "1")
     }
 
+    private func waitForAcknowledgement(scannedAt: Int64, active: Bool, generation: Int) async throws -> Bool {
+        for attempt in 0..<17 {
+            guard isCurrent(generation) else { throw CancellationError() }
+            if let helperStatus {
+                let acknowledgement = ManualSleepAcknowledgement(
+                    scannedAt: helperStatus.scannedAt,
+                    active: helperStatus.active,
+                    sleepDisabled: helperStatus.sleepDisabled,
+                    success: helperStatus.success
+                )
+                if acknowledgement.confirms(scannedAtOrAfter: scannedAt, active: active) {
+                    return true
+                }
+            }
+            if attempt < 16 {
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+        }
+        return false
+    }
+
+    private func message(_ chinese: String, _ english: String) -> String {
+        language == .simplifiedChinese ? chinese : english
+    }
+
     private func safePath(_ path: String, owner: UInt32, type: mode_t, exactMode: mode_t) -> Bool {
         var info = stat()
         return lstat(path, &info) == 0
@@ -203,17 +259,17 @@ final class TaskSleepController {
             && (info.st_mode & 0o777) == exactMode
     }
 
-    private func writeFreshLease(hasRunningTasks: Bool) throws {
-        let now = Int64(Date().timeIntervalSince1970)
+    private func writeFreshLease(active: Bool, generation: Int) async throws -> Int64 {
+        let now = try await nextLeaseTimestamp(generation: generation)
+        guard isCurrent(generation) else { throw CancellationError() }
         let lease = TaskSleepLease(
             uid: uid,
             ownerPID: ownerPID,
             scannedAt: now,
             expiresAt: now + Int64(TaskSleepLease.maximumLifetime),
-            hasRunningTasks: hasRunningTasks,
-            // The UI confirmation is required before enabling: Codex Quota
-            // takes over the existing global setting only for active tasks,
-            // then restores ordinary sleep when this lease ends.
+            hasRunningTasks: active,
+            // A user explicitly enabled manual protection. The lease is
+            // renewed only while that intent remains on in this app.
             restoreSleepDisabled: false
         )
         guard fileManager.fileExists(atPath: userDirectory.path) else {
@@ -221,6 +277,28 @@ final class TaskSleepController {
         }
         try lease.encoded().write(to: leaseURL, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: leaseURL.path)
+        return now
+    }
+
+    private func nextLeaseTimestamp(generation: Int) async throws -> Int64 {
+        var now = Int64(Date().timeIntervalSince1970)
+        for _ in 0..<12 {
+            guard isCurrent(generation) else { throw CancellationError() }
+            if now > lastRequestedAt {
+                lastRequestedAt = now
+                return now
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+            now = Int64(Date().timeIntervalSince1970)
+        }
+        throw ControllerError.leaseWriteFailed
+    }
+
+    private func isCurrent(_ generation: Int) -> Bool {
+        ManualSleepOperation.acceptsCompletion(
+            requestGeneration: generation,
+            currentGeneration: operationGeneration
+        )
     }
 
     private func removeLease() {

@@ -146,7 +146,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var identityItems: [StatusIdentityMode: NSMenuItem] = [:]
     private var resetToggleItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
-    private var taskSleepItem: NSMenuItem?
     private var isChangingTaskSleep = false
     private var updateMenuItem: NSMenuItem?
     private var currentSnapshot: QuotaSnapshot?
@@ -164,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let automaticUpdateInstaller = AutomaticUpdateInstaller()
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
-    private let taskSleepController = TaskSleepController()
+    private lazy var taskSleepController = TaskSleepController(language: language)
     private let mouseScrollReversalController = MouseScrollReversalController()
     private let mouseGestureController = MouseGestureController()
     private let doubleCommandTapController = DoubleCommandTapController()
@@ -234,12 +233,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         },
         onClearFinishedThreads: { [weak self] in
             self?.clearFinishedDesktopThreads()
+        },
+        onToggleSleep: { [weak self] in
+            self?.toggleTaskSleep()
         }
     )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        taskSleepController.onChange = { [weak self] in self?.syncMenuState() }
+        taskSleepController.onChange = { [weak self] in
+            guard let self else { return }
+            syncMenuState()
+            panelModel.updateSleep(
+                state: taskSleepController.manualState,
+                detail: taskSleepController.statusDescription
+            )
+        }
+        taskSleepController.resetOnLaunch()
         currentResetSignal = preferences.latestResetSignal
         panelModel.update(resetSignal: currentResetSignal)
         configureStatusItem()
@@ -366,14 +376,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         launchAtLoginItem = loginItem
         settingsMenu.addItem(loginItem)
-
-        let sleepItem = makeChoiceItem(
-            title: text.taskSleep,
-            tag: 0,
-            action: #selector(toggleTaskSleep(_:))
-        )
-        taskSleepItem = sleepItem
-        settingsMenu.addItem(sleepItem)
 
         settingsMenu.addItem(.separator())
 
@@ -526,10 +528,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         resetToggleItem?.state = showsReset ? .on : .off
         (resetToggleItem?.view as? MenuChoiceRow)?.isSelected = showsReset
 
-        taskSleepItem?.state = taskSleepController.isEnabled ? .on : .off
-        (taskSleepItem?.view as? MenuChoiceRow)?.isSelected = taskSleepController.isEnabled
-        taskSleepItem?.view?.toolTip = taskSleepController.statusDescription
-
         let launchState = launchAtLoginController.state
         let launchTitle: String
         let launchSelected: Bool
@@ -639,7 +637,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
     }
 
-    @objc private func toggleTaskSleep(_ sender: NSButton) {
+    private func toggleTaskSleep() {
         guard !isChangingTaskSleep else { return }
         settingsMenu.cancelTracking()
         let enable = !taskSleepController.isEnabled
@@ -976,7 +974,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             guard let self else {
                 return
             }
-            taskSleepController.update(hasRunningTasks: result.hasRunningTasks)
+            // Task scans have no authoritative liveness signal. Manual intent
+            // alone controls renewal, so scanner results must not change it.
+            // taskSleepController.update(hasRunningTasks: result.hasRunningTasks)
             panelModel.update(
                 tasks: result.tasks,
                 desktopThreads: result.desktopThreads,

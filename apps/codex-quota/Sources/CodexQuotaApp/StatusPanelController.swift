@@ -27,6 +27,8 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var hasCompletedTasks = false
     @Published private(set) var currentResetSignal: TiboResetSignal?
     @Published private(set) var now = Date()
+    @Published private(set) var sleepState: ManualSleepState = .off
+    @Published private(set) var sleepDetail = ""
 
     var canClearCompletedSessions: Bool {
         !CodexDesktopThreadTree.clearableThreadIDs(
@@ -77,6 +79,12 @@ final class StatusPanelModel: ObservableObject {
         notifyContentChange()
     }
 
+    func updateSleep(state: ManualSleepState, detail: String) {
+        sleepState = state
+        sleepDetail = detail
+        notifyContentChange()
+    }
+
     func tick(at date: Date = Date()) {
         now = date
         notifyContentChange()
@@ -111,7 +119,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         onOpenCLIProcess: @escaping (String, CodexCLIProcess) -> CodexCLIProcessOpenActionResult,
         onArchiveTask: @escaping (TaskStatusSnapshot) -> Void,
         onClearCompletedTasks: @escaping () -> Void,
-        onClearFinishedThreads: @escaping () -> Void
+        onClearFinishedThreads: @escaping () -> Void,
+        onToggleSleep: @escaping () -> Void
     ) {
         self.model = model
         let panelPopover = popover
@@ -131,7 +140,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 onOpenCLIProcess: onOpenCLIProcess,
                 onArchiveTask: onArchiveTask,
                 onClearCompletedTasks: onClearCompletedTasks,
-                onClearFinishedThreads: onClearFinishedThreads
+                onClearFinishedThreads: onClearFinishedThreads,
+                onToggleSleep: onToggleSleep
             )
         )
         super.init()
