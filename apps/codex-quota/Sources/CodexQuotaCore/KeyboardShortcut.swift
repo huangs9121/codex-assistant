@@ -35,6 +35,8 @@ public enum KeyboardShortcut {
 
     private static func keyName(for keyCode: UInt16) -> String {
         let specialKeys: [UInt16: String] = [
+            63: "Fn / 🌐",
+            110: "Menu",
             36: "Return", 48: "Tab", 49: "Space", 51: "Delete", 53: "Esc",
             123: "←", 124: "→", 125: "↓", 126: "↑",
             122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6",

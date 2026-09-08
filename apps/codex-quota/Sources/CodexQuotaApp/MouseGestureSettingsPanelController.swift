@@ -1,17 +1,7 @@
 import AppKit
 import CodexQuotaCore
 import CoreGraphics
-
-private final class SingleClickTextField: NSTextField {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(self)
-        super.mouseDown(with: event)
-    }
-}
+import UniformTypeIdentifiers
 
 // 列宽总和按最小可视宽度（竖向滚动条占位后的窄边 743pt）设置，
 // 任何滚动条样式下都不会溢出；不要在布局期动态改列宽或表格 frame——
@@ -52,6 +42,13 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     private let tableView = NSTableView()
+    private let enabledButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let exclusionsButton = NSButton(title: "", target: nil, action: nil)
+    private let hint = NSTextField(wrappingLabelWithString: "")
+    private let exclusionsTable = NSTableView()
+    private let exclusionsEmptyLabel = NSTextField(labelWithString: "")
+    private let removeExclusionButton = NSButton(title: "", target: nil, action: nil)
+    private var exclusionsPanel: NSPanel?
     private let permissionLabel = NSTextField(labelWithString: "")
     private let accessibilityButton = NSButton(title: "", target: nil, action: nil)
     private lazy var embeddedContentView = makeContentView()
@@ -75,6 +72,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
 
     func didBecomeVisible() {
         reloadRules()
+        refreshGlobalSettings()
         refreshPermissionStatus()
     }
 
@@ -82,6 +80,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         stopRecording()
         manualPopover.close()
         appPickerPopover.close()
+        closeExclusions()
     }
 
     func hostWindowDidResignKey() {
@@ -91,7 +90,15 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     private func makeContentView() -> NSView {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 430))
 
-        let hint = NSTextField(wrappingLabelWithString: text.rightClickShortcutHint)
+        enabledButton.title = text.enableRightClickShortcuts
+        enabledButton.font = .systemFont(ofSize: 14, weight: .medium)
+        enabledButton.target = self
+        enabledButton.action = #selector(toggleEnabled)
+        enabledButton.translatesAutoresizingMaskIntoConstraints = false
+        exclusionsButton.target = self
+        exclusionsButton.action = #selector(showExclusions)
+        exclusionsButton.bezelStyle = .rounded
+        exclusionsButton.translatesAutoresizingMaskIntoConstraints = false
         hint.font = .systemFont(ofSize: 13)
         hint.textColor = .secondaryLabelColor
         hint.translatesAutoresizingMaskIntoConstraints = false
@@ -124,19 +131,26 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         accessibilityButton.bezelStyle = .rounded
         accessibilityButton.translatesAutoresizingMaskIntoConstraints = false
 
+        content.addSubview(enabledButton)
+        content.addSubview(exclusionsButton)
         content.addSubview(hint)
         content.addSubview(scrollView)
         content.addSubview(tableActions)
         content.addSubview(permissionLabel)
         content.addSubview(accessibilityButton)
         NSLayoutConstraint.activate([
+            enabledButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            enabledButton.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+            enabledButton.trailingAnchor.constraint(lessThanOrEqualTo: exclusionsButton.leadingAnchor, constant: -16),
+            exclusionsButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            exclusionsButton.centerYAnchor.constraint(equalTo: enabledButton.centerYAnchor),
             hint.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             hint.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            hint.topAnchor.constraint(equalTo: content.topAnchor, constant: 18),
+            hint.topAnchor.constraint(equalTo: enabledButton.bottomAnchor, constant: 10),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             scrollView.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 12),
-            scrollView.heightAnchor.constraint(equalToConstant: 230),
+            scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
             tableActions.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             tableActions.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 10),
             permissionLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
@@ -145,16 +159,151 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             accessibilityButton.topAnchor.constraint(equalTo: tableActions.bottomAnchor, constant: 14),
             accessibilityButton.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -18)
         ])
+        refreshGlobalSettings()
         return content
+    }
+
+    private func refreshGlobalSettings() {
+        let preferences = controller.preferences
+        enabledButton.state = preferences.isEnabled ? .on : .off
+        hint.stringValue = preferences.isEnabled ? text.rightClickShortcutHint : text.rightClickShortcutsDisabledHint
+        exclusionsButton.title = "\(text.gestureExclusions)（\(preferences.excludedApplications.count)）…"
+        exclusionsButton.toolTip = preferences.excludedApplications.map(\.name).joined(separator: ", ")
+        exclusionsTable.reloadData()
+        exclusionsEmptyLabel.isHidden = !preferences.excludedApplications.isEmpty
+        removeExclusionButton.isEnabled = preferences.excludedApplications.indices.contains(exclusionsTable.selectedRow)
+    }
+
+    private func saveGlobalSettings(_ preferences: MouseGesturePreferences) {
+        preferences.save(to: defaults)
+        controller.reloadRules()
+        _ = controller.startIfPermitted()
+        onRulesChanged()
+        refreshGlobalSettings()
+        refreshPermissionStatus()
+    }
+
+    @objc private func toggleEnabled() {
+        var preferences = controller.preferences
+        preferences.isEnabled = enabledButton.state == .on
+        saveGlobalSettings(preferences)
+    }
+
+    @objc private func showExclusions() {
+        guard let window = contentView.window, exclusionsPanel == nil else { return }
+        stopRecording()
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 360),
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
+        panel.title = text.gestureExclusions
+        panel.isReleasedWhenClosed = false
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 480, height: 360))
+        panel.contentView = content
+        let title = NSTextField(labelWithString: text.gestureExclusions)
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.frame = NSRect(x: 20, y: 318, width: 440, height: 22)
+        let explanation = NSTextField(wrappingLabelWithString: text.gestureExclusionsHint)
+        explanation.font = .systemFont(ofSize: 13)
+        explanation.textColor = .secondaryLabelColor
+        explanation.frame = NSRect(x: 20, y: 266, width: 440, height: 42)
+        exclusionsTable.headerView = nil
+        exclusionsTable.rowHeight = 44
+        exclusionsTable.delegate = self
+        exclusionsTable.dataSource = self
+        exclusionsTable.usesAlternatingRowBackgroundColors = true
+        exclusionsTable.frame = NSRect(x: 0, y: 0, width: 420, height: 196)
+        if exclusionsTable.tableColumns.isEmpty {
+            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("excludedApp"))
+            column.width = 420
+            exclusionsTable.addTableColumn(column)
+        }
+        let scroll = NSScrollView(frame: NSRect(x: 20, y: 62, width: 440, height: 196))
+        scroll.documentView = exclusionsTable
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.borderType = .bezelBorder
+        exclusionsEmptyLabel.stringValue = text.gestureExclusionsEmpty
+        exclusionsEmptyLabel.font = .systemFont(ofSize: 13)
+        exclusionsEmptyLabel.textColor = .secondaryLabelColor
+        exclusionsEmptyLabel.alignment = .center
+        exclusionsEmptyLabel.frame = NSRect(x: 20, y: 145, width: 440, height: 24)
+        let add = NSButton(title: text.addExcludedApplication, target: self, action: #selector(addExclusions))
+        add.frame = NSRect(x: 20, y: 18, width: 120, height: 30)
+        add.bezelStyle = .rounded
+        removeExclusionButton.title = text.removeExcludedApplication
+        removeExclusionButton.target = self
+        removeExclusionButton.action = #selector(removeExclusion)
+        removeExclusionButton.frame = NSRect(x: 144, y: 18, width: 180, height: 30)
+        removeExclusionButton.bezelStyle = .rounded
+        let done = NSButton(title: text.done, target: self, action: #selector(closeExclusions))
+        done.frame = NSRect(x: 372, y: 18, width: 88, height: 30)
+        done.bezelStyle = .rounded
+        done.keyEquivalent = "\r"
+        for view in [title, explanation, scroll, exclusionsEmptyLabel, add, removeExclusionButton, done] {
+            content.addSubview(view)
+        }
+        exclusionsPanel = panel
+        refreshGlobalSettings()
+        window.beginSheet(panel)
+    }
+
+    @objc private func closeExclusions() {
+        guard let panel = exclusionsPanel else { return }
+        panel.sheetParent?.endSheet(panel)
+        panel.orderOut(nil)
+        exclusionsPanel = nil
+    }
+
+    @objc private func addExclusions() {
+        guard let panel = exclusionsPanel else { return }
+        let picker = NSOpenPanel()
+        picker.title = text.addExcludedApplication
+        picker.allowedContentTypes = [.applicationBundle]
+        picker.canChooseDirectories = false
+        picker.allowsMultipleSelection = true
+        picker.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        picker.beginSheetModal(for: panel) { [weak self] response in
+            guard let self, response == .OK else { return }
+            var preferences = self.controller.preferences
+            var invalidNames: [String] = []
+            for url in picker.urls {
+                guard let bundle = Bundle(url: url), let identifier = bundle.bundleIdentifier, !identifier.isEmpty else {
+                    invalidNames.append(url.lastPathComponent)
+                    continue
+                }
+                let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                    ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+                    ?? url.deletingPathExtension().lastPathComponent
+                preferences.exclude(MouseGestureExcludedApplication(bundleIdentifier: identifier, name: name))
+            }
+            self.saveGlobalSettings(preferences)
+            if !invalidNames.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = self.text.invalidExcludedApplication
+                alert.informativeText = invalidNames.joined(separator: "\n")
+                alert.beginSheetModal(for: panel)
+            }
+        }
+    }
+
+    @objc private func removeExclusion() {
+        var preferences = controller.preferences
+        guard preferences.excludedApplications.indices.contains(exclusionsTable.selectedRow) else { return }
+        preferences.removeExclusion(bundleIdentifier: preferences.excludedApplications[exclusionsTable.selectedRow].bundleIdentifier)
+        saveGlobalSettings(preferences)
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard notification.object as? NSTableView === exclusionsTable else { return }
+        removeExclusionButton.isEnabled = controller.preferences.excludedApplications.indices.contains(exclusionsTable.selectedRow)
     }
 
     private func configureTable() {
         tableView.frame = NSRect(x: 0, y: 0, width: 650, height: 230)
         tableView.delegate = self
         tableView.dataSource = self
-        tableView.headerView = NSTableHeaderView()
-        tableView.rowHeight = 34
-        tableView.usesAlternatingRowBackgroundColors = true
+        QuickToolsTableStyle.configure(tableView)
         // 列宽总和 650：系统新表格样式会按列累加约 11-17pt 装饰宽度，
         // 膨胀后约 720-752pt，仍小于最窄可视区（竖向滚动条占位后的 743pt）。
         for (column, width) in [
@@ -181,7 +330,8 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        tableView === appPickerTable ? filteredAppsForPicker.count : rules.count
+        if tableView === exclusionsTable { return controller.preferences.excludedApplications.count }
+        return tableView === appPickerTable ? filteredAppsForPicker.count : rules.count
     }
 
     func tableView(
@@ -189,6 +339,23 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
+        if tableView === exclusionsTable {
+            guard controller.preferences.excludedApplications.indices.contains(row) else { return nil }
+            let application = controller.preferences.excludedApplications[row]
+            let name = NSTextField(labelWithString: application.name)
+            name.font = .systemFont(ofSize: 14, weight: .medium)
+            name.lineBreakMode = .byTruncatingTail
+            let identifier = NSTextField(labelWithString: application.bundleIdentifier)
+            identifier.font = .systemFont(ofSize: 12)
+            identifier.textColor = .secondaryLabelColor
+            identifier.lineBreakMode = .byTruncatingMiddle
+            let stack = NSStackView(views: [name, identifier])
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 2
+            stack.edgeInsets = NSEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+            return stack
+        }
         if tableView === appPickerTable {
             return appPickerRowView(row: row)
         }

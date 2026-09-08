@@ -186,6 +186,8 @@ enum QuotaParserTests {
             + ManualSleepAcknowledgementTests.all.map { ($0.name, $0.run) }
             + ThreadTreeTests.all.map { ($0.name, $0.run) }
             + StatusPanelPresentationTests.all.map { ($0.name, $0.run) }
+            + MouseGesturePreferencesTests.all.map { ($0.name, $0.run) }
+            + KeyMappingTests.all.map { ($0.name, $0.run) }
 
         var failureCount = 0
         for test in tests {

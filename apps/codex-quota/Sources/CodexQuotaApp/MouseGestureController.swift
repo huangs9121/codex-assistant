@@ -13,6 +13,7 @@ final class MouseGestureController: NSObject {
 
     private enum State {
         case idle
+        case cancelled
         case pending(start: CGPoint, recognizer: MouseGestureRecognizer)
         case recognizing(
             start: CGPoint,
@@ -27,6 +28,8 @@ final class MouseGestureController: NSObject {
     private var timeoutTimer: Timer?
     private var state: State = .idle
     private(set) var rules: [MouseGestureRule] = []
+    private(set) var preferences: MouseGesturePreferences
+    private var gestureTargetPID: pid_t?
     private let shortcutPostingQueue = DispatchQueue(
         label: "CodexQuota.mouseGestureShortcutPosting",
         qos: .userInteractive
@@ -35,6 +38,7 @@ final class MouseGestureController: NSObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        preferences = MouseGesturePreferences(defaults: defaults)
         super.init()
         reloadRules()
     }
@@ -53,14 +57,15 @@ final class MouseGestureController: NSObject {
 
     func reloadRules() {
         rules = Self.loadRules(from: defaults)
-        if !hasEnabledRules {
+        preferences = MouseGesturePreferences(defaults: defaults)
+        if !preferences.isEnabled || !hasEnabledRules {
             stop()
         }
     }
 
     @discardableResult
     func startIfPermitted() -> Bool {
-        guard hasEnabledRules, isAccessibilityTrusted else {
+        guard preferences.isEnabled, hasEnabledRules, isAccessibilityTrusted else {
             stop()
             return false
         }
@@ -137,10 +142,30 @@ final class MouseGestureController: NSObject {
         return controller.handle(type: type, event: event)
     }
 
-    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        let application = NSWorkspace.shared.frontmostApplication
+        return handle(
+            type: type, event: event,
+            bundleIdentifier: application?.bundleIdentifier,
+            targetPID: application?.processIdentifier,
+            pointedBundleIdentifier: type == .rightMouseDown ? applicationBundleIdentifier(at: event.location) : nil
+        )
+    }
+
+    // Keep the event decision independently testable without posting real input.
+    func handle(
+        type: CGEventType, event: CGEvent,
+        bundleIdentifier: String?, targetPID: pid_t?, pointedBundleIdentifier: String?
+    ) -> Unmanaged<CGEvent>? {
         switch type {
         case .rightMouseDown:
-            guard hasEnabledRules else { return Unmanaged.passUnretained(event) }
+            resetState()
+            guard hasEnabledRules,
+                  preferences.allows(bundleIdentifier: bundleIdentifier),
+                  preferences.allows(bundleIdentifier: pointedBundleIdentifier) else {
+                return Unmanaged.passUnretained(event)
+            }
+            gestureTargetPID = targetPID
             let point = event.location
             state = .pending(
                 start: point,
@@ -150,10 +175,18 @@ final class MouseGestureController: NSObject {
             return nil
         case .rightMouseDragged:
             guard !isIdle else { return Unmanaged.passUnretained(event) }
+            guard preferences.allows(bundleIdentifier: bundleIdentifier), targetPID == gestureTargetPID else {
+                state = .cancelled
+                return nil
+            }
             handleDrag(at: event.location)
             return nil
         case .rightMouseUp:
             guard !isIdle else { return Unmanaged.passUnretained(event) }
+            guard preferences.allows(bundleIdentifier: bundleIdentifier), targetPID == gestureTargetPID else {
+                resetState()
+                return nil
+            }
             handleMouseUp()
             return nil
         default:
@@ -161,9 +194,24 @@ final class MouseGestureController: NSObject {
         }
     }
 
+    private func applicationBundleIdentifier(at point: CGPoint) -> String? {
+        // Also protect an excluded window clicked before it becomes the frontmost app.
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return nil }
+        for window in windows {
+            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
+                  let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds), rect.contains(point),
+                  let pid = window[kCGWindowOwnerPID as String] as? pid_t else { continue }
+            return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+        }
+        return nil
+    }
+
     private func handleDrag(at point: CGPoint) {
         switch state {
-        case .idle:
+        case .idle, .cancelled:
             return
         case let .pending(start, recognizer):
             var recognizer = recognizer
@@ -196,7 +244,7 @@ final class MouseGestureController: NSObject {
         let completedState = state
         resetState()
         switch completedState {
-        case .idle:
+        case .idle, .cancelled:
             return
         case let .pending(start, _):
             repostRightClick(at: start)
@@ -205,6 +253,7 @@ final class MouseGestureController: NSObject {
             let frontmostApplication = NSWorkspace.shared.frontmostApplication
             let bundleIdentifier = frontmostApplication?.bundleIdentifier
             let targetPID = frontmostApplication?.processIdentifier
+            guard preferences.allows(bundleIdentifier: bundleIdentifier) else { return }
             if let rule = MouseGestureRuleMatcher.firstMatch(
                 sequence: recognizer.sequence,
                 bundleIdentifier: bundleIdentifier,
@@ -219,6 +268,7 @@ final class MouseGestureController: NSObject {
 
     private func fireImmediateRuleIfMatched(sequence: [MouseGestureDirection]) -> Bool {
         let frontmostApplication = NSWorkspace.shared.frontmostApplication
+        guard preferences.allows(bundleIdentifier: frontmostApplication?.bundleIdentifier) else { return false }
         guard let rule = MouseGestureRuleMatcher.firstImmediateMatch(
             sequence: sequence,
             bundleIdentifier: frontmostApplication?.bundleIdentifier,
@@ -247,6 +297,7 @@ final class MouseGestureController: NSObject {
         timeoutTimer?.invalidate()
         timeoutTimer = nil
         state = .idle
+        gestureTargetPID = nil
     }
 
     @objc private func resetGestureAfterTimeout(_ timer: Timer) {

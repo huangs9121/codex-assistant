@@ -296,6 +296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         RunLoop.main.add(resetTimer, forMode: .common)
         resetMonitorTimer = resetTimer
+        if CommandLine.arguments.contains("--show-quick-tools") {
+            DispatchQueue.main.async { [weak self] in self?.quickToolsPanelController.show() }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -735,7 +738,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
            !doubleCommandTapController.isRunning {
             _ = doubleCommandTapController.startIfPermitted()
         }
-        if mouseGestureController.hasEnabledRules,
+        if mouseGestureController.preferences.isEnabled,
+           mouseGestureController.hasEnabledRules,
            !mouseGestureController.isRunning {
             _ = mouseGestureController.startIfPermitted()
         }

@@ -7,7 +7,7 @@ struct ModifierTapGesture: Equatable {
     static let tapCountDefaultsKey = "modifierTapGestureTapCount"
     static let defaultKeyCodes: Set<CGKeyCode> = [54, 55]
     static let defaultTapCount = 2
-    static let supportedKeyCodes: Set<CGKeyCode> = [54, 55, 56, 58, 59, 60, 61, 62]
+    static let supportedKeyCodes: Set<CGKeyCode> = [54, 55, 56, 58, 59, 60, 61, 62, 63]
 
     let keyCodes: Set<CGKeyCode>
     let tapCount: Int

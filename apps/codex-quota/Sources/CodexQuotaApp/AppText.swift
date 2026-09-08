@@ -29,6 +29,22 @@ struct AppText {
     var mouseScrollReversalHint: String { choose("反转外接鼠标滚轮方向；启用时需要辅助功能权限。", "Reverse external mouse-wheel direction. Accessibility permission is required when enabled.") }
     var enableModifierTapOpenCodex: String { choose("启用修饰键呼出", "Enable Modifier Gesture") }
     var globalShortcutSettings: String { choose("全局快捷键设置", "Global Shortcut Settings") }
+    var enableKeyMappings: String { choose("启用全局按键映射", "Enable Global Key Mappings") }
+    var originalShortcut: String { choose("原始快捷键", "Original Shortcut") }
+    var mappedShortcut: String { choose("映射快捷键", "Mapped Shortcut") }
+    var keyMappingHint: String { choose("点击快捷键录制；支持组合键和修饰键单击/双击，可配置多条映射。", "Click a shortcut to record. Add multiple mappings using key combinations or modifier taps.") }
+    var addKeyMapping: String { choose("添加映射", "Add Mapping") }
+    var removeKeyMapping: String { choose("移除所选映射", "Remove Selected Mapping") }
+    var configureShortcut: String { choose("手动设置快捷键", "Set Shortcut Manually") }
+    var recordOriginalShortcut: String { choose("录制原始快捷键，Esc 取消", "Record original shortcut; Esc to cancel") }
+    var recordMappedShortcut: String { choose("录制映射快捷键，Esc 取消", "Record mapped shortcut; Esc to cancel") }
+    var keyCombination: String { choose("组合快捷键", "Key Combination") }
+    var modifierSingleTap: String { choose("修饰键单击", "Single Modifier Tap") }
+    var modifierDoubleTap: String { choose("修饰键双击", "Double Modifier Tap") }
+    var keyMappingConflict: String { choose("原始快捷键已被使用", "Original Shortcut Already Used") }
+    var keyMappingConflictHint: String { choose("请更换原始快捷键，或先停用已有映射。同一修饰键的单击与双击也不能同时启用。", "Choose another original shortcut or disable the existing mapping. Single and double taps of the same modifier also conflict.") }
+    var inputMonitoringSettings: String { choose("输入监听设置…", "Input Monitoring Settings…") }
+    var accessibilitySettings: String { choose("辅助功能设置…", "Accessibility Settings…") }
     var rightClickShortcutOperations: String { choose("右键快捷操作", "Right-Click Shortcuts") }
     var quickTools: String { choose("便捷工具", "Quick Tools") }
     var quickToolsMenu: String { choose("便捷工具…", "Quick Tools…") }
@@ -41,6 +57,15 @@ struct AppText {
     var recordingShortcut: String { choose("按下快捷键…", "Press a shortcut…") }
     var noShortcut: String { choose("未设置", "Not Set") }
     var rightClickShortcutHint: String { choose("按住右键拖出方向后松开，触发匹配的快捷键。", "Hold the right mouse button, draw a direction, then release to trigger a shortcut.") }
+    var enableRightClickShortcuts: String { choose("启用右键快捷操作", "Enable Right-Click Shortcuts") }
+    var rightClickShortcutsDisabledHint: String { choose("已关闭右键监听。所有应用使用原生右键，已保存的规则保留。", "Right-click monitoring is off. All apps use their native right-click behavior; saved rules are preserved.") }
+    var gestureExclusions: String { choose("全局排除应用", "Excluded Apps") }
+    var gestureExclusionsHint: String { choose("以下应用不触发任何右键快捷操作，右键点击和拖动保持原生行为。修改立即生效。", "These apps use native right-click and drag behavior for all gesture rules. Changes take effect immediately.") }
+    var gestureExclusionsEmpty: String { choose("尚未排除任何应用", "No Excluded Apps") }
+    var addExcludedApplication: String { choose("添加应用…", "Add Apps…") }
+    var removeExcludedApplication: String { choose("移除所选应用", "Remove Selected App") }
+    var invalidExcludedApplication: String { choose("所选应用缺少应用标识，未加入排除清单。", "The selected app has no bundle identifier and could not be excluded.") }
+    var done: String { choose("完成", "Done") }
     var rightClickShortcutPermissionGranted: String { choose("辅助功能权限：已授权", "Accessibility: Authorized") }
     var rightClickShortcutPermissionRequired: String { choose("辅助功能权限：未授权，右键快捷操作不可用。", "Accessibility permission is required; right-click shortcuts are unavailable.") }
     var appPickerButton: String { choose("选择应用", "Pick App") }
@@ -367,6 +392,8 @@ struct AppText {
             choose("右 ⌥", "Right ⌥")
         case 62:
             choose("右 ⌃", "Right ⌃")
+        case 63:
+            "Fn / 🌐"
         default:
             choose("修饰键", "Modifier Key")
         }
