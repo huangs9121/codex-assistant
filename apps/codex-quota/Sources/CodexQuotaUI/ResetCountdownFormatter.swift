@@ -7,24 +7,26 @@ public enum ResetCountdownFormatter {
         now: Date = Date(),
         language: AppLanguage = .simplifiedChinese
     ) -> String? {
-        guard let resetsAt else {
-            return nil
-        }
+        guard let resetsAt else { return nil }
         let interval = resetsAt.timeIntervalSince(now)
-        guard interval.isFinite else {
-            return nil
-        }
-        let totalMinutes = Int(max(0, interval) / 60)
-        let hours = totalMinutes / 60
+        guard interval.isFinite else { return nil }
+        let minutesValue = floor(max(0, interval) / 60)
+        guard minutesValue < Double(Int.max) else { return nil }
+        let totalMinutes = Int(minutesValue)
+        let days = totalMinutes / (24 * 60)
+        let hours = totalMinutes / 60 % 24
         let minutes = totalMinutes % 60
-        if hours > 0 {
-            return language == .simplifiedChinese
-                ? "\(hours) 小时 \(minutes) 分钟"
-                : "\(hours)h \(minutes)m"
+        var parts: [String] = []
+        if days > 0 {
+            parts.append(language == .simplifiedChinese ? "\(days)天" : "\(days)d")
         }
-        return language == .simplifiedChinese
-            ? "\(minutes) 分钟"
-            : "\(minutes)m"
+        if days > 0 || hours > 0 {
+            parts.append(language == .simplifiedChinese ? "\(hours)小时" : "\(hours)h")
+        }
+        if days == 0 {
+            parts.append(language == .simplifiedChinese ? "\(minutes)分" : "\(minutes)m")
+        }
+        return parts.joined(separator: language == .simplifiedChinese ? "" : " ")
     }
 
     public static func weeklyResetValue(
@@ -94,10 +96,10 @@ public enum ResetCountdownFormatter {
             let totalMinutes = Int(floor(clampedInterval / 60))
             return language == .simplifiedChinese ? "\(totalMinutes)分钟" : "\(totalMinutes)m"
         }
-        if clampedInterval <= 24 * 3_600 {
+        if clampedInterval < 24 * 3_600 {
             return language == .simplifiedChinese ? "\(totalHours)小时" : "\(totalHours)h"
         }
-        let totalDays = Int(ceil(clampedInterval / 86_400))
+        let totalDays = totalHours / 24
         return language == .simplifiedChinese ? "\(totalDays)天" : "\(totalDays)d"
     }
 }

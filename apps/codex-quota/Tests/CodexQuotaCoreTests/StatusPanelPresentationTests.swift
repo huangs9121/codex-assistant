@@ -295,18 +295,31 @@ enum StatusPanelPresentationTests {
     }
 
     private static func testResetCountdown() -> Bool {
-        let overAnHour = ResetCountdownFormatter.panelCountdownValue(
-            resetsAt: now.addingTimeInterval(3_600 + 5 * 60),
-            now: now,
-            language: .simplifiedChinese
-        )
-        let underAnHour = ResetCountdownFormatter.panelCountdownValue(
-            resetsAt: now.addingTimeInterval(59 * 60),
-            now: now,
-            language: .english
-        )
-        return overAnHour == "1 小时 5 分钟"
-            && underAnHour == "59m"
+        let cases: [(TimeInterval, String, String)] = [
+            ((6 * 24 + 20) * 3_600 + 32 * 60, "6天20小时", "6d 20h"),
+            (130 * 3_600 + 37 * 60, "5天10小时", "5d 10h"),
+            (24 * 3_600 + 1, "1天0小时", "1d 0h"),
+            (24 * 3_600, "1天0小时", "1d 0h"),
+            (24 * 3_600 - 1, "23小时59分", "23h 59m"),
+            (3_600 + 5 * 60, "1小时5分", "1h 5m"),
+            (3_600, "1小时0分", "1h 0m"),
+            (3_599, "59分", "59m"),
+            (-1, "0分", "0m")
+        ]
+        return cases.allSatisfy { interval, chinese, english in
+            ResetCountdownFormatter.panelCountdownValue(
+                resetsAt: now.addingTimeInterval(interval), now: now,
+                language: .simplifiedChinese
+            ) == chinese
+                && ResetCountdownFormatter.panelCountdownValue(
+                    resetsAt: now.addingTimeInterval(interval), now: now,
+                    language: .english
+                ) == english
+        }
+            && ResetCountdownFormatter.panelCountdownValue(resetsAt: nil) == nil
+            && ResetCountdownFormatter.panelCountdownValue(
+                resetsAt: Date(timeIntervalSince1970: 1e308), now: now
+            ) == nil
     }
 
     private static func testWeeklyReset() -> Bool {

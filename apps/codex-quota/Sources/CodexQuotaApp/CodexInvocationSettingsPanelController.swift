@@ -13,7 +13,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
     private let onPermissionRefresh: () -> Void
     private var rules: [KeyMappingRule] = []
     private let table = NSTableView()
-    private let enabledButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let enabledButton = HelpButton(checkboxWithTitle: "", target: nil, action: nil)
     private let permissionLabel = NSTextField(labelWithString: "")
     private var permissionTimer: Timer?
     private var recording: (row: Int, source: Bool)?
@@ -26,9 +26,9 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
     private var manualPanel: NSPanel?
     private var manualRow = 0
     private var manualSource = true
-    private let manualType = NSPopUpButton()
-    private let manualKey = NSPopUpButton()
-    private let manualModifierKey = NSPopUpButton()
+    private let manualType = HelpPopUpButton()
+    private let manualKey = HelpPopUpButton()
+    private let manualModifierKey = HelpPopUpButton()
     private var modifierButtons: [NSButton] = []
     private let modifiers: [(String, UInt64)] = [("⌃ Control", KeyboardShortcut.controlFlag), ("⌥ Option", KeyboardShortcut.optionFlag), ("⇧ Shift", KeyboardShortcut.shiftFlag), ("⌘ Command", KeyboardShortcut.commandFlag)]
     private let gestureKeys: [UInt16] = [55, 54, 58, 61, 56, 60, 59, 62, 63]
@@ -73,13 +73,14 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
         let scroll = NSScrollView()
         scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true; scroll.borderType = .bezelBorder
-        let add = NSButton(title: "+", target: self, action: #selector(addRule))
-        let remove = NSButton(title: "−", target: self, action: #selector(removeRule))
+        let add = HelpButton(title: "+", target: self, action: #selector(addRule))
+        let remove = HelpButton(title: "−", target: self, action: #selector(removeRule))
         for button in [add, remove] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 18) }
         add.setAccessibilityLabel(text.addKeyMapping); remove.setAccessibilityLabel(text.removeKeyMapping)
+        add.toolTip = text.addKeyMapping; remove.toolTip = text.removeKeyMapping
         let actions = NSStackView(views: [add, remove]); actions.spacing = 6
         permissionLabel.font = .systemFont(ofSize: 12)
-        let settings = NSButton(title: text.openSettings, target: self, action: #selector(openPermissions(_:)))
+        let settings = HelpButton(title: text.openSettings, target: self, action: #selector(openPermissions(_:)))
         settings.bezelStyle = .rounded
         for child in [enabledButton, hint, scroll, actions, permissionLabel, settings] {
             child.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(child)
@@ -113,11 +114,11 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
             let source = column == .source
             let isRecording = recording?.row == row && recording?.source == source
             let title = isRecording ? text.recordingShortcut : (source ? display(rules[row].trigger) : rules[row].target?.displayString ?? text.noShortcut)
-            let record = NSButton(title: title, target: self, action: #selector(startRecording(_:)))
+            let record = HelpButton(title: title, target: self, action: #selector(startRecording(_:)))
             record.tag = row * 2 + (source ? 0 : 1); record.bezelStyle = .rounded
             record.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
-            record.toolTip = source ? text.recordOriginalShortcut : text.recordMappedShortcut
-            let manual = NSButton(image: NSImage(systemSymbolName: "keyboard", accessibilityDescription: text.configureShortcut) ?? NSImage(), target: self, action: #selector(showManual(_:)))
+            record.toolTip = isRecording ? text.recordingShortcut : (source ? text.recordOriginalShortcut : text.recordMappedShortcut)
+            let manual = HelpButton(image: NSImage(systemSymbolName: "keyboard", accessibilityDescription: text.configureShortcut) ?? NSImage(), target: self, action: #selector(showManual(_:)))
             manual.tag = record.tag; manual.bezelStyle = .rounded
             manual.toolTip = text.configureShortcut
             let stack = NSStackView(views: [record, manual]); stack.spacing = 8
@@ -128,9 +129,10 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
             field.isBordered = false; field.drawsBackground = false
             return field
         case .enabled:
-            let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleRule(_:)))
+            let button = HelpButton(checkboxWithTitle: "", target: self, action: #selector(toggleRule(_:)))
             button.tag = row; button.state = rules[row].isEnabled ? .on : .off
             button.setAccessibilityLabel(text.enabled)
+            button.toolTip = text.enabled
             return button
         }
     }
@@ -278,12 +280,21 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
         manualType.removeAllItems(); manualType.addItems(withTitles: [text.keyCombination, text.modifierSingleTap, text.modifierDoubleTap])
         manualType.isEnabled = manualSource; manualType.target = self; manualType.action = #selector(changeManualType)
         manualType.frame = NSRect(x: 20, y: 222, width: 220, height: 28)
+        manualType.toolTip = text.language == .simplifiedChinese
+            ? "选择快捷键类型"
+            : "Choose shortcut type"
         manualKey.removeAllItems(); manualKey.addItems(withTitles: keyboardCodes.map { KeyboardShortcut.displayString(keyCode: $0, flags: 0) })
         manualKey.frame = NSRect(x: 20, y: 178, width: 220, height: 28)
         manualKey.target = self; manualKey.action = #selector(changeManualType)
+        manualKey.toolTip = text.language == .simplifiedChinese
+            ? "选择快捷键按键"
+            : "Choose shortcut key"
         manualModifierKey.removeAllItems()
         manualModifierKey.addItems(withTitles: gestureKeys.map { ModifierTapGesture(keyCodes: [$0], tapCount: 1).displayString(text: text) })
         manualModifierKey.frame = manualKey.frame
+        manualModifierKey.toolTip = text.language == .simplifiedChinese
+            ? "选择触发手势的修饰键"
+            : "Choose modifier key for the trigger gesture"
         let shortcut = manualSource ? rules[manualRow].trigger.flatMap { if case .shortcut(let key) = $0 { return key }; return nil } : rules[manualRow].target
         if let code = shortcut?.keyCode, let index = keyboardCodes.firstIndex(of: code) { manualKey.selectItem(at: index) }
         if manualSource, case let .modifierTap(keys, count) = rules[manualRow].trigger {
@@ -291,14 +302,14 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
             if let index = gestureKeys.firstIndex(where: { keys.contains($0) }) { manualModifierKey.selectItem(at: index) }
         } else { manualType.selectItem(at: 0) }
         modifierButtons = modifiers.enumerated().map { index, item in
-            let button = NSButton(checkboxWithTitle: item.0, target: nil, action: nil)
+            let button = HelpButton(checkboxWithTitle: item.0, target: nil, action: nil)
             button.state = (shortcut?.flags ?? 0) & item.1 != 0 ? .on : .off
             button.frame = NSRect(x: 20 + (index % 2) * 240, y: 128 - (index / 2) * 34, width: 220, height: 24)
             return button
         }
-        let cancel = NSButton(title: text.cancel, target: self, action: #selector(closeManual))
+        let cancel = HelpButton(title: text.cancel, target: self, action: #selector(closeManual))
         cancel.frame = NSRect(x: 290, y: 16, width: 88, height: 28); cancel.bezelStyle = .rounded; cancel.keyEquivalent = "\u{1b}"
-        let save = NSButton(title: text.save, target: self, action: #selector(saveManual))
+        let save = HelpButton(title: text.save, target: self, action: #selector(saveManual))
         save.frame = NSRect(x: 388, y: 16, width: 88, height: 28); save.bezelStyle = .rounded; save.keyEquivalent = "\r"
         for child in [manualType, manualKey, manualModifierKey, cancel, save] + modifierButtons { view.addSubview(child) }
         manualPanel = panel; changeManualType(); window.beginSheet(panel)

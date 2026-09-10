@@ -10,6 +10,8 @@ struct StatusPanelView: View {
     let text: AppText
     let onSettingsMenu: (NSView) -> Void
     let onQuickTools: () -> Void
+    let onNodeScores: () -> Void
+    var onDisplaySleep: () -> Void = {}
     let onOpenResetAnnouncement: () -> Void
     let canResumeTaskSessions: Bool
     let onResumeSession: (String, Bool) -> TaskResumeActionResult
@@ -167,6 +169,7 @@ struct StatusPanelView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!model.hasCompletedTasks)
+                .buttonHelp(text.clearCompletedTasks)
                 let runningCount = TaskStatusPresentationFormatter.runningCount(
                     in: model.tasks
                 )
@@ -278,7 +281,7 @@ struct StatusPanelView: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(Color(nsColor: .controlAccentColor))
-        .help(text.clearFinishedThreads)
+        .buttonHelp(text.clearFinishedThreads)
         .accessibilityLabel(text.clearFinishedThreads)
         .focused($isClearFinishedThreadsFocused)
         .overlay(alignment: .bottom) {
@@ -309,6 +312,23 @@ struct StatusPanelView: View {
             )
             .frame(width: 24, height: 24)
             manualSleepButton
+            Button(action: onNodeScores) {
+                Image(systemName: "network").frame(width: 24, height: 24)
+            }.buttonStyle(.plain).buttonHelp("节点评分与本地排行榜").accessibilityLabel("节点评分")
+            Button(action: onDisplaySleep) {
+                Image(systemName: "display")
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: "moon.fill")
+                            .font(.system(size: 8, weight: .semibold))
+                            .offset(x: 3, y: -3)
+                    }
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .buttonHelp(text.language == .simplifiedChinese
+                ? "熄屏继续工作：临时防休眠，亮屏后自动结束。请插电、勿合盖。"
+                : "Turn display off and keep working until it wakes. Keep plugged in and lid open.")
+            .accessibilityLabel(text.language == .simplifiedChinese ? "熄屏继续工作" : "Turn display off and keep working")
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 1) {
                 Text(
@@ -358,7 +378,7 @@ struct StatusPanelView: View {
         }
         .buttonStyle(.plain)
         .disabled(model.sleepState == .pending)
-        .help(manualSleepStatusText)
+        .buttonHelp(manualSleepStatusText)
         .accessibilityLabel(manualSleepStatusText)
     }
 
@@ -451,7 +471,7 @@ private struct ResetForecastRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(text.resetAnnouncementTooltip)
+            .buttonHelp(text.resetAnnouncementTooltip)
             .accessibilityLabel(text.resetAnnouncementAccessibility)
             .onHover { isHovered = $0 }
         } else {
@@ -589,7 +609,7 @@ private struct CodexCLIProcessRow: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 7).contentShape(Rectangle())
         }
-        .buttonStyle(.plain).help(text.openCLIProcessHelp).accessibilityLabel(text.codexCLIProcesses)
+        .buttonStyle(.plain).buttonHelp(text.openCLIProcessHelp).accessibilityLabel(text.codexCLIProcesses)
     }
 
     private var subtitle: String {
@@ -685,7 +705,7 @@ private struct TaskStatusRow: View {
             .focused($isContinueFocused)
             .opacity(showsActionButtons ? (canContinue ? 1 : 0.35) : 0)
             .allowsHitTesting(showsActionButtons)
-            .help(text.continueTask)
+            .buttonHelp(text.continueTask)
             .accessibilityLabel(text.continueTask)
 
             Button {
@@ -701,7 +721,7 @@ private struct TaskStatusRow: View {
             .focused($isDeleteFocused)
             .opacity(showsActionButtons ? (canDelete ? 1 : 0.35) : 0)
             .allowsHitTesting(showsActionButtons)
-            .help(text.deleteTask)
+            .buttonHelp(text.deleteTask)
             .accessibilityLabel(text.deleteTask)
         }
         .padding(.horizontal, 16)
@@ -740,33 +760,31 @@ private struct CodexDesktopThreadGroupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                if group.descendantCount > 0 {
-                    Button(action: onToggle) {
-                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 18, height: 24)
+            if let root = group.root {
+                CodexDesktopThreadOpenButton(thread: root.thread, text: text, onOpenCodexThread: onOpenCodexThread) {
+                    HStack(spacing: 8) {
+                        Color.clear.frame(width: 18, height: 24)
+                        CodexDesktopThreadSummary(thread: root.thread, now: now, text: text, childCount: group.descendantCount, showsMainTaskLabel: root.thread.source == .user, statusIcon: aggregateStatus)
+                        Spacer(minLength: 4)
+                        CodexDesktopThreadOpenChevron()
                     }
-                    .buttonStyle(.plain)
-                    .help(isCollapsed ? "展开子任务" : "折叠子任务")
-                } else {
-                    Color.clear.frame(width: 18, height: 24)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 5)
                 }
-                if let root = group.root {
-                    CodexDesktopThreadSummary(thread: root.thread, now: now, text: text, childCount: group.descendantCount, showsMainTaskLabel: root.thread.source == .user, statusIcon: aggregateStatus)
-                } else {
+                .overlay(alignment: .leading) {
+                    disclosureButton.padding(.leading, 16)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    disclosureButton
                     Text("所属聊天不可用")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 4)
                 }
-                Spacer(minLength: 4)
-                if let root = group.root {
-                    CodexDesktopThreadOpenButton(thread: root.thread, text: text, onOpenCodexThread: onOpenCodexThread)
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 5)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 5)
             if !isCollapsed {
                 CodexDesktopThreadChildren(nodes: childNodes, depth: group.root == nil ? 0 : 1, now: now, text: text, onOpenCodexThread: onOpenCodexThread)
                     .padding(.vertical, 4)
@@ -782,6 +800,20 @@ private struct CodexDesktopThreadGroupView: View {
             Color(nsColor: .separatorColor).opacity(0.10),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+    }
+
+    @ViewBuilder
+    private var disclosureButton: some View {
+        if group.descendantCount > 0 {
+            Button(action: onToggle) {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 18, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .buttonHelp(isCollapsed ? "展开子任务" : "折叠子任务")
+        }
     }
 
     private var childNodes: [CodexDesktopThreadNode] {
@@ -811,16 +843,18 @@ private struct CodexDesktopThreadChildren: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
-                HStack(spacing: 8) {
-                    DesktopThreadStatusIcon(status: node.thread.status)
-                        .frame(width: 16, height: 18)
-                    CodexDesktopThreadSummary(thread: node.thread, now: now, text: text)
-                    Spacer(minLength: 4)
-                    CodexDesktopThreadOpenButton(thread: node.thread, text: text, onOpenCodexThread: onOpenCodexThread)
+                CodexDesktopThreadOpenButton(thread: node.thread, text: text, onOpenCodexThread: onOpenCodexThread) {
+                    HStack(spacing: 8) {
+                        DesktopThreadStatusIcon(status: node.thread.status)
+                            .frame(width: 16, height: 18)
+                        CodexDesktopThreadSummary(thread: node.thread, now: now, text: text)
+                        Spacer(minLength: 4)
+                        CodexDesktopThreadOpenChevron()
+                    }
+                    .padding(.leading, CGFloat(34 + depth * 18))
+                    .padding(.trailing, 16)
+                    .padding(.vertical, 5)
                 }
-                .padding(.leading, CGFloat(34 + depth * 18))
-                .padding(.trailing, 16)
-                .padding(.vertical, 5)
                 if !node.children.isEmpty {
                     CodexDesktopThreadChildren(nodes: node.children, depth: depth + 1, now: now, text: text, onOpenCodexThread: onOpenCodexThread)
                 }
@@ -892,25 +926,35 @@ private struct DesktopThreadStatusIcon: View {
         case .running:
             Circle().fill(Color(nsColor: .controlAccentColor)).frame(width: 8, height: 8)
                 .accessibilityLabel("运行中")
-                .help("任务运行中")
+                .buttonHelp("任务运行中")
         case .ended:
             Circle().fill(Color.secondary.opacity(0.55)).frame(width: 8, height: 8)
                 .accessibilityLabel("已结束")
-                .help("已收到明确的完成事件")
+                .buttonHelp("已收到明确的完成事件")
         case .unknown:
             Image(systemName: "questionmark.circle")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .help("状态未知，尚未收到明确的完成事件")
+                .buttonHelp("状态未知，尚未收到明确的完成事件")
                 .accessibilityLabel("状态未知")
         }
     }
 }
 
-private struct CodexDesktopThreadOpenButton: View {
+private struct CodexDesktopThreadOpenChevron: View {
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 11))
+            .foregroundStyle(.tertiary)
+            .frame(width: 20, height: 20)
+    }
+}
+
+private struct CodexDesktopThreadOpenButton<Label: View>: View {
     let thread: CodexDesktopThreadSnapshot
     let text: AppText
     let onOpenCodexThread: (CodexDesktopThreadSnapshot) -> CodexThreadOpenActionResult
+    @ViewBuilder let label: () -> Label
 
     private var canOpen: Bool {
         let id = thread.source == .subagent ? thread.parentThreadID : thread.id
@@ -919,14 +963,13 @@ private struct CodexDesktopThreadOpenButton: View {
 
     var body: some View {
         Button { if canOpen { _ = onOpenCodexThread(thread) } } label: {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .frame(width: 20, height: 20)
+            label()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!canOpen)
-        .help(thread.source == .subagent ? text.openParentCodexThreadHelp : text.openCodexThreadHelp)
+        .buttonHelp(thread.source == .subagent ? text.openParentCodexThreadHelp : text.openCodexThreadHelp)
     }
 }
 
@@ -992,7 +1035,7 @@ private struct CodexDesktopThreadRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!canOpenThread)
-        .help(threadHelp)
+        .buttonHelp(threadHelp)
         .accessibilityLabel(thread.title)
     }
 
@@ -1091,7 +1134,7 @@ private struct SettingsMenuButton: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSButton {
-        let button = NSButton()
+        let button = HelpButton()
         button.title = ""
         button.isBordered = false
         button.bezelStyle = .shadowlessSquare
@@ -1109,12 +1152,14 @@ private struct SettingsMenuButton: NSViewRepresentable {
         button.target = context.coordinator
         button.action = #selector(Coordinator.performAction(_:))
         button.setAccessibilityLabel(accessibilityLabel)
+        button.toolTip = accessibilityLabel
         return button
     }
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
         button.setAccessibilityLabel(accessibilityLabel)
+        button.toolTip = accessibilityLabel
     }
 
     @MainActor
@@ -1131,21 +1176,8 @@ private struct SettingsMenuButton: NSViewRepresentable {
     }
 }
 
-private final class HoverButton: NSButton {
+private final class HoverButton: HelpButton {
     private var isPointerInside = false
-
-    override func updateTrackingAreas() {
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(
-            NSTrackingArea(
-                rect: bounds,
-                options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-                owner: self,
-                userInfo: nil
-            )
-        )
-        super.updateTrackingAreas()
-    }
 
     override func mouseEntered(with event: NSEvent) {
         isPointerInside = true

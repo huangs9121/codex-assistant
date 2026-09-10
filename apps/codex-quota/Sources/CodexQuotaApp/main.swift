@@ -30,7 +30,7 @@ private final class MenuChoiceRow: NSView {
     private let checkmarkLabel = NSTextField(labelWithString: "✓")
     private let titleLabel = NSTextField(labelWithString: "")
     private let preview = NSImageView()
-    private let actionButton = NSButton()
+    private let actionButton = HelpButton()
     private let selectedAccessibilityValue: String
     private let notSelectedAccessibilityValue: String
 
@@ -104,6 +104,7 @@ private final class MenuChoiceRow: NSView {
     func updateTitle(_ title: String) {
         titleLabel.stringValue = title
         actionButton.setAccessibilityLabel(title)
+        actionButton.toolTip = title
     }
 
     func setWarning(_ showsWarning: Bool) {
@@ -163,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let automaticUpdateInstaller = AutomaticUpdateInstaller()
     private let resetMonitorController = TiboResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
+    private let displaySleepController = DisplaySleepController()
     private lazy var taskSleepController = TaskSleepController(language: language)
     private let mouseScrollReversalController = MouseScrollReversalController()
     private let mouseGestureController = MouseGestureController()
@@ -199,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
     )
     private let rateLimitController = CodexRateLimitController()
+    private let nodeScoreWindowController = NodeScoreWindowController()
     private let taskStatusController = TaskStatusController()
     private lazy var panelController = StatusPanelController(
         model: panelModel,
@@ -208,6 +211,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         },
         onQuickTools: { [weak self] in
             self?.quickToolsPanelController.show()
+        },
+        onNodeScores: { [weak self] in self?.nodeScoreWindowController.show() },
+        onDisplaySleep: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do { try await displaySleepController.start() }
+                catch { showAlert(message: "熄屏未完成", informativeText: error.localizedDescription) }
+            }
         },
         onOpenResetAnnouncement: { [weak self] in
             self?.openCurrentResetAnnouncement()
@@ -299,9 +310,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         if CommandLine.arguments.contains("--show-quick-tools") {
             DispatchQueue.main.async { [weak self] in self?.quickToolsPanelController.show() }
         }
+        if CommandLine.arguments.contains("--show-node-scores") {
+            DispatchQueue.main.async { [weak self] in self?.nodeScoreWindowController.show() }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        displaySleepController.stop()
         taskSleepController.stop()
         refreshTimer?.invalidate()
         updatePolicyTimer?.invalidate()
@@ -323,6 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         guard let button = statusItem.button else {
             return
         }
+        button.installButtonHelp(language == .simplifiedChinese ? "打开 Codex 额度与任务面板" : "Open Codex quota and tasks")
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -651,7 +667,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             alert.addButton(withTitle: text.enabled)
             alert.addButton(withTitle: language == .simplifiedChinese ? "取消" : "Cancel")
             NSApp.activate(ignoringOtherApps: true)
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard alert.runWithButtonHelp() == .alertFirstButtonReturn else { return }
         }
         isChangingTaskSleep = true
         Task { [weak self] in
@@ -721,7 +737,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         alert.messageText = text.moveToApplications
         alert.addButton(withTitle: text.enableAnyway)
         alert.addButton(withTitle: text.cancel)
-        return alert.runModal() == .alertFirstButtonReturn
+        return alert.runWithButtonHelp() == .alertFirstButtonReturn
     }
 
     private func closeMenuForLaunchAtLoginInteraction() {
@@ -862,7 +878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             withTitle: canInstallAutomatically ? text.installUpdate : text.goToUpdate
         )
         alert.addButton(withTitle: text.later)
-        if alert.runModal() == .alertFirstButtonReturn {
+        if alert.runWithButtonHelp() == .alertFirstButtonReturn {
             if canInstallAutomatically {
                 beginAutomaticUpdate(release)
             } else if !NSWorkspace.shared.open(release.htmlURL) {
@@ -911,7 +927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         alert.informativeText = text.automaticUpdateFailedDetail
         alert.addButton(withTitle: text.openDownloadPage)
         alert.addButton(withTitle: text.later)
-        if alert.runModal() == .alertFirstButtonReturn,
+        if alert.runWithButtonHelp() == .alertFirstButtonReturn,
            !NSWorkspace.shared.open(release.htmlURL) {
             showAlert(message: text.cannotOpenUpdate)
         }
@@ -1256,7 +1272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                 let alert = NSAlert()
                 alert.messageText = self.text.codexThreadOpenFailedTitle
                 alert.informativeText = error.localizedDescription
-                alert.runModal()
+                alert.runWithButtonHelp()
             }
         }
         return .openRequested
@@ -1398,7 +1414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         alert.messageText = message
         alert.informativeText = informativeText
         alert.addButton(withTitle: text.dismiss)
-        alert.runModal()
+        alert.runWithButtonHelp()
     }
 
     private func showAutoRefreshNoticeIfNeeded() {
@@ -1411,7 +1427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         alert.messageText = text.launched
         alert.informativeText = text.launchNotice
         alert.addButton(withTitle: text.dismiss)
-        alert.runModal()
+        alert.runWithButtonHelp()
         preferences.hasShownAutoRefreshNotice = true
     }
 
@@ -1425,6 +1441,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 }
 
 let application = NSApplication.shared
+if CommandLine.arguments.contains("--node-scores-preview") {
+    let preview = NodeScoreWindowController()
+    application.setActivationPolicy(.regular)
+    preview.show()
+    if let index = CommandLine.arguments.firstIndex(of:"--snapshot"), CommandLine.arguments.count > index + 1 {
+        let destination = CommandLine.arguments[index + 1]
+        Task { @MainActor in
+            try? await Task.sleep(for:.milliseconds(500))
+            do { try preview.snapshot(to:destination) } catch { print(error) }
+            application.terminate(nil)
+        }
+    }
+    application.run()
+    exit(0)
+}
 let delegate = AppDelegate()
 application.delegate = delegate
 application.run()

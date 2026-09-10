@@ -42,15 +42,15 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     private let tableView = NSTableView()
-    private let enabledButton = NSButton(checkboxWithTitle: "", target: nil, action: nil)
-    private let exclusionsButton = NSButton(title: "", target: nil, action: nil)
+    private let enabledButton = HelpButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let exclusionsButton = HelpButton(title: "", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let exclusionsTable = NSTableView()
     private let exclusionsEmptyLabel = NSTextField(labelWithString: "")
-    private let removeExclusionButton = NSButton(title: "", target: nil, action: nil)
+    private let removeExclusionButton = HelpButton(title: "", target: nil, action: nil)
     private var exclusionsPanel: NSPanel?
     private let permissionLabel = NSTextField(labelWithString: "")
-    private let accessibilityButton = NSButton(title: "", target: nil, action: nil)
+    private let accessibilityButton = HelpButton(title: "", target: nil, action: nil)
     private lazy var embeddedContentView = makeContentView()
 
     init(
@@ -112,12 +112,14 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         scrollView.borderType = .bezelBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        let addButton = NSButton(title: "+", target: self, action: #selector(addRule))
+        let addButton = HelpButton(title: "+", target: self, action: #selector(addRule))
         addButton.bezelStyle = .rounded
         addButton.font = .systemFont(ofSize: 18)
-        let removeButton = NSButton(title: "−", target: self, action: #selector(removeRule))
+        let removeButton = HelpButton(title: "−", target: self, action: #selector(removeRule))
         removeButton.bezelStyle = .rounded
         removeButton.font = .systemFont(ofSize: 18)
+        addButton.toolTip = text.addKeyMapping
+        removeButton.toolTip = text.removeKeyMapping
         let tableActions = NSStackView(views: [addButton, removeButton])
         tableActions.orientation = .horizontal
         tableActions.spacing = 6
@@ -168,7 +170,9 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         enabledButton.state = preferences.isEnabled ? .on : .off
         hint.stringValue = preferences.isEnabled ? text.rightClickShortcutHint : text.rightClickShortcutsDisabledHint
         exclusionsButton.title = "\(text.gestureExclusions)（\(preferences.excludedApplications.count)）…"
-        exclusionsButton.toolTip = preferences.excludedApplications.map(\.name).joined(separator: ", ")
+        exclusionsButton.toolTip = preferences.excludedApplications.isEmpty
+            ? text.gestureExclusions
+            : preferences.excludedApplications.map(\.name).joined(separator: ", ")
         exclusionsTable.reloadData()
         exclusionsEmptyLabel.isHidden = !preferences.excludedApplications.isEmpty
         removeExclusionButton.isEnabled = preferences.excludedApplications.indices.contains(exclusionsTable.selectedRow)
@@ -228,7 +232,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         exclusionsEmptyLabel.textColor = .secondaryLabelColor
         exclusionsEmptyLabel.alignment = .center
         exclusionsEmptyLabel.frame = NSRect(x: 20, y: 145, width: 440, height: 24)
-        let add = NSButton(title: text.addExcludedApplication, target: self, action: #selector(addExclusions))
+        let add = HelpButton(title: text.addExcludedApplication, target: self, action: #selector(addExclusions))
         add.frame = NSRect(x: 20, y: 18, width: 120, height: 30)
         add.bezelStyle = .rounded
         removeExclusionButton.title = text.removeExcludedApplication
@@ -236,7 +240,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         removeExclusionButton.action = #selector(removeExclusion)
         removeExclusionButton.frame = NSRect(x: 144, y: 18, width: 180, height: 30)
         removeExclusionButton.bezelStyle = .rounded
-        let done = NSButton(title: text.done, target: self, action: #selector(closeExclusions))
+        let done = HelpButton(title: text.done, target: self, action: #selector(closeExclusions))
         done.frame = NSRect(x: 372, y: 18, width: 88, height: 30)
         done.bezelStyle = .rounded
         done.keyEquivalent = "\r"
@@ -376,7 +380,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             field.isBordered = false
             field.drawsBackground = false
             field.setContentHuggingPriority(.init(1), for: .horizontal)
-            let picker = NSButton(
+            let picker = HelpButton(
                 image: NSImage(
                     systemSymbolName: "macwindow.on.rectangle",
                     accessibilityDescription: text.appPickerButton
@@ -404,25 +408,29 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             field.drawsBackground = false
             return field
         case .action:
-            let button = NSButton(title: actionTitle(for: row), target: self, action: #selector(recordShortcut(_:)))
+            let button = HelpButton(title: actionTitle(for: row), target: self, action: #selector(recordShortcut(_:)))
             button.tag = row
             button.bezelStyle = .rounded
             button.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
-            let manual = NSButton(image: NSImage(systemSymbolName: "keyboard", accessibilityDescription: text.action) ?? NSImage(), target: self, action: #selector(showManualShortcut(_:)))
+            button.toolTip = recordingRow == row ? text.recordingShortcut : text.recordShortcut
+            let manual = HelpButton(image: NSImage(systemSymbolName: "keyboard", accessibilityDescription: text.action) ?? NSImage(), target: self, action: #selector(showManualShortcut(_:)))
             manual.tag = row
             manual.bezelStyle = .rounded
+            manual.toolTip = text.configureShortcut
             return NSStackView(views: [button, manual])
         case .immediate:
-            let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleImmediateRule(_:)))
+            let button = HelpButton(checkboxWithTitle: "", target: self, action: #selector(toggleImmediateRule(_:)))
             button.tag = row
             button.state = rules[row].firesImmediately ? .on : .off
             button.setAccessibilityLabel(text.immediateTrigger)
+            button.toolTip = text.immediateTrigger
             return button
         case .enabled:
-            let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleRule(_:)))
+            let button = HelpButton(checkboxWithTitle: "", target: self, action: #selector(toggleRule(_:)))
             button.tag = row
             button.state = rules[row].isEnabled ? .on : .off
             button.setAccessibilityLabel(text.enabled)
+            button.toolTip = text.enabled
             return button
         }
     }
@@ -514,8 +522,8 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     private func gestureControls(row: Int) -> NSView {
-        let first = NSPopUpButton(frame: .zero, pullsDown: false)
-        let second = NSPopUpButton(frame: .zero, pullsDown: false)
+        let first = HelpPopUpButton(frame: .zero, pullsDown: false)
+        let second = HelpPopUpButton(frame: .zero, pullsDown: false)
         for direction in MouseGestureDirection.allCases {
             first.addItem(withTitle: direction.symbol)
             second.addItem(withTitle: direction.symbol)
@@ -525,6 +533,12 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         second.selectItem(withTitle: rules[row].gesture.dropFirst().first?.symbol ?? text.none)
         first.tag = row * 2
         second.tag = row * 2 + 1
+        first.toolTip = text.language == .simplifiedChinese
+            ? "选择手势的第一个方向"
+            : "Choose the first gesture direction"
+        second.toolTip = text.language == .simplifiedChinese
+            ? "选择手势的第二个方向"
+            : "Choose the second gesture direction"
         first.target = self; second.target = self
         first.action = #selector(changeGesture(_:)); second.action = #selector(changeGesture(_:))
         return NSStackView(views: [first, second])
@@ -699,13 +713,13 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         let modifiers: [(String, UInt64)] = [("⌃ Control", KeyboardShortcut.controlFlag), ("⌥ Option", KeyboardShortcut.optionFlag), ("⇧ Shift", KeyboardShortcut.shiftFlag), ("⌘ Command", KeyboardShortcut.commandFlag)]
         manualModifierButtons = []
         for (index, item) in modifiers.enumerated() {
-            let button = NSButton(checkboxWithTitle: item.0, target: self, action: #selector(toggleManualModifier(_:)))
+            let button = HelpButton(checkboxWithTitle: item.0, target: self, action: #selector(toggleManualModifier(_:)))
             button.tag = index; button.state = manualFlags & item.1 != 0 ? .on : .off; button.frame = NSRect(x: 20, y: 275 - index * 34, width: 130, height: 26); view.addSubview(button)
             manualModifierButtons.append(button)
         }
         let keys = manualKeys()
         for (index, key) in keys.enumerated() {
-            let button = NSButton(title: key.0, target: self, action: #selector(selectManualKey(_:)))
+            let button = HelpButton(title: key.0, target: self, action: #selector(selectManualKey(_:)))
             button.tag = Int(key.1); button.frame = NSRect(x: 170 + (index % 8) * 41, y: 275 - (index / 8) * 36, width: 37, height: 28); view.addSubview(button)
         }
         let systemActions = NSTextField(labelWithString: text.systemActions)
@@ -714,7 +728,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         systemActions.frame = NSRect(x: 20, y: 136, width: 130, height: 18)
         view.addSubview(systemActions)
         for (index, action) in SystemGestureAction.all.enumerated() {
-            let button = NSButton(
+            let button = HelpButton(
                 title: action.localizedName(language: text.language),
                 target: self,
                 action: #selector(selectSystemAction(_:))
@@ -723,7 +737,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             button.frame = NSRect(x: 20, y: 104 - index * 32, width: 130, height: 28)
             view.addSubview(button)
         }
-        let save = NSButton(title: text.save, target: self, action: #selector(saveManualShortcut)); save.bezelStyle = .rounded; save.frame = NSRect(x: 420, y: 16, width: 80, height: 28); view.addSubview(save)
+        let save = HelpButton(title: text.save, target: self, action: #selector(saveManualShortcut)); save.bezelStyle = .rounded; save.frame = NSRect(x: 420, y: 16, width: 80, height: 28); view.addSubview(save)
         return view
     }
 

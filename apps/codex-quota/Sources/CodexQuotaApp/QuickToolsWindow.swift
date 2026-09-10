@@ -9,6 +9,14 @@ final class QuickToolsWindow: NSWindow {
         }
 
         switch event.charactersIgnoringModifiers?.lowercased() {
+        case "a":
+            return NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self)
+        case "c":
+            return NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self)
+        case "v":
+            return NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self)
+        case "x":
+            return NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self)
         case "w":
             performClose(nil)
             return true

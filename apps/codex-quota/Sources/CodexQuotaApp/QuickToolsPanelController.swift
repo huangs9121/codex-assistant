@@ -19,7 +19,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
 
     private let pageControl = NSSegmentedControl()
     private let contentContainer = NSView()
-    private let scrollReversalEnabledButton = NSButton(
+    private let scrollReversalEnabledButton = HelpButton(
         checkboxWithTitle: "",
         target: nil,
         action: nil
@@ -101,6 +101,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     }
 
     private func configurePageControl() {
+        pageControl.cell = HelpSegmentedCell()
         pageControl.segmentCount = 3
         pageControl.segmentStyle = .texturedRounded
         pageControl.trackingMode = .selectOne

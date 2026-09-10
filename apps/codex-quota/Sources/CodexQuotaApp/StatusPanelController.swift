@@ -112,6 +112,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         text: AppText,
         onSettingsMenu: @escaping (NSView) -> Void,
         onQuickTools: @escaping () -> Void,
+        onNodeScores: @escaping () -> Void,
+        onDisplaySleep: @escaping () -> Void,
         onOpenResetAnnouncement: @escaping () -> Void,
         canResumeTaskSessions: Bool,
         onResumeSession: @escaping (String, Bool) -> TaskResumeActionResult,
@@ -132,6 +134,14 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 onQuickTools: {
                     panelPopover.performClose(nil)
                     onQuickTools()
+                },
+                onNodeScores: {
+                    panelPopover.performClose(nil)
+                    onNodeScores()
+                },
+                onDisplaySleep: {
+                    panelPopover.performClose(nil)
+                    onDisplaySleep()
                 },
                 onOpenResetAnnouncement: onOpenResetAnnouncement,
                 canResumeTaskSessions: canResumeTaskSessions,

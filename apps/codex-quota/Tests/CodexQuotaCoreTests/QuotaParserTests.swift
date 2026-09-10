@@ -11,6 +11,45 @@ enum QuotaParserTests {
 
     static func main() {
         let tests: [TestCase] = [
+            ("retired webpage cannot affect score or coverage", {
+                var node = NodeScore(name:"test", metrics:Array(repeating:NodeMetric(8),count:7))
+                return [NodeMetric(),NodeMetric(0),NodeMetric(10)].allSatisfy {
+                    node.metrics[2] = $0
+                    return node.total == 8 && node.coverage == 1
+                }
+            }),
+            ("six metric weights preserve Codex priority", {
+                var node = NodeScore(name:"test", metrics:Array(repeating:NodeMetric(0),count:7))
+                node.metrics[0] = NodeMetric(10)
+                return node.total == 5 && NodeScore.activeMetricIndices == [0,1,3,4,5,6]
+            }),
+            ("retired webpage historical data survives round trip", {
+                var node = NodeScore(name:"test")
+                node.metrics[0] = NodeMetric(8); node.metrics[2] = NodeMetric(0,"old HTTP403")
+                guard let data = try? JSONEncoder().encode(node), let decoded = try? JSONDecoder().decode(NodeScore.self,from:data) else { return false }
+                return decoded.metrics[2] == node.metrics[2] && decoded.total == 8 && decoded.coverage == 0.5
+            }),
+            ("node score missing metrics are not zero", {
+                var node = NodeScore(name: "test")
+                node.metrics[0] = NodeMetric(8)
+                return node.total == 8 && node.coverage == 0.5
+            }),
+            ("node score requires Codex and excludes cancelled run", {
+                var node = NodeScore(name: "test")
+                node.metrics[1] = NodeMetric(10)
+                guard node.total == nil else { return false }
+                node.metrics[0] = NodeMetric(9); node.cancelled = true
+                return node.total == nil
+            }),
+            ("node score penalizes failed connections", {
+                NodeScore.connectionScore(success: 0, count: 3, seconds: 1) == 0 &&
+                abs(NodeScore.connectionScore(success: 2, count: 3, seconds: 1) - 20.0/3) < 0.001
+            }),
+            ("node history round trips without losing test ids", {
+                let records = [NodeScore(name: "Test node", source: "Test fixture", version: 0)]
+                guard let data = try? JSONEncoder().encode(records), let decoded = try? JSONDecoder().decode([NodeScore].self, from: data) else { return false }
+                return decoded.map(\.id) == records.map(\.id) && decoded.allSatisfy { $0.version == 0 && $0.metrics.count == 7 }
+            }),
             ("primary used 40 leaves 60", testPrimaryUsedPercent),
             ("highest used percent wins", testHighestUsedPercent),
             ("account response preserves both quota windows", testAccountDualWindowParsing),
@@ -476,10 +515,12 @@ enum QuotaParserTests {
             (59 * 60 + 30, "59分钟"),
             (60 * 60, "1小时"),
             (23.5 * 60 * 60, "23小时"),
-            (24 * 60 * 60, "24小时"),
-            (24 * 60 * 60 + 1, "2天"),
-            (47.9 * 60 * 60, "2天"),
-            (48 * 60 * 60 + 1, "3天"),
+            (24 * 60 * 60 - 1, "23小时"),
+            (24 * 60 * 60, "1天"),
+            (24 * 60 * 60 + 1, "1天"),
+            (47.9 * 60 * 60, "1天"),
+            (48 * 60 * 60 + 1, "2天"),
+            (130 * 3_600 + 37 * 60, "5天"),
             (-1, "0分钟")
         ]
         return cases.allSatisfy { interval, expected in
@@ -525,10 +566,12 @@ enum QuotaParserTests {
         let compactCases: [(TimeInterval, String)] = [
             (59 * 60 + 30, "59m"),
             (60 * 60, "1h"),
-            (24 * 60 * 60, "24h"),
-            (24 * 60 * 60 + 1, "2d"),
-            (47.9 * 60 * 60, "2d"),
-            (48 * 60 * 60 + 1, "3d")
+            (24 * 60 * 60 - 1, "23h"),
+            (24 * 60 * 60, "1d"),
+            (24 * 60 * 60 + 1, "1d"),
+            (47.9 * 60 * 60, "1d"),
+            (48 * 60 * 60 + 1, "2d"),
+            (130 * 3_600 + 37 * 60, "5d")
         ]
         let compactCasesMatch = compactCases.allSatisfy { interval, expected in
             expect(
