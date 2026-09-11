@@ -337,19 +337,7 @@ final class MouseGestureController: NSObject {
     }
 
     private func runSystemAction(_ action: SystemGestureAction.Definition) {
-        switch action.invocation {
-        case let .openApplication(path):
-            DispatchQueue.main.async {
-                NSWorkspace.shared.open(URL(fileURLWithPath: path))
-            }
-        case let .runCommand(executablePath, arguments):
-            shortcutPostingQueue.async {
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: executablePath)
-                process.arguments = arguments
-                try? process.run()
-            }
-        }
+        SystemActionRunner.run(action)
     }
 
     private static func postShortcut(

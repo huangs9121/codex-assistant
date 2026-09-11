@@ -2,6 +2,7 @@ import Foundation
 
 public enum SystemGestureAction {
     public enum Invocation: Equatable, Sendable {
+        case keyboardShortcut(keyCode: UInt16, flags: UInt64)
         case openApplication(path: String)
         case runCommand(executablePath: String, arguments: [String])
     }
@@ -33,6 +34,12 @@ public enum SystemGestureAction {
     }
 
     public static let all: [Definition] = [
+        Definition(id: "captureSelection", keyCode: 0xFFFC, chineseName: "选区截图并复制", englishName: "Copy Selected Screenshot",
+            invocation: .keyboardShortcut(keyCode: 21, flags: KeyboardShortcut.controlFlag | KeyboardShortcut.commandFlag | KeyboardShortcut.shiftFlag)),
+        Definition(id: "captureScreen", keyCode: 0xFFFB, chineseName: "全屏截图并复制", englishName: "Copy Full Screenshot",
+            invocation: .keyboardShortcut(keyCode: 20, flags: KeyboardShortcut.controlFlag | KeyboardShortcut.commandFlag | KeyboardShortcut.shiftFlag)),
+        Definition(id: "recordScreen", keyCode: 0xFFFA, chineseName: "录屏", englishName: "Screen Recording",
+            invocation: .openApplication(path: "/System/Applications/Utilities/Screenshot.app")),
         Definition(
             id: "missionControl",
             keyCode: 0xFFFF,

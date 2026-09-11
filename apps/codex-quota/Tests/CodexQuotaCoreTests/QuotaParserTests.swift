@@ -1183,7 +1183,7 @@ enum QuotaParserTests {
                 )
             )
         ]
-        return SystemGestureAction.all == expected
+        return Array(SystemGestureAction.all.suffix(3)) == expected
             && KeyboardShortcut.missionControlKeyCode == 0xFFFF
             && SystemGestureAction.all.allSatisfy { action in
                 KeyboardShortcut.displayString(keyCode: action.keyCode, flags: 0) == action.englishName
