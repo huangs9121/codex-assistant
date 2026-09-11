@@ -17,6 +17,8 @@ public struct KeyMappingShortcut: Codable, Equatable, Sendable {
         return keyCode <= 126 && !Self.modifierKeyCodes.contains(keyCode) && flags & ~Self.modifierMask == 0
     }
 
+    public var isValidTarget: Bool { isValid || SystemGestureAction.action(keyCode: keyCode, modifierFlags: flags) != nil }
+
     public var isFunctionKey: Bool { keyCode == 63 }
 
     public var displayString: String { KeyboardShortcut.displayString(keyCode: keyCode, flags: flags) }
@@ -57,7 +59,7 @@ public struct KeyMappingRule: Codable, Equatable, Sendable, Identifiable {
         self.id = id; self.trigger = trigger; self.target = target; self.note = note; self.isEnabled = isEnabled
     }
 
-    public var isComplete: Bool { trigger?.isValid == true && target?.isValid == true }
+    public var isComplete: Bool { trigger?.isValid == true && target?.isValidTarget == true }
 
     public static func conflictingRule(for candidate: Self, in rules: [Self]) -> Self? {
         guard candidate.isEnabled, let trigger = candidate.trigger else { return nil }

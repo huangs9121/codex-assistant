@@ -113,7 +113,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
         case .source, .target:
             let source = column == .source
             let isRecording = recording?.row == row && recording?.source == source
-            let title = isRecording ? text.recordingShortcut : (source ? display(rules[row].trigger) : rules[row].target?.displayString ?? text.noShortcut)
+            let title = isRecording ? text.recordingShortcut : (source ? display(rules[row].trigger) : rules[row].target.map { SystemGestureAction.action(keyCode: $0.keyCode, modifierFlags: $0.flags)?.localizedName(language: text.language) ?? $0.displayString } ?? text.noShortcut)
             let record = HelpButton(title: title, target: self, action: #selector(startRecording(_:)))
             record.tag = row * 2 + (source ? 0 : 1); record.bezelStyle = .rounded
             record.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
@@ -273,6 +273,17 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
         guard let window = contentView.window, manualPanel == nil, rules.indices.contains(button.tag / 2) else { return }
         stopRecording(); manualRow = button.tag / 2; manualSource = button.tag % 2 == 0
         controller.setRecording(true)
+        if !manualSource {
+            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 570), styleMask: [.titled], backing: .buffered, defer: false)
+            panel.isReleasedWhenClosed = false
+            panel.contentView = SystemActionPicker(selection: rules[manualRow].target ?? .init(keyCode: 0, flags: 0), language: text.language,
+                onSave: { [weak self] selection in
+                    guard let self, rules.indices.contains(manualRow) else { return }
+                    let row = manualRow; var candidate = rules[row]; candidate.target = selection
+                    closeManual(); _ = commit(candidate, row: row)
+                }, onCancel: { [weak self] in self?.closeManual() })
+            manualPanel = panel; window.beginSheet(panel); return
+        }
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 500, height: 280), styleMask: [.titled], backing: .buffered, defer: false)
         panel.title = manualSource ? text.originalShortcut : text.mappedShortcut
         panel.isReleasedWhenClosed = false

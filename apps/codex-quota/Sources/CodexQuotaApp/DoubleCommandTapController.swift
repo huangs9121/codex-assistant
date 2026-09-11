@@ -7,7 +7,7 @@ import Foundation
 final class DoubleCommandTapController {
     static let isEnabledDefaultsKey = "doubleCommandTapEnabled"
     static let rulesDefaultsKey = "globalKeyMappingRules"
-    static let syntheticEventMarker: Int64 = 0x4351_4B4D
+    static let syntheticEventMarker = SystemActionRunner.syntheticEventMarker
     private let defaults: UserDefaults
     private let eventSink: ((CGEvent) -> Void)?
     private var eventTap: CFMachPort?
@@ -136,6 +136,12 @@ final class DoubleCommandTapController {
             if let target = engine.process(phase: type == .keyDown ? .down : .up, keyCode: keyCode,
                 flags: event.flags.rawValue, isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0,
                 rules: activeRules) {
+                if let action = SystemGestureAction.action(keyCode: target.keyCode, modifierFlags: target.flags) {
+                    if type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                        SystemActionRunner.run(action, eventSink: eventSink)
+                    }
+                    return nil
+                }
                 if target.isFunctionKey {
                     // Fn is a flagsChanged event, not a printable key. Repeats must not retrigger it.
                     if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
@@ -191,6 +197,10 @@ final class DoubleCommandTapController {
         for target in engine.releaseAll() { post(target, keyDown: false) }
     }
     private func post(_ shortcut: KeyMappingShortcut, keyDown: Bool) {
+        if let action = SystemGestureAction.action(keyCode: shortcut.keyCode, modifierFlags: shortcut.flags) {
+            if keyDown { SystemActionRunner.run(action, eventSink: eventSink) }
+            return
+        }
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: shortcut.keyCode, keyDown: keyDown) else { return }
         event.flags = CGEventFlags(rawValue: shortcut.flags)
         if shortcut.isFunctionKey {

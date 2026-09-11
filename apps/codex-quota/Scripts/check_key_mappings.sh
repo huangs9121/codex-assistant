@@ -7,6 +7,7 @@ BIN_DIR="$(swift build --disable-sandbox --package-path "$PACKAGE_ROOT" --show-b
 CHECK_BINARY="$PACKAGE_ROOT/.build/key-mapping-controller-checks"
 trap 'rm -f "$CHECK_BINARY"' EXIT
 swiftc -parse-as-library -I "$BIN_DIR/Modules" \
+    "$PACKAGE_ROOT/Sources/CodexQuotaApp/SystemActionRunner.swift" \
     "$PACKAGE_ROOT/Sources/CodexQuotaApp/AppText.swift" \
     "$PACKAGE_ROOT/Sources/CodexQuotaApp/ModifierTapGesture.swift" \
     "$PACKAGE_ROOT/Sources/CodexQuotaApp/DoubleCommandTapShortcut.swift" \

@@ -147,12 +147,32 @@ struct StatusPanelView: View {
     }
 
     private var resetForecastSection: some View {
-        ResetForecastRow(
-            forecast: resetForecast,
-            now: model.now,
-            text: text,
-            action: onOpenResetAnnouncement
-        )
+        HStack(alignment: .center, spacing: 10) {
+            ResetForecastRow(
+                forecast: resetForecast,
+                now: model.now,
+                text: text,
+                action: onOpenResetAnnouncement
+            )
+            Button {
+                if let url = URL(string: "https://x.com/thsottiaux") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text("Tibo · X")
+                    Image(systemName: "arrow.up.right")
+                }
+                .font(.system(size: 11))
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .buttonHelp(text.language == .simplifiedChinese ? "打开 Tibo 的 X 主页" : "Open Tibo on X")
+            .accessibilityLabel("Tibo · X")
+        }
         .padding(.horizontal, 16)
         .padding(.bottom, 13)
     }

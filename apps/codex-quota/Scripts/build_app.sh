@@ -77,9 +77,14 @@ trap cleanup EXIT
 rm -rf "$TEMP_DIR"
 mkdir -p "$STAGING_APP/Contents/MacOS" "$STAGING_APP/Contents/Resources" "$STAGING_APP/Contents/Library/LaunchServices" "$ICONSET"
 
-swift run --disable-sandbox --package-path "$PACKAGE_ROOT" CodexQuotaCoreTests
-swift build --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64
-BIN_DIR="$(swift build --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64 --show-bin-path)"
+SDK_FLAGS=()
+if [[ -n "${CODEX_QUOTA_SDK:-}" ]]; then
+    SDK_FLAGS=(--sdk "$CODEX_QUOTA_SDK")
+fi
+
+swift run "${SDK_FLAGS[@]}" --build-system native --disable-sandbox --package-path "$PACKAGE_ROOT" CodexQuotaCoreTests
+swift build "${SDK_FLAGS[@]}" --build-system native --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64
+BIN_DIR="$(swift build "${SDK_FLAGS[@]}" --build-system native --disable-sandbox --package-path "$PACKAGE_ROOT" -c release --arch arm64 --show-bin-path)"
 cp "$BIN_DIR/CodexQuotaApp" "$STAGING_APP/Contents/MacOS/CodexQuotaApp"
 cp "$BIN_DIR/CodexQuotaSleepHelper" "$STAGING_APP/Contents/Library/LaunchServices/CodexQuotaSleepHelper"
 

@@ -22,6 +22,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     private var recordingRow: Int?
     private let manualPopover = NSPopover()
     private var manualRow: Int?
+    private var systemActionPanel: NSPanel?
     private var manualKeyCode: UInt16 = 0
     private var manualFlags: UInt64 = 0
     private let manualPreview = NSTextField(labelWithString: "")
@@ -566,13 +567,22 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     @objc private func showManualShortcut(_ sender: NSButton) {
-        manualRow = sender.tag
-        manualKeyCode = rules[sender.tag].keyCode
-        manualFlags = rules[sender.tag].modifierFlags
-        manualPopover.contentViewController = NSViewController()
-        manualPopover.contentViewController?.view = makeManualShortcutView()
-        manualPopover.behavior = .transient
-        manualPopover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        guard let window = sender.window, systemActionPanel == nil, rules.indices.contains(sender.tag) else { return }
+        stopRecording()
+        let row = sender.tag
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 640, height: 570), styleMask: [.titled], backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentView = SystemActionPicker(selection: .init(keyCode: rules[row].keyCode, flags: rules[row].modifierFlags), language: text.language,
+            onSave: { [weak self] selection in
+                guard let self, rules.indices.contains(row) else { return }
+                rules[row].keyCode = selection.keyCode; rules[row].modifierFlags = selection.flags
+                saveRules(); closeSystemActionPanel(); tableView.reloadData()
+            }, onCancel: { [weak self] in self?.closeSystemActionPanel() })
+        systemActionPanel = panel; window.beginSheet(panel)
+    }
+    private func closeSystemActionPanel() {
+        guard let panel = systemActionPanel else { return }
+        panel.sheetParent?.endSheet(panel); panel.orderOut(nil); systemActionPanel = nil
     }
 
     // MARK: - 应用选择器（过滤列）
