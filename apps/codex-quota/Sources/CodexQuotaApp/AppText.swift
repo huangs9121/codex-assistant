@@ -13,7 +13,6 @@ struct AppText {
     var updatedPlaceholder: String { choose("更新时间：--:--:--", "Updated: --:--:--") }
     var nextResetPlaceholder: String { choose("下次重置：--", "Next reset: --") }
     var planPlaceholder: String { choose("当前套餐：--", "Plan: --") }
-    var resetForecastNone: String { choose("重置预告 · 暂无动静", "Reset forecast · quiet") }
     var expectedTimePlaceholder: String { choose("预期时间：--", "Expected: --") }
     var displayStyle: String { choose("展示形式", "Display Style") }
     var identityStyle: String { choose("标识形式", "Identity") }
@@ -88,8 +87,6 @@ struct AppText {
     var moveHint: String { choose("按住 ⌘ 可自由拖动位置", "Hold ⌘ and drag to reposition") }
     var checkForUpdates: String { choose("检查更新…", "Check for Updates…") }
     var quit: String { choose("退出", "Quit") }
-    var resetAnnouncementTooltip: String { choose("在 X 上查看 Tibo 的重置预告", "View Tibo's reset announcement on X") }
-    var resetAnnouncementAccessibility: String { choose("查看 Tibo 的重置预告原帖", "View Tibo's original reset announcement") }
     var launchUnavailableMessage: String { choose("开机自动启动不可用", "Launch at Login Unavailable") }
     var unavailableRetry: String { choose("当前系统无法使用此功能，请稍后重试。", "This feature is unavailable on this system. Try again later.") }
     var cannotEnableLaunch: String { choose("无法开启开机自动启动", "Could Not Enable Launch at Login") }
@@ -150,29 +147,6 @@ struct AppText {
     var weeklyWindow: String { choose("每周窗口", "Weekly window") }
     var quotaWindow: String { choose("额度窗口", "Quota window") }
     var waitingForData: String { choose("等待数据", "Waiting for data") }
-    var resetMonitoringSource: String {
-        choose("来自 Tibo X 动态监测", "From Tibo X monitoring")
-    }
-    var resetCompletedTitle: String {
-        choose("重置已发起 · 额度即将恢复", "Reset started · Quota returning soon")
-    }
-    var resetAnnouncedBadge: String { choose("已预告", "Announced") }
-    var resetCountdownText: ResetForecastCountdownText {
-        ResetForecastCountdownText(
-            hoursMinutesFormat: choose(
-                "还剩 {hours} 小时 {minutes} 分 · 点击查看 X 原帖",
-                "{hours}h {minutes}m left · View on X"
-            ),
-            minutesFormat: choose(
-                "还剩 {minutes} 分 · 点击查看 X 原帖",
-                "{minutes}m left · View on X"
-            ),
-            imminent: choose(
-                "即将重置 · 点击查看 X 原帖",
-                "Reset imminent · View on X"
-            )
-        )
-    }
     var backgroundTask: String { choose("后台任务", "Background task") }
     var unknownTask: String { choose("未知任务", "Unknown task") }
     var settings: String { choose("设置", "Settings") }
@@ -255,24 +229,6 @@ struct AppText {
         choose("当前套餐：\(value)", "Plan: \(value)")
     }
 
-    func resetForecast(_ value: String, linked: Bool) -> String {
-        choose("重置预告：\(value)", "Reset forecast: \(value)") + (linked ? "  ↗" : "")
-    }
-
-    func resetProposalTitle(_ expectedTime: String) -> String {
-        choose(
-            "可能重置 · \(expectedTime)",
-            "Possible reset · \(expectedTime)"
-        )
-    }
-
-    func resetAnnouncedTitle(_ expectedTime: String) -> String {
-        choose(
-            "已预告 · 预计\(expectedTime)重置",
-            "Announced · Reset expected \(expectedTime)"
-        )
-    }
-
     func expectedTime(_ value: String) -> String {
         choose("预期时间：\(value)", "Expected: \(value)")
     }
@@ -341,37 +297,6 @@ struct AppText {
 
     func taskNotificationBody(name: String, time: String) -> String {
         "\(name) · \(time)"
-    }
-
-    func resetNotificationTitle(kind: TiboResetSignalKind) -> String {
-        switch kind {
-        case .proposal:
-            choose("Tibo 提到可能重置 Codex 额度", "Tibo Mentioned a Possible Codex Quota Reset")
-        case .announced:
-            choose("Tibo 已预告 Codex 额度重置", "Tibo Announced a Codex Quota Reset")
-        case .completed:
-            choose("Codex 额度重置已发起", "Codex Quota Reset Started")
-        }
-    }
-
-    func resetNotificationBody(for signal: TiboResetSignal) -> String {
-        switch signal.kind {
-        case .proposal:
-            return choose(
-                "重置预告更新：可能重置，预计\(signal.expectedTimeText(language: language))",
-                "Reset forecast update: possible reset, \(signal.expectedTimeText(language: language))"
-            )
-        case .announced:
-            return choose(
-                "重置预告升级：已预告，预计\(signal.expectedTimeText(language: language))",
-                "Reset forecast upgraded: announced, \(signal.expectedTimeText(language: language))"
-            )
-        case .completed:
-            return choose(
-                "重置预告升级：重置已发起，额度即将恢复",
-                "Reset forecast upgraded: reset started; quota should return soon"
-            )
-        }
     }
 
     private func modifierGestureKeyName(_ keyCode: UInt16) -> String {

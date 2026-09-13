@@ -25,7 +25,8 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var cliProcesses: [String: CodexCLIProcess] = [:]
     @Published private(set) var expandedDesktopThreadGroupIDs: Set<String>
     @Published private(set) var hasCompletedTasks = false
-    @Published private(set) var currentResetSignal: TiboResetSignal?
+    @Published private(set) var resetCalendar: CodexResetCache?
+    @Published private(set) var resetSyncFailed = false
     @Published private(set) var now = Date()
     @Published private(set) var sleepState: ManualSleepState = .off
     @Published private(set) var sleepDetail = ""
@@ -74,8 +75,9 @@ final class StatusPanelModel: ObservableObject {
         notifyContentChange()
     }
 
-    func update(resetSignal: TiboResetSignal?) {
-        currentResetSignal = resetSignal
+    func update(resetCalendar: CodexResetCache?, syncFailed: Bool = false) {
+        self.resetCalendar = resetCalendar
+        resetSyncFailed = syncFailed
         notifyContentChange()
     }
 
