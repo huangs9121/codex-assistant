@@ -26,14 +26,6 @@ struct StatusPanelView: View {
         StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
     }
 
-    private var resetForecast: StatusPanelResetForecast {
-        StatusPanelResetForecast(
-            signal: model.currentResetSignal,
-            quotaSnapshot: model.snapshot,
-            now: model.now
-        )
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             quotaSection
@@ -147,34 +139,50 @@ struct StatusPanelView: View {
     }
 
     private var resetForecastSection: some View {
-        HStack(alignment: .center, spacing: 10) {
-            ResetForecastRow(
-                forecast: resetForecast,
-                now: model.now,
-                text: text,
-                action: onOpenResetAnnouncement
+        VStack(alignment: .leading, spacing: 7) {
+            ResetCalendarRow(
+                event: model.resetCalendar?.feed.upcomingAnnouncement(now: model.now),
+                now: model.now, text: text, action: onOpenResetAnnouncement
             )
-            Button {
-                if let url = URL(string: "https://x.com/thsottiaux") {
-                    NSWorkspace.shared.open(url)
+            HStack(spacing: 9) {
+                Text(resetSyncText)
+                    .foregroundStyle(model.resetSyncFailed || resetVerificationDelayed ? Color.orange : Color.secondary)
+                    .lineLimit(1)
+                    .buttonHelp(resetSyncDetail)
+                Spacer(minLength: 0)
+                Button {
+                    NSWorkspace.shared.open(CodexResetFeed.calendarURL)
+                } label: {
+                    Text(text.language == .simplifiedChinese ? "重置日历 ↗" : "Reset calendar ↗")
                 }
-            } label: {
-                HStack(spacing: 3) {
-                    Text("Tibo · X")
-                    Image(systemName: "arrow.up.right")
-                }
-                .font(.system(size: 11))
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
+                .buttonHelp(text.language == .simplifiedChinese ? "在 AIHOT 查看历史、中文译文和原帖" : "View history, translations and sources on AIHOT")
+                Button("Tibo · X") { NSWorkspace.shared.open(URL(string: "https://x.com/thsottiaux")!) }
+                    .buttonHelp(text.language == .simplifiedChinese ? "打开 Tibo 的 X 主页" : "Open Tibo on X")
             }
+            .font(.system(size: 12))
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .fixedSize()
-            .buttonHelp(text.language == .simplifiedChinese ? "打开 Tibo 的 X 主页" : "Open Tibo on X")
-            .accessibilityLabel("Tibo · X")
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 13)
+    }
+
+    private var resetVerificationDelayed: Bool {
+        model.resetCalendar?.feed.isVerificationDelayed(now: model.now) ?? false
+    }
+
+    private var resetSyncText: String {
+        if model.resetSyncFailed { return text.language == .simplifiedChinese ? "AIHOT · 同步失败" : "AIHOT · Offline" }
+        if resetVerificationDelayed { return text.language == .simplifiedChinese ? "暂无信息" : "No information" }
+        return model.resetCalendar == nil
+            ? (text.language == .simplifiedChinese ? "AIHOT · 同步中" : "AIHOT · Loading") : "AIHOT"
+    }
+
+    private var resetSyncDetail: String {
+        let checked = model.resetCalendar?.feed.checkedAt.map(CodexResetEvent.beijingTime) ?? "--"
+        return text.language == .simplifiedChinese
+            ? "AIHOT 整理，非 OpenAI 官方。来源上次核验：\(checked)（北京时间）。超过 15 分钟未更新会提示暂无信息，不代表你的额度或重置延迟。每 5 分钟同步。"
+            : "AIHOT, an independent source. Last verified: \(checked), Beijing time. Synced every 5 minutes; cached records remain available offline."
     }
 
     private var taskSection: some View {
@@ -475,112 +483,61 @@ struct StatusPanelView: View {
 
 }
 
-private struct ResetForecastRow: View {
-    let forecast: StatusPanelResetForecast
+private struct ResetCalendarRow: View {
+    let event: CodexResetEvent?
     let now: Date
     let text: AppText
     let action: () -> Void
-
     @State private var isHovered = false
 
     var body: some View {
-        if let signal = forecast.signal {
+        if let event {
             Button(action: action) {
-                signalContent(signal)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Image(systemName: event.type == .resetCredit ? "ticket" : "arrow.clockwise")
+                            .foregroundStyle(accent(for: event))
+                        Text(event.kindText(language: text.language))
+                            .font(.system(size: 13, weight: .medium))
+                        Spacer(minLength: 0)
+                        Text(event.statusText(now: now, language: text.language))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(accent(for: event))
+                    }
+                    Text(event.timeText(now: now, language: text.language))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let post = event.latestPost {
+                        Text(text.language == .simplifiedChinese ? post.text : post.originalText)
+                            .font(.system(size: 12))
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(accent(for: event).opacity(isHovered ? 0.14 : 0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .buttonHelp(text.resetAnnouncementTooltip)
-            .accessibilityLabel(text.resetAnnouncementAccessibility)
+            .disabled(event.sourceURL == nil)
+            .buttonHelp(event.detailText(now: now, language: text.language) + (text.language == .simplifiedChinese ? "\n点击查看 X 原帖" : "\nClick to view the source on X"))
+            .accessibilityLabel(event.detailText(now: now, language: text.language))
             .onHover { isHovered = $0 }
         } else {
-            HStack(spacing: 7) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                Text(text.resetForecastNone)
-            }
-            .font(.system(size: 11))
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Label(text.language == .simplifiedChinese ? "重置预告 · 暂无预告" : "Reset forecast · No announcements", systemImage: "dot.radiowaves.left.and.right")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    @ViewBuilder
-    private func signalContent(_ signal: TiboResetSignal) -> some View {
-        switch forecast.state {
-        case .quiet:
-            EmptyView()
-        case .proposal:
-            HStack(alignment: .top, spacing: 8) {
-                Circle()
-                    .fill(.yellow)
-                    .frame(width: 7, height: 7)
-                    .padding(.top, 5)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(
-                        text.resetProposalTitle(
-                            signal.expectedTimeText(
-                                now: now,
-                                language: text.language
-                            )
-                        )
-                    )
-                    .font(.system(size: 13))
-                    Text(text.resetMonitoringSource)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        case .announced:
-            HStack(alignment: .center, spacing: 9) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .foregroundStyle(Color.accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(
-                        text.resetAnnouncedTitle(
-                            signal.expectedTimeText(
-                                now: now,
-                                language: text.language
-                            )
-                        )
-                    )
-                    .font(.system(size: 13))
-                    if let expectedAt = signal.expectedAt {
-                        Text(
-                            ResetForecastCountdownFormatter.string(
-                                until: expectedAt,
-                                now: now,
-                                text: text.resetCountdownText
-                            )
-                        )
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .monospacedDigit()
-                    }
-                }
-                Spacer(minLength: 6)
-                Text(text.resetAnnouncedBadge)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Color.accentColor, in: Capsule())
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                Color.accentColor.opacity(isHovered ? 0.14 : 0.10),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
-        case .completed:
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 7, height: 7)
-                Text(text.resetCompletedTitle)
-                    .font(.system(size: 13))
-            }
-        }
+    private func accent(for event: CodexResetEvent) -> Color {
+        if event.type == .resetCredit { return .orange }
+        return event.status == .confirmed ? .green : .accentColor
     }
 }
 

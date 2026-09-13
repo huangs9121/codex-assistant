@@ -53,34 +53,6 @@ enum StatusPanelPresentationTests {
             run: testWeeklyReset
         ),
         TaskStatusParserTestCase(
-            name: "reset forecast quiet state is always present",
-            run: testQuietResetForecast
-        ),
-        TaskStatusParserTestCase(
-            name: "reset forecast proposal state",
-            run: testProposalResetForecast
-        ),
-        TaskStatusParserTestCase(
-            name: "reset forecast announced state",
-            run: testAnnouncedResetForecast
-        ),
-        TaskStatusParserTestCase(
-            name: "reset forecast completed state",
-            run: testCompletedResetForecast
-        ),
-        TaskStatusParserTestCase(
-            name: "expired reset forecast falls back to quiet",
-            run: testExpiredResetForecast
-        ),
-        TaskStatusParserTestCase(
-            name: "reset forecast countdown covers all boundaries",
-            run: testResetForecastCountdownBoundaries
-        ),
-        TaskStatusParserTestCase(
-            name: "reset forecast notification deduplicates by id and kind",
-            run: testResetNotificationKey
-        ),
-        TaskStatusParserTestCase(
             name: "quota panel supports primary window only",
             run: testPrimaryWindowOnly
         ),
@@ -347,103 +319,6 @@ enum StatusPanelPresentationTests {
             ) == "Sat 08:30"
     }
 
-    private static func testQuietResetForecast() -> Bool {
-        let forecast = StatusPanelResetForecast(
-            signal: nil,
-            quotaSnapshot: nil,
-            now: now
-        )
-        return forecast.state == .quiet && forecast.signal == nil
-    }
-
-    private static func testProposalResetForecast() -> Bool {
-        let signal = resetSignal(kind: .proposal)
-        let forecast = StatusPanelResetForecast(
-            signal: signal,
-            quotaSnapshot: nil,
-            now: now
-        )
-        return forecast.state == .proposal && forecast.signal == signal
-    }
-
-    private static func testAnnouncedResetForecast() -> Bool {
-        let signal = resetSignal(kind: .announced)
-        let forecast = StatusPanelResetForecast(
-            signal: signal,
-            quotaSnapshot: nil,
-            now: now
-        )
-        return forecast.state == .announced && forecast.signal == signal
-    }
-
-    private static func testCompletedResetForecast() -> Bool {
-        let signal = resetSignal(kind: .completed, expectedAt: nil)
-        let forecast = StatusPanelResetForecast(
-            signal: signal,
-            quotaSnapshot: nil,
-            now: now
-        )
-        return forecast.state == .completed && forecast.signal == signal
-    }
-
-    private static func testExpiredResetForecast() -> Bool {
-        let signal = resetSignal(
-            kind: .announced,
-            expectedAt: now.addingTimeInterval(-1)
-        )
-        let forecast = StatusPanelResetForecast(
-            signal: signal,
-            quotaSnapshot: nil,
-            now: now
-        )
-        return forecast.state == .quiet && forecast.signal == nil
-    }
-
-    private static func testResetForecastCountdownBoundaries() -> Bool {
-        let text = ResetForecastCountdownText(
-            hoursMinutesFormat: "{hours}h {minutes}m left",
-            minutesFormat: "{minutes}m left",
-            imminent: "imminent"
-        )
-        return ResetForecastCountdownFormatter.string(
-            until: now.addingTimeInterval(2 * 3_600 + 5 * 60),
-            now: now,
-            text: text
-        ) == "2h 5m left"
-            && ResetForecastCountdownFormatter.string(
-                until: now.addingTimeInterval(59 * 60),
-                now: now,
-                text: text
-            ) == "59m left"
-            && ResetForecastCountdownFormatter.string(
-                until: now.addingTimeInterval(59),
-                now: now,
-                text: text
-            ) == "imminent"
-            && ResetForecastCountdownFormatter.string(
-                until: now.addingTimeInterval(-1),
-                now: now,
-                text: text
-            ) == "imminent"
-    }
-
-    private static func testResetNotificationKey() -> Bool {
-        let proposal = TiboResetNotificationKey(
-            signal: resetSignal(kind: .proposal)
-        )
-        let sameProposal = TiboResetNotificationKey(
-            signal: resetSignal(kind: .proposal)
-        )
-        let announced = TiboResetNotificationKey(
-            signal: resetSignal(kind: .announced)
-        )
-        return !sameProposal.shouldNotify(after: proposal)
-            && announced.shouldNotify(after: proposal)
-            && TiboResetNotificationKey(
-                storageValue: announced.storageValue
-            ) == announced
-    }
-
     private static func testPrimaryWindowOnly() -> Bool {
         let data = quotaData(primary: quotaWindow(remainingPercent: 80))
         return data.primaryWindow != nil && data.secondaryWindow == nil
@@ -474,22 +349,6 @@ enum StatusPanelPresentationTests {
             ) == .weekly
             && StatusPanelQuotaWindowKind(windowDuration: 12 * 3_600) == .generic
             && StatusPanelQuotaWindowKind(windowDuration: nil) == .generic
-    }
-
-    private static func resetSignal(
-        kind: TiboResetSignalKind,
-        expectedAt: Date? = now.addingTimeInterval(3_600)
-    ) -> TiboResetSignal {
-        TiboResetSignal(
-            id: "same-signal",
-            kind: kind,
-            publishedAt: now.addingTimeInterval(-60),
-            text: "Reset signal",
-            url: URL(string: "https://x.com/thsottiaux/status/123")!,
-            signalStrength: 80,
-            expectedAt: expectedAt,
-            expectationHint: nil
-        )
     }
 
     private static func quotaWindow(

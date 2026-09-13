@@ -3,28 +3,6 @@ import CodexQuotaCore
 import CodexQuotaUI
 import UserNotifications
 
-private extension DisplayPreferences {
-    var lastNotifiedResetSignalKey: TiboResetNotificationKey? {
-        get {
-            UserDefaults.standard.string(
-                forKey: TiboResetNotificationKey.defaultsKey
-            ).flatMap(TiboResetNotificationKey.init(storageValue:))
-        }
-        set {
-            if let newValue {
-                UserDefaults.standard.set(
-                    newValue.storageValue,
-                    forKey: TiboResetNotificationKey.defaultsKey
-                )
-            } else {
-                UserDefaults.standard.removeObject(
-                    forKey: TiboResetNotificationKey.defaultsKey
-                )
-            }
-        }
-    }
-}
-
 @MainActor
 private final class MenuChoiceRow: NSView {
     private let checkmarkLabel = NSTextField(labelWithString: "✓")
@@ -155,14 +133,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var resetMonitorTimer: Timer?
     private var accessibilityPermissionTimer: Timer?
     private var availableRelease: GitHubRelease?
-    private var currentResetSignal: TiboResetSignal?
+    private var currentResetCalendar: CodexResetCache?
+    private var resetNotificationsInFlight: Set<String> = []
     private var isRefreshing = false
     private var isUpdateCheckInFlight = false
     private var isUpdateInstallInFlight = false
     private var isResetMonitorInFlight = false
     private let updateController = GitHubUpdateController()
     private let automaticUpdateInstaller = AutomaticUpdateInstaller()
-    private let resetMonitorController = TiboResetMonitorController()
+    private let resetMonitorController = CodexResetMonitorController()
     private let launchAtLoginController = LaunchAtLoginController()
     private let displaySleepController = DisplaySleepController()
     private lazy var taskSleepController = TaskSleepController(language: language)
@@ -261,8 +240,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             )
         }
         taskSleepController.resetOnLaunch()
-        currentResetSignal = preferences.latestResetSignal
-        panelModel.update(resetSignal: currentResetSignal)
+        currentResetCalendar = preferences.resetCalendarCache
+        panelModel.update(resetCalendar: currentResetCalendar)
         configureStatusItem()
         refreshAccessibilityControllers()
         refresh()
@@ -297,11 +276,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         updatePolicyTimer = updateTimer
 
         configureResetNotifications()
-        checkTiboResetSignals()
+        checkResetCalendar()
         let resetTimer = Timer(
-            timeInterval: 300,
+            timeInterval: CodexResetFeed.pollInterval,
             target: self,
-            selector: #selector(checkTiboResetSignalsFromTimer),
+            selector: #selector(checkResetCalendarFromTimer),
             userInfo: nil,
             repeats: true
         )
@@ -774,8 +753,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         checkForUpdatesAutomatically()
     }
 
-    @objc private func checkTiboResetSignalsFromTimer() {
-        checkTiboResetSignals()
+    @objc private func checkResetCalendarFromTimer() {
+        checkResetCalendar()
     }
 
     private func checkForUpdatesAutomatically() {
@@ -1138,16 +1117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     @objc private func openCurrentResetAnnouncement() {
-        let now = Date()
-        guard
-            let signal = currentResetSignal,
-            signal.shouldDisplay(at: now, quotaSnapshot: currentSnapshot)
-        else {
-            return
-        }
+        guard let url = currentResetCalendar?.feed.upcomingAnnouncement()?.sourceURL else { return }
         settingsMenu.cancelTracking()
         panelController.close()
-        NSWorkspace.shared.open(signal.url)
+        NSWorkspace.shared.open(url)
     }
 
     private func resumeTaskSession(
@@ -1299,75 +1272,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound]) { [weak self] _, _ in
             Task { @MainActor [weak self] in
-                self?.checkTiboResetSignals()
+                self?.checkResetCalendar()
             }
         }
     }
 
-    private func checkTiboResetSignals() {
-        guard !isResetMonitorInFlight else {
-            return
-        }
+    private func checkResetCalendar() {
+        guard !isResetMonitorInFlight else { return }
         isResetMonitorInFlight = true
-        resetMonitorController.check { [weak self] result in
-            guard let self else {
-                return
-            }
+        resetMonitorController.check(cache: currentResetCalendar) { [weak self] result in
+            guard let self else { return }
             isResetMonitorInFlight = false
             switch result {
-            case let .signal(signal):
-                currentResetSignal = signal
-                preferences.latestResetSignal = signal
-                panelModel.update(resetSignal: signal)
-                if
-                    let signal,
-                    signal.shouldDisplay(
-                        at: Date(),
-                        quotaSnapshot: currentSnapshot
-                    ),
-                    TiboResetNotificationKey(signal: signal).shouldNotify(
-                        after: preferences.lastNotifiedResetSignalKey
-                    )
-                {
-                    preferences.lastNotifiedResetSignalKey = TiboResetNotificationKey(
-                        signal: signal
-                    )
-                    sendResetNotification(for: signal)
+            case var .snapshot(cache):
+                // Delivery may finish while this request is in flight.
+                cache.seenNoticeKeys.formUnion(currentResetCalendar?.seenNoticeKeys ?? [])
+                currentResetCalendar = cache
+                preferences.resetCalendarCache = cache
+                panelModel.update(resetCalendar: cache)
+                guard !cache.feed.isVerificationDelayed() else { return }
+                for event in cache.feed.notificationCandidates(seen: cache.seenNoticeKeys) {
+                    sendResetNotification(for: event)
                 }
             case .failure:
-                break
+                panelModel.update(resetCalendar: currentResetCalendar, syncFailed: true)
             }
         }
     }
 
-    private func sendResetNotification(for signal: TiboResetSignal) {
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { [weak self] settings in
-            guard
-                settings.authorizationStatus == .authorized
-                    || settings.authorizationStatus == .provisional
-            else {
+    private func sendResetNotification(for event: CodexResetEvent) {
+        let key = event.noticeKey
+        guard !resetNotificationsInFlight.contains(key), let url = event.sourceURL else { return }
+        resetNotificationsInFlight.insert(key)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { resetNotificationsInFlight.remove(key) }
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+                markResetNoticeSeen(key)
                 return
             }
-            Task { @MainActor [weak self] in
-                self?.deliverResetNotification(for: signal)
+            let content = UNMutableNotificationContent()
+            content.title = event.kindText(language: text.language) + " · " + event.statusText(language: text.language)
+            content.body = event.detailText(language: text.language)
+            content.sound = .default
+            content.userInfo = ["url": url.absoluteString]
+            let request = UNNotificationRequest(identifier: "aihot-reset-" + key, content: content, trigger: nil)
+            do {
+                try await center.add(request)
+                markResetNoticeSeen(key)
+            } catch {
+                // Leave this key pending so the next successful sync can retry delivery.
             }
         }
     }
 
-    private func deliverResetNotification(for signal: TiboResetSignal) {
-        let content = UNMutableNotificationContent()
-        content.title = text.resetNotificationTitle(kind: signal.kind)
-        content.body = text.resetNotificationBody(for: signal)
-        content.sound = .default
-        content.userInfo = ["url": signal.url.absoluteString]
-
-        let request = UNNotificationRequest(
-            identifier: "tibo-reset-\(signal.id)-\(signal.kind.rawValue)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
+    private func markResetNoticeSeen(_ key: String) {
+        currentResetCalendar?.seenNoticeKeys.insert(key)
+        preferences.resetCalendarCache = currentResetCalendar
     }
 
     func userNotificationCenter(

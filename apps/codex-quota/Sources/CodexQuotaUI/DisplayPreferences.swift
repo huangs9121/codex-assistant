@@ -11,9 +11,8 @@ public struct DisplayPreferences {
     public static let lastUpdateCheckSuccessKey = "lastUpdateCheckSuccess"
     public static let lastUpdateCheckFailureKey = "lastUpdateCheckFailure"
     public static let lastPromptedVersionKey = "lastPromptedVersion"
-    public static let lastNotifiedResetSignalIDKey = "lastNotifiedResetSignalID"
     public static let quotaResetNotificationStateKey = "quotaResetNotificationState"
-    public static let latestResetSignalKey = "latestResetSignal"
+    public static let resetCalendarCacheKey = "aihotResetCalendarCache"
 
     private let defaults: UserDefaults
 
@@ -142,15 +141,6 @@ public struct DisplayPreferences {
         }
     }
 
-    public var lastNotifiedResetSignalID: String? {
-        get {
-            defaults.string(forKey: Self.lastNotifiedResetSignalIDKey)
-        }
-        set {
-            defaults.set(newValue, forKey: Self.lastNotifiedResetSignalIDKey)
-        }
-    }
-
     public var quotaResetNotificationState: QuotaResetNotificationState? {
         get {
             guard
@@ -180,11 +170,11 @@ public struct DisplayPreferences {
         }
     }
 
-    public var latestResetSignal: TiboResetSignal? {
+    public var resetCalendarCache: CodexResetCache? {
         get {
             guard
-                let data = defaults.data(forKey: Self.latestResetSignalKey),
-                let signal = try? JSONDecoder().decode(TiboResetSignal.self, from: data)
+                let data = defaults.data(forKey: Self.resetCalendarCacheKey),
+                let signal = try? JSONDecoder().decode(CodexResetCache.self, from: data)
             else {
                 return nil
             }
@@ -192,10 +182,10 @@ public struct DisplayPreferences {
         }
         set {
             guard let newValue, let data = try? JSONEncoder().encode(newValue) else {
-                defaults.removeObject(forKey: Self.latestResetSignalKey)
+                defaults.removeObject(forKey: Self.resetCalendarCacheKey)
                 return
             }
-            defaults.set(data, forKey: Self.latestResetSignalKey)
+            defaults.set(data, forKey: Self.resetCalendarCacheKey)
         }
     }
 }
