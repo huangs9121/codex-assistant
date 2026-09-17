@@ -7,6 +7,8 @@
 校验 releases/latest 是否就是 version.env 中的版本，以及旧版客户端
 发现、校验、下载该版本所需的全部条件。全部输出 PASS 才算通过。
 """
+import tempfile
+import plistlib
 import hashlib
 import json
 import re
@@ -88,6 +90,28 @@ if assets:
     ).read()
     check("下载 SHA-256 与 digest 一致", hashlib.sha256(data).hexdigest() == digest[7:])
     check("下载大小与声明一致", len(data) == a["size"], str(len(data)))
+    # Match the old client's extraction contract, not just HTTP and digest checks.
+    with tempfile.TemporaryDirectory(prefix="codex-update-chain-") as temp:
+        temp = Path(temp)
+        archive = temp / "update.zip"
+        archive.write_bytes(data)
+        expanded = temp / "expanded"
+        expanded.mkdir()
+        extraction = subprocess.run(["/usr/bin/ditto", "-x", "-k", str(archive), str(expanded)], capture_output=True)
+        check("旧客户端解压成功", extraction.returncode == 0)
+        items = list(expanded.iterdir())
+        valid_root = len(items) == 1 and items[0].name == "Codex Quota.app"
+        check("旧客户端要求 ZIP 根目录只有应用", valid_root, str([p.name for p in items]))
+        if valid_root:
+            app = items[0]
+            check("应用不含符号链接", not any(p.is_symlink() for p in app.rglob("*")))
+            info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+            check("应用版本与 Release 一致", info.get("CFBundleShortVersionString") == current)
+            check("Bundle ID 正确", info.get("CFBundleIdentifier") == "local.openclaw.codexquota")
+            check("应用签名有效", subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True).returncode == 0)
+            binary = app / "Contents/MacOS" / info["CFBundleExecutable"]
+            check("arm64 架构", subprocess.run(["/usr/bin/lipo", str(binary), "-verify_arch", "arm64"], capture_output=True).returncode == 0)
+
 
 print("---")
 print("RESULT:", "ALL-PASS" if failures == 0 else f"{failures} FAILURES")
