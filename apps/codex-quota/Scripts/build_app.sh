@@ -190,6 +190,10 @@ fi
 codesign --verify --deep --strict "$STAGING_APP"
 
 ditto -c -k --sequesterRsrc --keepParent "$STAGING_APP" "$STAGING_ZIP"
+# Include the installation guide alongside the app without altering its signature.
+if [[ -f "$WORKSPACE_ROOT/docs/打开说明.txt" ]]; then
+    /usr/bin/zip -j "$STAGING_ZIP" "$WORKSPACE_ROOT/docs/打开说明.txt" >/dev/null
+fi
 chmod 644 "$STAGING_ZIP"
 unzip -t "$STAGING_ZIP" >/dev/null
 

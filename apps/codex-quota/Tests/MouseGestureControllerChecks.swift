@@ -8,6 +8,18 @@ enum MouseGestureControllerChecks {
         let suite = "CodexQuotaGestureControllerChecks.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
+        let fresh = MouseGestureController(defaults: defaults)
+        precondition(fresh.rules.count == 7 && !fresh.preferences.isEnabled)
+        precondition(!fresh.startIfPermitted() && !fresh.isRunning)
+        let nativeClick = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown,
+            mouseCursorPosition: .zero, mouseButton: .right)!
+        precondition(fresh.handle(type: .rightMouseDown, event: nativeClick,
+            bundleIdentifier: "com.apple.Safari", targetPID: 123, pointedBundleIdentifier: nil)?.takeUnretainedValue() === nativeClick)
+        MouseGestureController.saveRules(fresh.rules, to: defaults)
+        fresh.reloadRules()
+        precondition(!fresh.preferences.isEnabled && !fresh.startIfPermitted())
+        print("PASS: fresh presets stay disabled before and after saving; native right-click passes through")
+        defaults.removePersistentDomain(forName: suite)
         let rules = [MouseGestureRule(gesture: [.down], keyCode: 17, modifierFlags: KeyboardShortcut.commandFlag, firesImmediately: true)]
         MouseGestureController.saveRules(rules, to: defaults)
         let controller = MouseGestureController(defaults: defaults)

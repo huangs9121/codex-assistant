@@ -21,7 +21,12 @@ public struct MouseGesturePreferences: Equatable, Sendable {
     public private(set) var excludedApplications: [MouseGestureExcludedApplication]
 
     public init(defaults: UserDefaults) {
-        isEnabled = defaults.object(forKey: Self.enabledDefaultsKey) as? Bool ?? true
+        isEnabled = defaults.object(forKey: Self.enabledDefaultsKey) as? Bool
+            ?? (defaults.object(forKey: "mouseGestureRules") != nil)
+        // Freeze the migration result before a fresh user edits or saves preset rules.
+        if defaults.object(forKey: Self.enabledDefaultsKey) == nil {
+            defaults.set(isEnabled, forKey: Self.enabledDefaultsKey)
+        }
         // Missing settings migrate to Blender; an explicitly empty list stays empty.
         excludedApplications = defaults.data(forKey: Self.exclusionsDefaultsKey)
             .flatMap { try? JSONDecoder().decode([MouseGestureExcludedApplication].self, from: $0) }

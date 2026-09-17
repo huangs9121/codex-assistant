@@ -25,6 +25,7 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var cliProcesses: [String: CodexCLIProcess] = [:]
     @Published private(set) var expandedDesktopThreadGroupIDs: Set<String>
     @Published private(set) var hasCompletedTasks = false
+    @Published private(set) var showsResetForecast = false
     @Published private(set) var resetCalendar: CodexResetCache?
     @Published private(set) var resetSyncFailed = false
     @Published private(set) var now = Date()
@@ -72,6 +73,11 @@ final class StatusPanelModel: ObservableObject {
             expandedDesktopThreadGroupIDs.insert(id)
         }
         store.expandedDesktopThreadGroupIDs = expandedDesktopThreadGroupIDs
+        notifyContentChange()
+    }
+
+    func update(showsResetForecast: Bool) {
+        self.showsResetForecast = showsResetForecast
         notifyContentChange()
     }
 

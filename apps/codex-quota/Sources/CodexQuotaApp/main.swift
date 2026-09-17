@@ -123,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     )
     private var styleItems: [BatteryStyle: NSMenuItem] = [:]
     private var identityItems: [StatusIdentityMode: NSMenuItem] = [:]
+    private var resetForecastToggleItem: NSMenuItem?
     private var resetToggleItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
     private var isChangingTaskSleep = false
@@ -240,6 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             )
         }
         taskSleepController.resetOnLaunch()
+        panelModel.update(showsResetForecast: preferences.showsResetForecast)
         currentResetCalendar = preferences.resetCalendarCache
         panelModel.update(resetCalendar: currentResetCalendar)
         configureStatusItem()
@@ -366,6 +368,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         resetToggleItem = resetItem
         settingsMenu.addItem(resetItem)
+
+        let forecastItem = makeChoiceItem(
+            title: text.showResetForecast,
+            tag: 0,
+            action: #selector(toggleResetForecast(_:))
+        )
+        resetForecastToggleItem = forecastItem
+        settingsMenu.addItem(forecastItem)
 
         let loginItem = makeChoiceItem(
             title: text.launchAtLogin,
@@ -526,6 +536,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         resetToggleItem?.state = showsReset ? .on : .off
         (resetToggleItem?.view as? MenuChoiceRow)?.isSelected = showsReset
 
+        let showsForecast = preferences.showsResetForecast
+        resetForecastToggleItem?.state = showsForecast ? .on : .off
+        (resetForecastToggleItem?.view as? MenuChoiceRow)?.isSelected = showsForecast
+
         let launchState = launchAtLoginController.state
         let launchTitle: String
         let launchSelected: Bool
@@ -609,6 +623,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         preferences.showsResetCountdownInStatusBar.toggle()
         syncMenuState()
         updateStatusPresentation()
+    }
+
+    @objc private func toggleResetForecast(_ sender: NSButton) {
+        preferences.showsResetForecast.toggle()
+        panelModel.update(showsResetForecast: preferences.showsResetForecast)
+        syncMenuState()
     }
 
     @objc private func toggleLaunchAtLogin(_ sender: NSButton) {
@@ -746,6 +766,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     @objc private func refreshAccessibilityPermissionFromTimer() {
         refreshAccessibilityControllers()
+        // Fast completion detection is needed only while holding a sleep assertion.
+        // Otherwise, task scans retain the normal 15-second refresh cadence.
+        if displaySleepController.isActive {
+            refreshTaskStatuses()
+        }
         syncMenuState()
     }
 
@@ -973,6 +998,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             guard let self else {
                 return
             }
+            displaySleepController.update(hasRunningTasks: result.hasRunningTasks)
             // Task scans have no authoritative liveness signal. Manual intent
             // alone controls renewal, so scanner results must not change it.
             // taskSleepController.update(hasRunningTasks: result.hasRunningTasks)

@@ -5,7 +5,8 @@ import IOKit.pwr_mgt
 @MainActor
 final class DisplaySleepController {
     private var assertion: IOPMAssertionID?
-    private var wakeObserver: NSObjectProtocol?
+    private var hasRunningTasks = false
+    var isActive: Bool { assertion != nil }
     private var isStarting = false
     private let displaySleep: @Sendable () async -> Bool
 
@@ -30,19 +31,16 @@ final class DisplaySleepController {
         isStarting = true
         defer { isStarting = false }
         stop()
-        var identifier: IOPMAssertionID = 0
-        let result = IOPMAssertionCreateWithName(
-            kIOPMAssertionTypeNoIdleSleep as CFString,
-            IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "Codex Quota: work while display is asleep" as CFString,
-            &identifier
-        )
-        guard result == kIOReturnSuccess else { throw Failure.protection }
-        assertion = identifier
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.stop() }
+        if hasRunningTasks {
+            var identifier: IOPMAssertionID = 0
+            let result = IOPMAssertionCreateWithName(
+                kIOPMAssertionTypeNoIdleSleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "Codex Quota: running tasks while display is asleep" as CFString,
+                &identifier
+            )
+            guard result == kIOReturnSuccess else { throw Failure.protection }
+            assertion = identifier
         }
         if !(await displaySleep()) {
             stop()
@@ -65,11 +63,13 @@ final class DisplaySleepController {
         }.value
     }
 
+    /// Release synchronously on the first scan with no executing tasks.
+    func update(hasRunningTasks: Bool) {
+        self.hasRunningTasks = hasRunningTasks
+        if !hasRunningTasks { stop() }
+    }
+
     func stop() {
-        if let wakeObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
-            self.wakeObserver = nil
-        }
         if let assertion {
             IOPMAssertionRelease(assertion)
             self.assertion = nil

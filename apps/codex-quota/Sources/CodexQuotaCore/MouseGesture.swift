@@ -329,3 +329,22 @@ public enum MouseGestureRuleMatcher {
         return patternIndex == pattern.endIndex
     }
 }
+
+/// Product presets apply only when no rules have ever been saved.
+public enum MouseGestureRuleDefaults {
+    public static let rules: [MouseGestureRule] = [
+        MouseGestureRule(id: UUID(uuidString: "12D84F2D-05B9-40EB-8F02-9050337011BD")!, gesture: [.up], keyCode: 65535, modifierFlags: 0, note: "控制台", firesImmediately: true),
+        MouseGestureRule(id: UUID(uuidString: "E2C4ADEB-5147-420B-B265-2981CE94384F")!, gesture: [.down], keyCode: 17, modifierFlags: 1048576, note: "浏览器：新建tab", firesImmediately: false),
+        MouseGestureRule(id: UUID(uuidString: "FCA63327-60D8-41FC-B3D6-2FFF8C8DC58E")!, gesture: [.down, .right], keyCode: 13, modifierFlags: 1048576, note: "关闭", firesImmediately: true),
+        MouseGestureRule(id: UUID(uuidString: "8F161668-5884-4D6B-94E4-7D98013960F2")!, gesture: [.right], keyCode: 48, modifierFlags: 262144, note: "浏览器：下一个标签", firesImmediately: true),
+        MouseGestureRule(id: UUID(uuidString: "7C1221E8-BF64-437F-A7E8-4AD42A150302")!, gesture: [.left], keyCode: 48, modifierFlags: 393216, note: "浏览器：上一个标签", firesImmediately: true),
+        MouseGestureRule(id: UUID(uuidString: "811A5345-16AF-4E34-99C1-E12482D889CA")!, gesture: [.downLeft], keyCode: 46, modifierFlags: 1048576, note: "最小化", firesImmediately: false),
+        MouseGestureRule(id: UUID(uuidString: "F127EAE2-71AB-4397-BBF4-277B41401FAD")!, gesture: [.upRight], keyCode: 51, modifierFlags: 1048576, note: "删除", firesImmediately: false),
+    ]
+
+    public static func load(from defaults: UserDefaults) -> [MouseGestureRule] {
+        guard defaults.object(forKey: "mouseGestureRules") != nil else { return rules }
+        guard let data = defaults.data(forKey: "mouseGestureRules") else { return [] }
+        return (try? JSONDecoder().decode([MouseGestureRule].self, from: data)) ?? []
+    }
+}

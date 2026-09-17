@@ -6,6 +6,7 @@ public struct DisplayPreferences {
     public static let batteryStyleKey = "batteryStyle"
     public static let showsCodexLabelKey = "showsCodexLabel"
     public static let statusIdentityModeKey = "statusIdentityMode"
+    public static let showsResetForecastKey = "showsResetForecast"
     public static let showsResetCountdownInStatusBarKey = "showsResetCountdownInStatusBar"
     public static let hasShownAutoRefreshNoticeKey = "hasShownAutoRefreshNotice"
     public static let lastUpdateCheckSuccessKey = "lastUpdateCheckSuccess"
@@ -85,6 +86,11 @@ public struct DisplayPreferences {
         set {
             defaults.set(newValue, forKey: Self.showsResetCountdownInStatusBarKey)
         }
+    }
+
+    public var showsResetForecast: Bool {
+        get { defaults.bool(forKey: Self.showsResetForecastKey) }
+        set { defaults.set(newValue, forKey: Self.showsResetForecastKey) }
     }
 
     public var hasShownAutoRefreshNotice: Bool {

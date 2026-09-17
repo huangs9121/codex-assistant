@@ -16,6 +16,7 @@ struct AppText {
     var expectedTimePlaceholder: String { choose("预期时间：--", "Expected: --") }
     var displayStyle: String { choose("展示形式", "Display Style") }
     var identityStyle: String { choose("标识形式", "Identity") }
+    var showResetForecast: String { choose("显示重置预告", "Show Reset Announcements") }
     var showResetTime: String { choose("显示重置时间", "Show Reset Time") }
     var launchAtLogin: String { choose("开机自动启动", "Launch at Login") }
     var taskSleep: String { choose("手动合盖不睡眠", "Keep Awake Manually (Lid Closed)") }

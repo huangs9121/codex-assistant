@@ -29,7 +29,9 @@ struct StatusPanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             quotaSection
-            resetForecastSection
+            if model.showsResetForecast {
+                resetForecastSection
+            }
             if !model.tasks.isEmpty {
                 Divider()
                 taskSection
@@ -342,7 +344,9 @@ struct StatusPanelView: View {
             manualSleepButton
             Button(action: onNodeScores) {
                 Image(systemName: "network").frame(width: 24, height: 24)
-            }.buttonStyle(.plain).buttonHelp("节点评分与本地排行榜").accessibilityLabel("节点评分")
+            }.buttonStyle(.plain).buttonHelp(text.language == .simplifiedChinese
+                ? "节点评分：测试当前网络节点的 Codex、Claude Code、下载、依赖、视频和 IP 信誉，查看各项结果与本地历史排行榜。切换节点后可重新测试、比较；评分仅供参考，不代表账号安全保证。"
+                : "Node scores: test the current connection for Codex, Claude Code, downloads, dependencies, video and IP reputation. Compare results with local history after switching nodes. Scores are indicative, not an account-safety guarantee.").accessibilityLabel("节点评分")
             Button(action: onDisplaySleep) {
                 Image(systemName: "display")
                     .overlay(alignment: .topTrailing) {
@@ -354,8 +358,8 @@ struct StatusPanelView: View {
             }
             .buttonStyle(.plain)
             .buttonHelp(text.language == .simplifiedChinese
-                ? "熄屏继续工作：临时防休眠，亮屏后自动结束。请插电、勿合盖。"
-                : "Turn display off and keep working until it wakes. Keep plugged in and lid open.")
+                ? "熄屏继续工作：任务执行期间防休眠，全部任务结束后立即恢复正常休眠。请插电、勿合盖。"
+                : "Turn display off; prevent idle sleep while tasks run and restore normal sleep when all tasks finish. Keep plugged in and lid open.")
             .accessibilityLabel(text.language == .simplifiedChinese ? "熄屏继续工作" : "Turn display off and keep working")
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 1) {
@@ -406,8 +410,15 @@ struct StatusPanelView: View {
         }
         .buttonStyle(.plain)
         .disabled(model.sleepState == .pending)
-        .buttonHelp(manualSleepStatusText)
+        .buttonHelp(manualSleepHelpText)
         .accessibilityLabel(manualSleepStatusText)
+    }
+
+    private var manualSleepHelpText: String {
+        let description = text.language == .simplifiedChinese
+            ? "点击切换合盖防睡眠：开启后即使合盖也保持电脑运行，任务结束不会自动关闭；再次点击关闭或退出应用后解除保护，重启默认关闭。首次使用需管理员授权，请保持通风。"
+            : "Click to toggle keep-awake, including with the lid closed. It stays on after tasks finish until you turn it off or quit; restarting leaves it off. First use requires administrator approval. Keep the Mac ventilated."
+        return "\(manualSleepStatusText)。\n\(description)"
     }
 
     private var manualSleepStatusText: String {

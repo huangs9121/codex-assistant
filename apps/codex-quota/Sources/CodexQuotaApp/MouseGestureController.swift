@@ -118,8 +118,7 @@ final class MouseGestureController: NSObject {
     }
 
     static func loadRules(from defaults: UserDefaults) -> [MouseGestureRule] {
-        guard let data = defaults.data(forKey: rulesDefaultsKey) else { return [] }
-        return (try? JSONDecoder().decode([MouseGestureRule].self, from: data)) ?? []
+        MouseGestureRuleDefaults.load(from: defaults)
     }
 
     static func saveRules(_ rules: [MouseGestureRule], to defaults: UserDefaults) {
