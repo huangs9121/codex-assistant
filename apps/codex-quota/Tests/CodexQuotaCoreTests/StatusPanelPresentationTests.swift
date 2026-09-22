@@ -49,6 +49,10 @@ enum StatusPanelPresentationTests {
             run: testResetCountdown
         ),
         TaskStatusParserTestCase(
+            name: "exact reset time preserves minutes across date and time zone boundaries",
+            run: testExactResetTime
+        ),
+        TaskStatusParserTestCase(
             name: "status panel weekly reset follows locale and time zone",
             run: testWeeklyReset
         ),
@@ -292,6 +296,18 @@ enum StatusPanelPresentationTests {
             && ResetCountdownFormatter.panelCountdownValue(
                 resetsAt: Date(timeIntervalSince1970: 1e308), now: now
             ) == nil
+    }
+
+    private static func testExactResetTime() -> Bool {
+        let reset = ISO8601DateFormatter().date(from: "2026-12-31T18:07:59Z")!
+        let beijing = TimeZone(secondsFromGMT: 8 * 3_600)!
+        let utc = TimeZone(secondsFromGMT: 0)!
+        return ResetCountdownFormatter.exactResetValue(resetsAt: reset, timeZone: beijing)
+            == "2027年1月1日 02:07（GMT+08:00）"
+            && ResetCountdownFormatter.exactResetValue(resetsAt: reset, timeZone: utc, language: .english)
+            == "Dec 31, 2026 18:07 (GMT+00:00)"
+            && ResetCountdownFormatter.exactResetValue(resetsAt: nil) == nil
+            && ResetCountdownFormatter.exactResetValue(resetsAt: Date(timeIntervalSince1970: .infinity)) == nil
     }
 
     private static func testWeeklyReset() -> Bool {

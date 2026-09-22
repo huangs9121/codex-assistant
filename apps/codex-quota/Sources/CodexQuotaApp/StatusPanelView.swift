@@ -112,10 +112,7 @@ struct StatusPanelView: View {
                 percent: window.remainingPercent,
                 height: 5
             )
-            Text(primaryResetLabel(for: window))
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
+            resetTimeRow(primaryResetLabel(for: window), window: window)
         }
     }
 
@@ -133,11 +130,41 @@ struct StatusPanelView: View {
                 Spacer(minLength: 0)
             }
             QuotaProgressBar(percent: window.remainingPercent, height: 4)
-            Text(secondaryResetLabel(for: window))
-                .font(.system(size: 11))
+            resetTimeRow(secondaryResetLabel(for: window), window: window)
+        }
+    }
+
+    private func resetTimeRow(_ label: String, window: StatusPanelQuotaWindow) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
+            if let reset = window.resetsAt, reset.timeIntervalSince1970.isFinite {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                    .resetTimeHelp(resetTimeHelp(for: reset))
+                    .accessibilityLabel(text.language == .simplifiedChinese ? "查看重置时间" : "View reset time")
+            }
         }
+        .font(.system(size: 11))
+    }
+
+    private func resetTimeHelp(for date: Date) -> ResetTimeHelp {
+        let formatter = DateFormatter()
+        formatter.locale = text.language.locale
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = text.language == .simplifiedChinese ? "yyyy年M月d日 HH:mm" : "MMM d, yyyy HH:mm"
+        let value = formatter.string(from: date)
+        formatter.dateFormat = "ZZZZ"
+        let zoneName = TimeZone.current.identifier == "Asia/Shanghai"
+            ? (text.language == .simplifiedChinese ? "北京时间" : "Beijing time")
+            : (text.language == .simplifiedChinese ? "本地时间" : "Local time")
+        return ResetTimeHelp(
+            title: text.language == .simplifiedChinese ? "重置时间" : "Reset time",
+            date: value, timeZone: "\(zoneName) · \(formatter.string(from: date))"
+        )
     }
 
     private var resetForecastSection: some View {
