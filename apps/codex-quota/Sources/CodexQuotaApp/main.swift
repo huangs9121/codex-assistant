@@ -339,13 +339,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func confirmClearCompletedClaudeSessions() {
-        let alert = NSAlert()
-        alert.messageText = "清理已完成的 Claude 会话？"
-        alert.informativeText = "只从趁手的列表中隐藏，不会归档或删除 Claude 里的会话；运行中的会话仍会显示。"
-        alert.addButton(withTitle: "清理完成项")
-        alert.addButton(withTitle: "取消")
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runWithButtonHelp() == .alertFirstButtonReturn else { return }
+        guard confirmClear(
+            title: "清理已完成的 Claude 会话？",
+            detail: "只从趁手的列表中隐藏，不会归档或删除 Claude 里的会话；运行中的会话仍会显示。",
+            skipKey: "skipClearClaudeSessionsConfirmation"
+        ) else { return }
         panelModel.hideCompletedClaudeSessions()
     }
 
@@ -1264,15 +1262,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             confirmClearCompletedClaudeSessions()
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "清理已完成的任务？"
-        alert.informativeText = "从列表中移除已完成项，保留运行中、状态未知和终端占用的任务。不会删除项目源码或工作区。"
-        alert.addButton(withTitle: "清理完成项")
-        alert.addButton(withTitle: "取消")
-        NSApp.activate(ignoringOtherApps: true)
-        guard alert.runWithButtonHelp() == .alertFirstButtonReturn else { return }
+        guard confirmClear(
+            title: "清理已完成的任务？",
+            detail: "从列表中移除已完成项，保留运行中、状态未知和终端占用的任务。不会删除项目源码或工作区。",
+            skipKey: "skipClearCompletedTasksConfirmation"
+        ) else { return }
         archiveCompletedTasks()
         clearFinishedDesktopThreads()
+    }
+
+    /// Clearing only removes finished items from the list, so the user may turn the prompt off.
+    /// The choice is saved only when the user goes ahead with the clearing.
+    private func confirmClear(title: String, detail: String, skipKey: String) -> Bool {
+        if UserDefaults.standard.bool(forKey: skipKey) { return true }
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "清理完成项")
+        alert.addButton(withTitle: "取消")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "不再提醒"
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runWithButtonHelp() == .alertFirstButtonReturn else { return false }
+        if alert.suppressionButton?.state == .on { UserDefaults.standard.set(true, forKey: skipKey) }
+        return true
     }
 
     private func clearFinishedDesktopThreads() {

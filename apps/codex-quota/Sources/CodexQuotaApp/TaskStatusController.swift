@@ -55,9 +55,10 @@ final class TaskStatusController {
                     .standardizedFileURL
             ]
         } else {
-            let workspaceDirectory = URL(
-                fileURLWithPath:
-                    "/Users/openclaw/Projects/codex助手",
+            // The workspace that hosts `.codex-tasks`, relative to the current home folder so the
+            // same build finds it on any Mac and account.
+            let workspaceDirectory = homeDirectory.appendingPathComponent(
+                "Projects/codex助手",
                 isDirectory: true
             )
             let appsDirectory = workspaceDirectory.appendingPathComponent(
