@@ -425,7 +425,7 @@ private struct OnboardingView: View {
                         .foregroundStyle(GuideStyle.quiet)
                     Text("当前没有启用便捷操作")
                         .font(.system(size: 13, weight: .medium))
-                    Text("以后可随时从右上角“设置”开启。")
+                    Text("以后可随时在“设置”中开启。")
                         .font(.system(size: 11))
                         .foregroundStyle(GuideStyle.muted)
                 }
@@ -549,7 +549,7 @@ private struct OnboardingView: View {
                 Image(systemName: "gearshape")
                     .font(.system(size: 20))
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("以后修改：右上角“设置”")
+                    Text("以后修改：点面板里的齿轮进入设置")
                         .font(.system(size: 12, weight: .medium))
                     Text("应用内也可按 ⌘, 打开")
                         .font(.system(size: 10))
