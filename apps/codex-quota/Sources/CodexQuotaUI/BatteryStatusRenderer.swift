@@ -24,6 +24,7 @@ public struct BatteryStatusRenderer {
         style: BatteryStyle,
         remainingPercent: Int?,
         showsCodexLabel: Bool,
+        provider: QuotaProvider = .codex,
         language: AppLanguage = .simplifiedChinese
     ) -> StatusPresentation {
         let presentation = presentation(
@@ -31,13 +32,14 @@ public struct BatteryStatusRenderer {
             remainingPercent: remainingPercent,
             identityMode: showsCodexLabel ? .text : .hidden,
             compactReset: nil,
+            provider: provider,
             language: language
         )
         let percent = remainingPercent.map { min(max($0, 0), 100) }
         return StatusPresentation(
             image: presentation.image,
             batteryImage: presentation.batteryImage,
-            accessibilityLabel: baseAccessibilityLabel(percent: percent, language: language)
+            accessibilityLabel: baseAccessibilityLabel(percent: percent, provider: provider, language: language)
         )
     }
 
@@ -46,6 +48,7 @@ public struct BatteryStatusRenderer {
         remainingPercent: Int?,
         identityMode: StatusIdentityMode,
         compactReset: String?,
+        provider: QuotaProvider = .codex,
         language: AppLanguage = .simplifiedChinese
     ) -> StatusPresentation {
         let percent = remainingPercent.map { min(max($0, 0), 100) }
@@ -67,9 +70,10 @@ public struct BatteryStatusRenderer {
             percent: percent,
             identityMode: identityMode,
             compactReset: compactReset,
+            provider: provider,
             batteryImage: batteryImage
         )
-        var accessibilityLabel = baseAccessibilityLabel(percent: percent, language: language)
+        var accessibilityLabel = baseAccessibilityLabel(percent: percent, provider: provider, language: language)
         if let compactReset {
             accessibilityLabel += language == .simplifiedChinese
                 ? "，下次重置 \(compactReset)"
@@ -78,12 +82,13 @@ public struct BatteryStatusRenderer {
         switch identityMode {
         case .text:
             accessibilityLabel += language == .simplifiedChinese
-                ? "，显示 Codex 文字"
-                : ", showing Codex text"
+                ? "，显示 \(provider.title) 文字"
+                : ", showing \(provider.title) text"
         case .logo:
+            let logoName = provider == .codex ? "OpenAI" : "Claude"
             accessibilityLabel += language == .simplifiedChinese
-                ? "，显示 OpenAI Logo"
-                : ", showing OpenAI logo"
+                ? "，显示 \(logoName) Logo"
+                : ", showing \(logoName) logo"
         case .hidden:
             accessibilityLabel += language == .simplifiedChinese
                 ? "，不显示标识"
@@ -99,13 +104,14 @@ public struct BatteryStatusRenderer {
 
     private func baseAccessibilityLabel(
         percent: Int?,
+        provider: QuotaProvider,
         language: AppLanguage
     ) -> String {
         switch language {
         case .simplifiedChinese:
-            return percent.map { "Codex 剩余额度 \($0)%" } ?? "Codex 剩余额度未知"
+            return percent.map { "\(provider.title) 剩余额度 \($0)%" } ?? "\(provider.title) 剩余额度未知"
         case .english:
-            return percent.map { "Codex quota remaining \($0)%" } ?? "Codex quota remaining unknown"
+            return percent.map { "\(provider.title) quota remaining \($0)%" } ?? "\(provider.title) quota remaining unknown"
         }
     }
 
@@ -114,6 +120,7 @@ public struct BatteryStatusRenderer {
         percent: Int?,
         identityMode: StatusIdentityMode,
         compactReset: String?,
+        provider: QuotaProvider,
         batteryImage: NSImage
     ) -> NSImage {
         let height: CGFloat = 18
@@ -123,7 +130,7 @@ public struct BatteryStatusRenderer {
             .font: NSFont.menuBarFont(ofSize: 0),
             .foregroundColor: NSColor.black.withAlphaComponent(0.9)
         ]
-        let label = NSAttributedString(string: "Codex", attributes: attributes)
+        let label = NSAttributedString(string: provider.title, attributes: attributes)
         let percentage = NSAttributedString(
             string: percent.map { "\($0)%" } ?? "--%",
             attributes: attributes
@@ -131,7 +138,9 @@ public struct BatteryStatusRenderer {
         let suffix = compactReset.map {
             NSAttributedString(string: $0, attributes: attributes)
         }
-        let logoImage = identityMode == .logo ? OpenAILogoRenderer.image() : nil
+        let logoImage: NSImage? = identityMode == .logo
+            ? (provider == .codex ? OpenAILogoRenderer.image() : ClaudeLogoRenderer.image())
+            : nil
         let labelWidth = ceil(label.size().width)
         let percentageWidth = ceil(percentage.size().width)
         let suffixWidth = suffix.map { ceil($0.size().width) } ?? 0

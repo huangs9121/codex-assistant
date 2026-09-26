@@ -241,6 +241,7 @@ enum StatusPanelPresentationTests {
             resetsAt: now.addingTimeInterval(3_600),
             windowDuration: 5 * 3_600,
             planName: "Pro",
+            planBadgeName: "Pro 20X",
             secondaryWindow: nil
         )
         let data = StatusPanelQuotaData(snapshot: snapshot, now: now)
@@ -248,6 +249,7 @@ enum StatusPanelPresentationTests {
             && data.primaryWindow?.windowDuration == 5 * 3_600
             && data.secondaryWindow == nil
             && data.planName == "Pro"
+            && data.planBadgeName == "Pro 20X"
             && data.observedAt == now
     }
 
@@ -268,6 +270,7 @@ enum StatusPanelPresentationTests {
             && data.primaryWindow?.windowDuration == 5 * 3_600
             && data.secondaryWindow?.remainingPercent == 30
             && data.secondaryWindow?.windowDuration == 7 * 86_400
+            && data.planBadgeName == nil
     }
 
     private static func testResetCountdown() -> Bool {

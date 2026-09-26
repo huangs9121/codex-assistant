@@ -123,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     )
     private var styleItems: [BatteryStyle: NSMenuItem] = [:]
     private var identityItems: [StatusIdentityMode: NSMenuItem] = [:]
+    private var panelModeItems: [PanelDisplayMode: NSMenuItem] = [:]
     private var resetForecastToggleItem: NSMenuItem?
     private var resetToggleItem: NSMenuItem?
     private var launchAtLoginItem: NSMenuItem?
@@ -181,6 +182,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
     )
     private let rateLimitController = CodexRateLimitController()
+    private lazy var onboardingController: OnboardingWindowController = OnboardingWindowController(
+        snapshot: { [weak self] in
+            guard let self else { return .init() }
+            return .init(
+                accessibilityTrusted: mouseScrollReversalController.isAccessibilityTrusted,
+                inputMonitoringTrusted: doubleCommandTapController.isInputMonitoringTrusted,
+                scrollReversal: .init(enabled: mouseScrollReversalController.isEnabled,
+                                      running: mouseScrollReversalController.isRunning),
+                rightClickGesture: .init(enabled: mouseGestureController.preferences.isEnabled,
+                                         running: mouseGestureController.isRunning),
+                keyMapping: .init(enabled: doubleCommandTapController.isEnabled,
+                                  running: doubleCommandTapController.isRunning))
+        },
+        setFeatureEnabled: { [weak self] feature, enabled in
+            self?.setOnboardingFeature(feature, enabled: enabled)
+        },
+        openSettings: { [weak self] feature in
+            guard let self else { return }
+            let page: QuickToolsPanelController.Page
+            switch feature {
+            case .scrollReversal: page = .scrollReversal
+            case .rightClickGesture: page = .rightClickGesture
+            case .keyMapping: page = .globalShortcut
+            case nil: page = .general
+            }
+            quickToolsPanelController.show(page: page)
+        },
+        requestAccessibility: { [weak self] in self?.mouseScrollReversalController.requestAccessibilityPermission() },
+        requestInputMonitoring: { [weak self] in self?.doubleCommandTapController.requestInputMonitoringPermission() }
+    )
+    private let claudeUsageController = ClaudeUsageController()
+    private var lastClaudeCheck: Date?
+    private var isRefreshingClaude = false
     private let nodeScoreWindowController = NodeScoreWindowController()
     private let taskStatusController = TaskStatusController()
     private lazy var panelController = StatusPanelController(
@@ -219,16 +253,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         onArchiveTask: { [weak self] task in
             self?.archiveTask(task)
         },
-        onClearCompletedTasks: { [weak self] in
-            self?.archiveCompletedTasks()
-        },
-        onClearFinishedThreads: { [weak self] in
-            self?.clearFinishedDesktopThreads()
-        },
+        onClearCompletedTasks: { [weak self] in self?.confirmClearCompletedTasks() },
+        onClearFinishedThreads: {},
         onToggleSleep: { [weak self] in
             self?.toggleTaskSleep()
+        },
+        onDisplayMode: { [weak self] mode in
+            self?.setPanelDisplayMode(mode)
         }
     )
+
+    private lazy var notchController: NotchPanelController = NotchPanelController(model: panelModel, text: text, actions: NotchActions(
+        settings: { [weak self] view in
+            self?.showSettingsMenu(relativeTo: view)
+        },
+        quickTools: { [weak self] in self?.notchController.collapse(); self?.quickToolsPanelController.show() },
+        openTasks: { [weak self] in self?.openTasksApplication() },
+        scroll: { [weak self] in
+            guard let self else { return }
+            setMouseScrollReversalEnabled(!mouseScrollReversalController.isRunning)
+        },
+        gestures: { [weak self] in self?.notchController.collapse(); self?.quickToolsPanelController.show(pageIndex: 2) },
+        mappings: { [weak self] in self?.notchController.collapse(); self?.quickToolsPanelController.show(pageIndex: 1) },
+        sleep: { [weak self] in self?.toggleTaskSleep() },
+        reset: { [weak self] in self?.openCurrentResetAnnouncement() },
+        mode: { [weak self] in self?.setPanelDisplayMode($0) },
+        resume: { [weak self] uuid, copy in self?.resumeTaskSession(sessionUUID: uuid, copyOnly: copy) ?? .unavailable },
+        thread: { [weak self] in self?.openCodexThread($0) ?? .unavailable },
+        cli: { [weak self] id, process in self?.openCLIProcess(id: id, process: process) ?? .unavailable },
+        archive: { [weak self] in self?.archiveTask($0) },
+        clear: { [weak self] in self?.confirmClearCompletedTasks() }
+    ))
+
+    private func setPanelDisplayMode(_ mode: PanelDisplayMode, reveal: Bool = true) {
+        preferences.panelDisplayMode = mode
+        panelModel.displayMode = mode
+        panelController.close()
+        notchController.setEnabled(mode == .island, expand: reveal && mode == .island)
+        statusItem.isVisible = mode == .menuBar
+        if reveal, mode == .menuBar, let button = statusItem.button {
+            DispatchQueue.main.async { [weak self] in self?.panelController.toggle(relativeTo: button) }
+        }
+    }
+
+    private func openTasksApplication() {
+        notchController.collapse()
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
+            showAlert(message: language == .simplifiedChinese ? "未找到 Codex 应用" : "Codex is not installed")
+            return
+        }
+        NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -245,6 +320,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         currentResetCalendar = preferences.resetCalendarCache
         panelModel.update(resetCalendar: currentResetCalendar)
         configureStatusItem()
+        configureUnifiedSettings()
+        setPanelDisplayMode(CommandLine.arguments.contains("--show-island") ? .island : preferences.panelDisplayMode,
+                            reveal: CommandLine.arguments.contains("--show-island"))
         refreshAccessibilityControllers()
         refresh()
         let timer = Timer(
@@ -265,7 +343,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         )
         RunLoop.main.add(accessibilityTimer, forMode: .common)
         accessibilityPermissionTimer = accessibilityTimer
-        showAutoRefreshNoticeIfNeeded()
+        preferences.hasShownAutoRefreshNotice = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if CommandLine.arguments.contains("--show-onboarding") { onboardingController.show() }
+            else { onboardingController.showIfNeeded() }
+        }
         checkForUpdatesAutomatically()
         let updateTimer = Timer(
             timeInterval: 3_600,
@@ -291,12 +374,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         if CommandLine.arguments.contains("--show-quick-tools") {
             DispatchQueue.main.async { [weak self] in self?.quickToolsPanelController.show() }
         }
+        if CommandLine.arguments.contains("--show-panel") {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let button = statusItem.button else { return }
+                setPanelDisplayMode(.menuBar, reveal: false)
+                panelController.toggle(relativeTo: button)
+            }
+        }
         if CommandLine.arguments.contains("--show-node-scores") {
             DispatchQueue.main.async { [weak self] in self?.nodeScoreWindowController.show() }
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        notchController.setEnabled(false)
         displaySleepController.stop()
         taskSleepController.stop()
         refreshTimer?.invalidate()
@@ -319,7 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         guard let button = statusItem.button else {
             return
         }
-        button.installButtonHelp(language == .simplifiedChinese ? "打开 Codex 额度与任务面板" : "Open Codex quota and tasks")
+        button.installButtonHelp(language == .simplifiedChinese ? "查看额度与 Codex 任务" : "View quotas and Codex tasks")
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -328,83 +419,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private func configureSettingsMenu() {
         settingsMenu.removeAllItems()
         settingsMenu.delegate = self
-        styleItems.removeAll()
-        identityItems.removeAll()
-
-        let styleItem = NSMenuItem(
-            title: text.displayStyle,
-            action: nil,
-            keyEquivalent: ""
-        )
-        let styleMenu = NSMenu(title: text.displayStyle)
-        for style in BatteryStyle.allCases {
-            let item = makeStyleItem(style)
-            styleItems[style] = item
-            styleMenu.addItem(item)
-        }
-        styleItem.submenu = styleMenu
-        settingsMenu.addItem(styleItem)
-
-        let identityItem = NSMenuItem(
-            title: text.identityStyle,
-            action: nil,
-            keyEquivalent: ""
-        )
-        let identityMenu = NSMenu(title: text.identityStyle)
-        for mode in StatusIdentityMode.allCases {
-            let item = makeIdentityItem(mode)
-            identityItems[mode] = item
-            identityMenu.addItem(item)
-        }
-        identityItem.submenu = identityMenu
-        settingsMenu.addItem(identityItem)
-
+        let settings = NSMenuItem(title: "设置…", action: #selector(openUnifiedSettings), keyEquivalent: ",")
+        settings.target = self
+        settingsMenu.addItem(settings)
         settingsMenu.addItem(.separator())
-
-        let resetItem = makeChoiceItem(
-            title: text.showResetTime,
-            tag: 0,
-            action: #selector(toggleResetCountdown(_:))
-        )
-        resetToggleItem = resetItem
-        settingsMenu.addItem(resetItem)
-
-        let forecastItem = makeChoiceItem(
-            title: text.showResetForecast,
-            tag: 0,
-            action: #selector(toggleResetForecast(_:))
-        )
-        resetForecastToggleItem = forecastItem
-        settingsMenu.addItem(forecastItem)
-
-        let loginItem = makeChoiceItem(
-            title: text.launchAtLogin,
-            tag: 0,
-            action: #selector(toggleLaunchAtLogin(_:))
-        )
-        launchAtLoginItem = loginItem
-        settingsMenu.addItem(loginItem)
-
-        settingsMenu.addItem(.separator())
-
-        let updateItem = NSMenuItem(
-            title: text.checkForUpdates,
-            action: #selector(checkForUpdatesManually),
-            keyEquivalent: ""
-        )
-        updateItem.target = self
-        updateMenuItem = updateItem
-        settingsMenu.addItem(updateItem)
-
-        let quitItem = NSMenuItem(
-            title: text.quit,
-            action: #selector(quit),
-            keyEquivalent: ""
-        )
+        let quitItem = NSMenuItem(title: "退出趁手", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         settingsMenu.addItem(quitItem)
+    }
 
-        syncMenuState()
+    private func configureUnifiedSettings() {
+        var actions = QuickToolsPanelController.SettingsActions()
+        actions.setLaunchAtLogin = { [weak self] in self?.setLaunchAtLogin($0) }
+        actions.setDisplayMode = { [weak self] in self?.setPanelDisplayMode($0 == 0 ? .island : .menuBar, reveal: false) }
+        actions.setManualSleep = { [weak self] desired in
+            guard let self, desired != taskSleepController.isEnabled else { return }
+            toggleTaskSleep()
+        }
+        actions.setQuotaProvider = { [weak self] in self?.panelModel.selectQuotaProvider($0 == 0 ? .codex : .claude) }
+        actions.setBatteryStyle = { [weak self] index in
+            guard let self, BatteryStyle.allCases.indices.contains(index) else { return }
+            preferences.batteryStyle = BatteryStyle.allCases[index]; updateStatusPresentation()
+        }
+        actions.setIdentityStyle = { [weak self] index in
+            guard let self, StatusIdentityMode.allCases.indices.contains(index) else { return }
+            preferences.identityMode = StatusIdentityMode.allCases[index]; updateStatusPresentation()
+        }
+        actions.setResetCountdown = { [weak self] enabled in
+            self?.preferences.showsResetCountdownInStatusBar = enabled; self?.updateStatusPresentation()
+        }
+        actions.setResetForecast = { [weak self] enabled in
+            self?.preferences.showsResetForecast = enabled; self?.panelModel.update(showsResetForecast: enabled)
+        }
+        actions.openNodeScores = { [weak self] in self?.nodeScoreWindowController.show() }
+        actions.openResetCalendar = { [weak self] in self?.openResetCalendar() }
+        actions.openDisplaySleep = { [weak self] in self?.startDisplaySleep() }
+        actions.refreshQuota = { [weak self] in self?.refreshQuotaManually() }
+        actions.quit = { NSApp.terminate(nil) }
+        actions.checkUpdates = { [weak self] in self?.checkForUpdatesManually() }
+        actions.showOnboarding = { [weak self] in self?.onboardingController.show() }
+        actions.onClose = { [weak self] in self?.onboardingController.resumeAfterSettings() }
+        quickToolsPanelController.configureSettings(stateProvider: { [weak self] in
+            guard let self else { return .init() }
+            var state = QuickToolsPanelController.SettingsState()
+            state.launchAtLogin = launchAtLoginController.state == .enabled
+            state.displayModeIndex = preferences.panelDisplayMode == .island ? 0 : 1
+            state.manualSleepEnabled = taskSleepController.isEnabled
+            state.quotaProviderIndex = panelModel.selectedQuotaProvider == .codex ? 0 : 1
+            state.batteryStyleIndex = BatteryStyle.allCases.firstIndex(of: preferences.batteryStyle) ?? 0
+            state.identityStyleIndex = StatusIdentityMode.allCases.firstIndex(of: preferences.identityMode) ?? 0
+            state.showsResetCountdown = preferences.showsResetCountdownInStatusBar
+            state.showsResetForecast = preferences.showsResetForecast
+            state.manualSleepDetail = taskSleepController.statusDescription
+            state.quotaStatus = panelModel.quotaStatus.isEmpty
+                ? "\(panelModel.selectedQuotaProvider.title) 额度已同步。" : panelModel.quotaStatus
+            state.launchAtLoginDetail = launchAtLoginController.state == .requiresApproval ? "请在系统登录项中允许趁手启动。" : "登录 Mac 后自动运行趁手。"
+            state.version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.5"
+            return state
+        }, actions: actions)
+        panelModel.onQuotaProviderChange = { [weak self] in
+            self?.updateStatusPresentation()
+            self?.quickToolsPanelController.refreshSettings()
+        }
+        panelModel.onRefreshQuota = { [weak self] in self?.refreshQuotaManually() }
+        let appMenu = NSMenu()
+        let root = NSMenuItem(); appMenu.addItem(root)
+        root.submenu = settingsMenu
+        NSApp.mainMenu = appMenu
+    }
+
+    @objc private func openUnifiedSettings() {
+        notchController.collapse(); panelController.close(); quickToolsPanelController.show()
     }
 
     @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
@@ -424,12 +509,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func showSettingsMenu(relativeTo view: NSView) {
-        syncMenuState()
-        settingsMenu.popUp(
-            positioning: nil,
-            at: NSPoint(x: view.bounds.minX, y: view.bounds.maxY + 4),
-            in: view
-        )
+        openUnifiedSettings()
+    }
+
+    @objc private func selectPanelMode(_ sender: NSMenuItem) {
+        guard PanelDisplayMode.allCases.indices.contains(sender.tag) else { return }
+        settingsMenu.cancelTracking()
+        setPanelDisplayMode(PanelDisplayMode.allCases[sender.tag])
+    }
+    @objc private func openResetCalendar() { NSWorkspace.shared.open(CodexResetFeed.calendarURL) }
+    @objc private func openResetSource() { NSWorkspace.shared.open(URL(string: "https://x.com/thsottiaux")!) }
+    @objc private func openNodeScores() { notchController.collapse(); panelController.close(); nodeScoreWindowController.show() }
+    @objc private func startDisplaySleep() {
+        notchController.collapse(); panelController.close()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do { try await displaySleepController.start() }
+            catch { showAlert(message: "熄屏未完成", informativeText: error.localizedDescription) }
+        }
     }
 
     private func makeStyleItem(_ style: BatteryStyle) -> NSMenuItem {
@@ -518,6 +615,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func syncMenuState() {
+        quickToolsPanelController.refreshSettings()
+        for (mode, item) in panelModeItems { item.state = mode == preferences.panelDisplayMode ? .on : .off }
+        panelModel.updateQuickTools(scroll: mouseScrollReversalController.isRunning,
+            gestures: mouseGestureController.isRunning,
+            mappingCount: doubleCommandTapController.rules.filter { $0.isEnabled && $0.isComplete }.count,
+            mappingEnabled: doubleCommandTapController.isEnabled)
         let selectedStyle = preferences.batteryStyle
         for (style, item) in styleItems {
             let selected = style == selectedStyle
@@ -575,7 +678,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     private func updateStatusPresentation() {
         let now = Date()
-        let effectiveReset = currentSnapshot?.resetDate(at: now)
+        let selectedSnapshot = panelModel.snapshot
+        let effectiveReset = selectedSnapshot?.resetDate(at: now)
         let compactReset = preferences.showsResetCountdownInStatusBar
             ? ResetCountdownFormatter.compactString(
                 resetsAt: effectiveReset,
@@ -585,9 +689,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             : nil
         let presentation = renderer.presentation(
             style: preferences.batteryStyle,
-            remainingPercent: currentSnapshot?.remainingPercent(at: now),
+            remainingPercent: selectedSnapshot?.remainingPercent(at: now),
             identityMode: preferences.identityMode,
             compactReset: compactReset,
+            provider: panelModel.selectedQuotaProvider,
             language: language
         )
         statusItem.button?.image = presentation.image
@@ -691,6 +796,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             mouseScrollReversalController.requestAccessibilityPermission()
         } else if !isEnabled {
             mouseScrollReversalController.stop()
+        }
+        syncMenuState()
+    }
+
+    // Choosing first-use preferences does not itself request system permissions.
+    private func setOnboardingFeature(_ feature: OnboardingWindowController.Feature, enabled: Bool) {
+        switch feature {
+        case .scrollReversal:
+            mouseScrollReversalController.isEnabled = enabled
+            if enabled { _ = mouseScrollReversalController.startIfPermitted() }
+            else { mouseScrollReversalController.stop() }
+        case .rightClickGesture:
+            var settings = mouseGestureController.preferences
+            settings.isEnabled = enabled
+            settings.save(to: .standard)
+            mouseGestureController.reloadRules()
+            if enabled { _ = mouseGestureController.startIfPermitted() }
+            else { mouseGestureController.stop() }
+        case .keyMapping:
+            doubleCommandTapController.isEnabled = enabled
+            if enabled { _ = doubleCommandTapController.startIfPermitted() }
+            else { doubleCommandTapController.stop() }
         }
         syncMenuState()
     }
@@ -963,6 +1090,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func refresh() {
+        refreshClaudeQuota()
         panelModel.tick()
         refreshTaskStatuses()
         guard !isRefreshing else {
@@ -984,12 +1112,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                     self.isRefreshing = false
                     switch result {
                     case let .snapshot(snapshot):
+                        self.panelModel.updateCodexStatus("")
                         self.apply(snapshot)
                     case .failure:
+                        self.panelModel.updateCodexStatus(fallbackSnapshot == nil ? "暂未读取到 Codex 额度" : "实时读取失败，显示本地记录")
                         self.apply(fallbackSnapshot)
                     }
                 }
             }
+        }
+    }
+
+    private func refreshQuotaManually() {
+        if panelModel.selectedQuotaProvider == .claude {
+            refreshClaudeQuota(manual: true)
+        } else { refresh() }
+    }
+
+    private func refreshClaudeQuota(manual: Bool = false) {
+        guard !isRefreshingClaude else { return }
+        if !manual, let lastClaudeCheck, Date().timeIntervalSince(lastClaudeCheck) < 180 { return }
+        isRefreshingClaude = true
+        lastClaudeCheck = Date()
+        claudeUsageController.check(allowKeychainPrompt: manual) { [weak self] result in
+            guard let self else { return }
+            isRefreshingClaude = false
+            switch result {
+            case let .snapshot(snapshot, source, stale, failure):
+                var status = ""
+                if source == .desktopCache {
+                    status = stale ? "桌面记录已过期，打开 Claude 更新；重置时间暂不可用。" : "Claude 桌面记录；重置时间暂不可用。"
+                    if let failure { status += " " + claudeFailureMessage(failure) }
+                } else if source == .oauthCache {
+                    status = "上次成功读取；实时更新失败。"
+                    if let failure { status += " " + claudeFailureMessage(failure) }
+                } else if !stale, failure == nil { handleClaudeResetNotification(snapshot) }
+                panelModel.updateClaude(snapshot: snapshot, status: status)
+            case let .unavailable(failure):
+                panelModel.updateClaude(snapshot: nil, status: claudeFailureMessage(failure))
+            }
+            updateStatusPresentation()
+            quickToolsPanelController.refreshSettings()
+        }
+    }
+
+    private func claudeFailureMessage(_ failure: ClaudeUsageController.Failure) -> String {
+        switch failure {
+        case .credentialsMissing: "请先在 Claude Code 登录。"
+        case .keychainPermission: "点击刷新，允许读取 Claude 登录凭据。"
+        case .keychainAuthentication: "macOS 钥匙串认证失败，Claude 实时额度暂不可用。"
+        case .keychainWritePermission: "Claude 登录凭据暂不能安全续期，请在 Claude Code 更新登录后刷新。"
+        case .credentialChanged: "Claude 登录状态刚刚更新，稍后重试。"
+        case .reauthenticationRequired: "Claude 登录需要重新验证，请登录后刷新。"
+        case .missingUsageScope: "当前 Claude 登录未提供额度读取权限，请重新登录。"
+        case .unauthorized: "Claude 登录失效，请重新登录后刷新。"
+        case .rateLimited: "Claude 暂时限制请求，稍后自动重试。"
+        case .network: "Claude 连接失败，稍后自动重试。"
+        case .invalidResponse: "Claude 返回的额度数据暂不可用。"
+        case let .httpStatus(code): "Claude 服务暂不可用（HTTP \(code)），稍后重试。"
+        }
+    }
+
+    private func handleClaudeResetNotification(_ snapshot: QuotaSnapshot) {
+        let key = "claudeQuotaResetNotificationState"
+        let old = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(QuotaResetNotificationState.self, from: $0) }
+        let detection = QuotaResetDetector.evaluate(snapshot, state: old)
+        if let data = try? JSONEncoder().encode(detection.state) { UserDefaults.standard.set(data, forKey: key) }
+        guard let start = detection.cycleStartToNotify else { return }
+        Task { @MainActor in
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Claude 额度已重置"
+            content.body = "新的额度周期已开始，可继续使用 Claude。"
+            content.sound = .default
+            try? await center.add(UNNotificationRequest(identifier: "claude-quota-reset-\(Int(start.timeIntervalSince1970))", content: content, trigger: nil))
         }
     }
 
@@ -1013,6 +1211,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                 sendTaskCompletionNotification(for: task)
             }
         }
+    }
+
+    private func confirmClearCompletedTasks() {
+        let alert = NSAlert()
+        alert.messageText = "清理已完成的任务？"
+        alert.informativeText = "从列表中移除已完成项，保留运行中、状态未知和终端占用的任务。不会删除项目源码或工作区。"
+        alert.addButton(withTitle: "清理完成项")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runWithButtonHelp() == .alertFirstButtonReturn else { return }
+        archiveCompletedTasks()
+        clearFinishedDesktopThreads()
     }
 
     private func clearFinishedDesktopThreads() {
@@ -1406,20 +1616,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         alert.runWithButtonHelp()
     }
 
-    private func showAutoRefreshNoticeIfNeeded() {
-        guard !preferences.hasShownAutoRefreshNotice else {
-            return
-        }
-        activateApp()
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = text.launched
-        alert.informativeText = text.launchNotice
-        alert.addButton(withTitle: text.dismiss)
-        alert.runWithButtonHelp()
-        preferences.hasShownAutoRefreshNotice = true
-    }
-
     func menuWillOpen(_ menu: NSMenu) {
         syncMenuState()
     }
@@ -1430,6 +1626,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 }
 
 let application = NSApplication.shared
+if CommandLine.arguments.contains("--notch-preview") {
+    let args = CommandLine.arguments
+    let state = args.firstIndex(of: "--state").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? "tasks"
+    let preview = NotchPreview(state: state)
+    application.setActivationPolicy(.accessory)
+    if let index = args.firstIndex(of: "--animation-dir"), args.count > index + 1 {
+        preview.recordAnimation(to: args[index + 1])
+    } else { preview.show() }
+    if let index = args.firstIndex(of: "--snapshot"), args.count > index + 1 {
+        let path = args[index + 1]
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            do { try preview.snapshot(to: path) } catch { print(error) }
+            application.terminate(nil)
+        }
+    }
+    application.run()
+    exit(0)
+}
 if CommandLine.arguments.contains("--node-scores-preview") {
     let preview = NodeScoreWindowController()
     application.setActivationPolicy(.regular)

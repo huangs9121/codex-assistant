@@ -56,8 +56,10 @@ enum QuotaParserTests {
             ("account response with one window has no secondary window", testAccountSingleWindowParsing),
             ("secondary quota window resets to full remaining", testSecondaryQuotaWindowReset),
             ("known plan names are normalized", testKnownPlanNames),
+            ("known plan badges distinguish Pro tiers", testKnownPlanBadges),
             ("unknown and missing plan names are nil", testUnknownAndMissingPlanNames),
             ("prolite snapshot carries Pro plan", testProliteSnapshotPlan),
+            ("pro snapshot carries Pro 20X badge", testProSnapshotPlan),
             ("unknown plan keeps snapshot valid", testUnknownPlanKeepsSnapshotValid),
             ("primary window carries its reset", testPrimaryWindowReset),
             ("secondary window carries its reset", testSecondaryWindowReset),
@@ -214,8 +216,10 @@ enum QuotaParserTests {
             + ManualSleepAcknowledgementTests.all.map { ($0.name, $0.run) }
             + ThreadTreeTests.all.map { ($0.name, $0.run) }
             + StatusPanelPresentationTests.all.map { ($0.name, $0.run) }
+            + PanelDisplayModeTests.all.map { ($0.name, $0.run) }
             + MouseGesturePreferencesTests.all.map { ($0.name, $0.run) }
             + KeyMappingTests.all.map { ($0.name, $0.run) }
+            + ClaudeUsageTests.all
             + CodexResetCalendarTests.all
 
         var failureCount = 0
@@ -339,6 +343,20 @@ enum QuotaParserTests {
     private static func testUnknownAndMissingPlanNames() -> Bool {
         expect(PlanInfo.normalizedName("unknown"), equals: nil)
             && expect(PlanInfo.normalizedName(nil), equals: nil)
+            && expect(PlanInfo.normalizedBadgeName("unknown"), equals: nil)
+            && expect(PlanInfo.normalizedBadgeName(nil), equals: nil)
+    }
+
+    private static func testKnownPlanBadges() -> Bool {
+        let cases: [(String, String)] = [
+            ("prolite", "Pro 5X"),
+            ("pro", "Pro 20X"),
+            ("plus", "Plus"),
+            ("  PROLITE\n", "Pro 5X")
+        ]
+        return cases.allSatisfy { rawValue, expected in
+            expect(PlanInfo.normalizedBadgeName(rawValue), equals: expected)
+        }
     }
 
     private static func testProliteSnapshotPlan() -> Bool {
@@ -346,6 +364,7 @@ enum QuotaParserTests {
             from: tokenCountLine(primary: 40, planType: "prolite")
         )
         return expect(snapshot?.planName, equals: "Pro")
+            && expect(snapshot?.planBadgeName, equals: "Pro 5X")
     }
 
     private static func testUnknownPlanKeepsSnapshotValid() -> Bool {
@@ -354,6 +373,16 @@ enum QuotaParserTests {
         )
         return expect(snapshot?.remainingPercent, equals: 60)
             && expect(snapshot?.planName, equals: nil)
+            && expect(snapshot?.planBadgeName, equals: nil)
+    }
+
+    private static func testProSnapshotPlan() -> Bool {
+        let snapshot = QuotaParser.snapshot(
+            from: tokenCountLine(primary: 99, planType: "pro")
+        )
+        return expect(snapshot?.remainingPercent, equals: 1)
+            && expect(snapshot?.planName, equals: "Pro")
+            && expect(snapshot?.planBadgeName, equals: "Pro 20X")
     }
 
     private static func testPrimaryWindowReset() -> Bool {
@@ -678,7 +707,8 @@ enum QuotaParserTests {
                     primaryWindowMinutes: 300,
                     secondary: 45,
                     secondaryReset: 1_900_000_000,
-                    secondaryWindowMinutes: 10_080
+                    secondaryWindowMinutes: 10_080,
+                    planType: "prolite"
                 ),
                 to: root.appendingPathComponent("dual-window.jsonl")
             ) else {
@@ -690,6 +720,8 @@ enum QuotaParserTests {
                 && expect(snapshot?.windowDuration, equals: 300 * 60)
                 && expect(snapshot?.secondaryWindow?.usedPercent, equals: 45)
                 && expect(snapshot?.secondaryWindow?.windowDuration, equals: 10_080 * 60)
+                && expect(snapshot?.planName, equals: "Pro")
+                && expect(snapshot?.planBadgeName, equals: "Pro 5X")
                 && expect(
                     snapshot?.secondaryWindow?.resetsAt,
                     equals: Date(timeIntervalSince1970: 1_900_000_000)
@@ -771,6 +803,7 @@ enum QuotaParserTests {
                 equals: Date(timeIntervalSince1970: 1_784_882_768)
             )
             && expect(snapshot?.planName, equals: "Pro")
+            && expect(snapshot?.planBadgeName, equals: "Pro 5X")
     }
 
     private static func testEmptyRoot() -> Bool {

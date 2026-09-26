@@ -38,17 +38,20 @@ public enum StatusPanelQuotaWindowKind: Equatable, Sendable {
 
 public struct StatusPanelQuotaData: Equatable, Sendable {
     public let planName: String?
+    public let planBadgeName: String?
     public let observedAt: Date?
     public let primaryWindow: StatusPanelQuotaWindow?
     public let secondaryWindow: StatusPanelQuotaWindow?
 
     public init(
         planName: String?,
+        planBadgeName: String? = nil,
         observedAt: Date?,
         primaryWindow: StatusPanelQuotaWindow?,
         secondaryWindow: StatusPanelQuotaWindow?
     ) {
         self.planName = planName
+        self.planBadgeName = planBadgeName
         self.observedAt = observedAt
         self.primaryWindow = primaryWindow
         self.secondaryWindow = secondaryWindow
@@ -58,6 +61,7 @@ public struct StatusPanelQuotaData: Equatable, Sendable {
         guard let snapshot else {
             self.init(
                 planName: nil,
+                planBadgeName: nil,
                 observedAt: nil,
                 primaryWindow: nil,
                 secondaryWindow: nil
@@ -91,6 +95,7 @@ public struct StatusPanelQuotaData: Equatable, Sendable {
         }
         self.init(
             planName: snapshot.planName,
+            planBadgeName: snapshot.planBadgeName,
             observedAt: snapshot.observedAt,
             primaryWindow: windows.first,
             secondaryWindow: windows.dropFirst().first

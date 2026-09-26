@@ -47,12 +47,14 @@ public enum AccountRateLimitsParser {
             max((100 - selectedWindow.usedPercent).rounded(), 0),
             100
         ))
+        let rawPlanType = rateLimits["planType"] as? String
         return QuotaSnapshot(
             remainingPercent: remaining,
             observedAt: observedAt,
             resetsAt: selectedWindow.resetsAt,
             windowDuration: selectedWindow.windowDuration,
-            planName: PlanInfo.normalizedName(rateLimits["planType"] as? String),
+            planName: PlanInfo.normalizedName(rawPlanType),
+            planBadgeName: PlanInfo.normalizedBadgeName(rawPlanType),
             secondaryWindow: secondaryWindow
         )
     }

@@ -22,12 +22,16 @@ final class TaskStatusController {
         qos: .utility
     )
     private var pendingClear: (@MainActor (Result) -> Void)?
+    private var pendingArchive: (@MainActor (Result) -> Void)?
     private var isChecking = false {
         didSet {
-            guard !isChecking, let pending = pendingClear else { return }
-            pendingClear = nil
-            DispatchQueue.main.async { [weak self] in
-                self?.clearEndedDesktopThreads(completion: pending)
+            guard !isChecking else { return }
+            if let pending = pendingArchive {
+                pendingArchive = nil
+                DispatchQueue.main.async { [weak self] in self?.archiveCompletedTasks(completion: pending) }
+            } else if let pending = pendingClear {
+                pendingClear = nil
+                DispatchQueue.main.async { [weak self] in self?.clearEndedDesktopThreads(completion: pending) }
             }
         }
     }
@@ -187,7 +191,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: snapshots,
                         desktopThreadGroups: desktopThreadGroups(snapshots),
                         cliProcesses: cliProcesses,
@@ -235,7 +239,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: desktopSnapshots,
                         desktopThreadGroups: desktopThreadGroups(desktopSnapshots),
                         cliProcesses: cliProcesses,
@@ -258,9 +262,8 @@ final class TaskStatusController {
     func archiveCompletedTasks(
         completion: @escaping @MainActor (Result) -> Void
     ) {
-        guard !invalidated, !isChecking else {
-            return
-        }
+        guard !invalidated else { return }
+        guard !isChecking else { pendingArchive = completion; return }
         isChecking = true
         let parsers = parsers
         let desktopSessionScanner = desktopSessionScanner
@@ -292,7 +295,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: desktopSnapshots,
                         desktopThreadGroups: desktopThreadGroups(desktopSnapshots),
                         cliProcesses: cliProcesses,
@@ -371,7 +374,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: desktopSnapshots,
                         desktopThreadGroups: desktopThreadGroups(desktopSnapshots),
                         cliProcesses: cliProcesses,
