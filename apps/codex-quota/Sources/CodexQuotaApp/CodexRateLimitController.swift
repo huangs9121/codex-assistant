@@ -293,6 +293,8 @@ final class CodexRateLimitController {
             candidates.append(URL(fileURLWithPath: override))
         }
         candidates += [
+            // ChatGPT 26.924 moved the CLI into a nested app; its bin/codex wrapper only execs this.
+            URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
             URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
             URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex"),
             FileManager.default.homeDirectoryForCurrentUser
