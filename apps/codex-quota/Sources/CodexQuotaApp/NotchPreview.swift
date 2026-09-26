@@ -111,7 +111,7 @@ final class NotchPreview {
             sample("1", "Claude 额度改走官方 CLI 并实施双圈", 0, .running),
             sample("2", "趁手首页任务区改版", 8, .waiting),
             ClaudeCodeSessionParser.terminalSession(process: CodexCLIProcess(pid: 4242, tty: "ttys003"),
-                                                    cwd: "/Users/openclaw/Projects/aihot", now: date),
+                                                    cwd: "/Users/me/Projects/aihot", now: date),
             sample("3", "整理 1.4.6 发布说明", 120, .completed),
             sample("4", "检查自动更新链路", 26 * 60, .completed)
         ])

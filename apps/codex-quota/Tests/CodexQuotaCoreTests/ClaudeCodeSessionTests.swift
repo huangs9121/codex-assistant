@@ -20,8 +20,8 @@ enum ClaudeCodeSessionTests {
 
     private static func session(_ extra: [String: Any] = [:]) -> [String: Any] {
         [
-            "sessionId": "local_622e0f57-032d-4113-9b55-0c6040a9aa8b",
-            "cliSessionId": "b6440483-4d1c-4b89-a97c-0712a899ac53",
+            "sessionId": "local_00000000-0000-4000-8000-000000000001",
+            "cliSessionId": "00000000-0000-4000-8000-0000000000aa",
             "cwd": "/Users/me/Projects/worktree",
             "originCwd": "/Users/me/Projects/codex助手",
             "title": "Review Claude quota",
@@ -40,7 +40,7 @@ enum ClaudeCodeSessionTests {
             && parsed?.folderName == "codex助手"
             && parsed?.status == .completed
             && parsed?.lastActiveAt == now.addingTimeInterval(-600)
-            && parsed?.origin == .desktop(sessionID: "local_622e0f57-032d-4113-9b55-0c6040a9aa8b")
+            && parsed?.origin == .desktop(sessionID: "local_00000000-0000-4000-8000-000000000001")
             && untitled?.title == "codex助手"
     }
 
@@ -50,7 +50,7 @@ enum ClaudeCodeSessionTests {
             asked = id
             return now.addingTimeInterval(-20)
         }
-        return asked == "b6440483-4d1c-4b89-a97c-0712a899ac53"
+        return asked == "00000000-0000-4000-8000-0000000000aa"
             && parsed?.status == .running
             && parsed?.lastActiveAt == now.addingTimeInterval(-20)
     }
@@ -75,8 +75,8 @@ enum ClaudeCodeSessionTests {
     }
 
     private static func openLink() -> Bool {
-        ClaudeCodeSessionParser.openURL(forDesktopSession: "local_4485ccc7-5a9f-4511-b202-8dcc3f0fc2c1")?.absoluteString
-            == "claude://code/continue?session=local_4485ccc7-5a9f-4511-b202-8dcc3f0fc2c1"
+        ClaudeCodeSessionParser.openURL(forDesktopSession: "local_00000000-0000-4000-8000-000000000002")?.absoluteString
+            == "claude://code/continue?session=local_00000000-0000-4000-8000-000000000002"
             && ClaudeCodeSessionParser.openURL(forDesktopSession: "local_") == nil
             && ClaudeCodeSessionParser.openURL(forDesktopSession: "local_a&b=c") == nil
             && ClaudeCodeSessionParser.openURL(forDesktopSession: "session_x") == nil
