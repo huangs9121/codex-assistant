@@ -471,8 +471,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             state.showsResetCountdown = preferences.showsResetCountdownInStatusBar
             state.showsResetForecast = preferences.showsResetForecast
             state.manualSleepDetail = taskSleepController.statusDescription
-            state.quotaStatus = panelModel.quotaStatus.isEmpty
-                ? "\(panelModel.selectedQuotaProvider.title) 额度已同步。" : panelModel.quotaStatus
+            state.quotaStatus = panelModel.quotaDetail.isEmpty
+                ? "\(panelModel.selectedQuotaProvider.title) 额度已同步。" : panelModel.quotaDetail
             state.launchAtLoginDetail = launchAtLoginController.state == .requiresApproval ? "请在系统登录项中允许趁手启动。" : "登录 Mac 后自动运行趁手。"
             state.version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.5"
             return state
@@ -1131,23 +1131,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     private func refreshClaudeQuota(manual: Bool = false) {
         guard !isRefreshingClaude else { return }
-        if !manual, let lastClaudeCheck, Date().timeIntervalSince(lastClaudeCheck) < 180 { return }
+        // Each check starts the official Claude Code CLI, so keep background checks sparse:
+        // every 5 minutes while Claude is shown, otherwise every 15 minutes for reset notices.
+        let interval: TimeInterval = panelModel.selectedQuotaProvider == .claude ? 300 : 900
+        if !manual, let lastClaudeCheck, Date().timeIntervalSince(lastClaudeCheck) < interval { return }
         isRefreshingClaude = true
         lastClaudeCheck = Date()
-        claudeUsageController.check(allowKeychainPrompt: manual) { [weak self] result in
+        claudeUsageController.check { [weak self] result in
             guard let self else { return }
             isRefreshingClaude = false
             switch result {
             case let .snapshot(snapshot, source, stale, failure):
-                var status = ""
-                if source == .desktopCache {
-                    status = stale ? "桌面记录已过期，打开 Claude 更新；重置时间暂不可用。" : "Claude 桌面记录；重置时间暂不可用。"
-                    if let failure { status += " " + claudeFailureMessage(failure) }
-                } else if source == .oauthCache {
-                    status = "上次成功读取；实时更新失败。"
-                    if let failure { status += " " + claudeFailureMessage(failure) }
-                } else if !stale, failure == nil { handleClaudeResetNotification(snapshot) }
-                panelModel.updateClaude(snapshot: snapshot, status: status)
+                let reason = failure.map { " " + claudeFailureMessage($0) } ?? ""
+                switch source {
+                case .live:
+                    handleClaudeResetNotification(snapshot)
+                    panelModel.updateClaude(snapshot: snapshot, status: "")
+                case .lastLive:
+                    let status = "实时更新失败，显示上次读取的数据"
+                    panelModel.updateClaude(snapshot: snapshot, status: status, detail: status + "。" + reason, stale: stale)
+                case .desktopCache:
+                    let status = stale ? "数据来自 Claude 桌面记录（较旧）" : "数据来自 Claude 桌面记录"
+                    let detail = "数据来自 Claude 桌面记录" + (stale ? "，已超过 30 分钟未更新" : "") + "，尚未获取重置时间。"
+                    panelModel.updateClaude(snapshot: snapshot, status: status, detail: detail + reason, stale: stale)
+                }
             case let .unavailable(failure):
                 panelModel.updateClaude(snapshot: nil, status: claudeFailureMessage(failure))
             }
@@ -1158,18 +1165,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     private func claudeFailureMessage(_ failure: ClaudeUsageController.Failure) -> String {
         switch failure {
-        case .credentialsMissing: "请先在 Claude Code 登录。"
-        case .keychainPermission: "点击刷新，允许读取 Claude 登录凭据。"
-        case .keychainAuthentication: "macOS 钥匙串认证失败，Claude 实时额度暂不可用。"
-        case .keychainWritePermission: "Claude 登录凭据暂不能安全续期，请在 Claude Code 更新登录后刷新。"
-        case .credentialChanged: "Claude 登录状态刚刚更新，稍后重试。"
-        case .reauthenticationRequired: "Claude 登录需要重新验证，请登录后刷新。"
-        case .missingUsageScope: "当前 Claude 登录未提供额度读取权限，请重新登录。"
-        case .unauthorized: "Claude 登录失效，请重新登录后刷新。"
-        case .rateLimited: "Claude 暂时限制请求，稍后自动重试。"
-        case .network: "Claude 连接失败，稍后自动重试。"
-        case .invalidResponse: "Claude 返回的额度数据暂不可用。"
-        case let .httpStatus(code): "Claude 服务暂不可用（HTTP \(code)），稍后重试。"
+        case .cliMissing: "未找到可用的 Claude Code，请安装 Claude Code 或 Claude 桌面版。"
+        case .notLoggedIn: "Claude Code 未登录，请在 Claude Code 中登录后刷新。"
+        case .noUsageWindows: "Claude Code 未返回额度窗口，请确认使用 Pro 或 Max 账户登录。"
+        case .timedOut: "Claude Code 响应超时，稍后自动重试。"
+        case .launchFailed: "无法启动 Claude Code，稍后自动重试。"
         }
     }
 
@@ -1637,7 +1637,8 @@ if CommandLine.arguments.contains("--notch-preview") {
     if let index = args.firstIndex(of: "--snapshot"), args.count > index + 1 {
         let path = args[index + 1]
         Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(700))
+            // claude-real waits for one real Claude Code CLI check.
+            try? await Task.sleep(for: .milliseconds(state == "claude-real" ? 15_000 : 700))
             do { try preview.snapshot(to: path) } catch { print(error) }
             application.terminate(nil)
         }

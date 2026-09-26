@@ -103,6 +103,39 @@ public struct StatusPanelQuotaData: Equatable, Sendable {
     }
 }
 
+public extension StatusPanelQuotaData {
+    /// The outer ring shows the longer (weekly) window; the inner ring shows the
+    /// 5-hour window only when both exist.
+    var outerRingWindow: StatusPanelQuotaWindow? { secondaryWindow ?? primaryWindow }
+    var innerRingWindow: StatusPanelQuotaWindow? { secondaryWindow == nil ? nil : primaryWindow }
+}
+
+/// Reset lines under the quota rings. Only times given by the source are shown:
+/// a full window without a reset time needs no line, and when every remaining line
+/// lacks a time they merge into one "not obtained yet" line.
+public enum StatusPanelResetSummary: Equatable, Sendable {
+    public enum Line: Equatable, Sendable {
+        case resets(StatusPanelQuotaWindowKind, Date)
+        case unknown(StatusPanelQuotaWindowKind)
+    }
+
+    case lines([Line])
+    case allUnknown
+
+    public init(windows: [StatusPanelQuotaWindow]) {
+        let lines = windows.compactMap { window -> Line? in
+            let kind = StatusPanelQuotaWindowKind(windowDuration: window.windowDuration)
+            if let resetsAt = window.resetsAt { return .resets(kind, resetsAt) }
+            return window.remainingPercent >= 100 ? nil : .unknown(kind)
+        }
+        let allUnknown = !lines.isEmpty && lines.allSatisfy {
+            if case .unknown = $0 { return true }
+            return false
+        }
+        self = allUnknown ? .allUnknown : .lines(lines)
+    }
+}
+
 public struct TaskStatusPresentationText: Equatable, Sendable {
     public let justNow: String
     public let runningFormat: String

@@ -41,6 +41,14 @@ enum StatusPanelPresentationTests {
             run: testSingleWindowFallback
         ),
         TaskStatusParserTestCase(
+            name: "quota rings put the weekly window outside",
+            run: testQuotaRingAssignment
+        ),
+        TaskStatusParserTestCase(
+            name: "quota reset lines only show times given by the source",
+            run: testResetSummary
+        ),
+        TaskStatusParserTestCase(
             name: "status panel orders quota windows by duration",
             run: testWindowOrdering
         ),
@@ -232,6 +240,35 @@ enum StatusPanelPresentationTests {
         )
         // 被清理的已结束线程不再显示；曾被清理但重新运行的线程恢复显示
         return visible.map(\.id) == ["running-1"]
+    }
+
+    private static func testQuotaRingAssignment() -> Bool {
+        let fiveHour = StatusPanelQuotaWindow(remainingPercent: 85, resetsAt: nil, windowDuration: 18_000)
+        let week = StatusPanelQuotaWindow(remainingPercent: 97, resetsAt: nil, windowDuration: 604_800)
+        let both = StatusPanelQuotaData(planName: nil, observedAt: now, primaryWindow: fiveHour, secondaryWindow: week)
+        let single = StatusPanelQuotaData(planName: nil, observedAt: now, primaryWindow: week, secondaryWindow: nil)
+        return both.outerRingWindow == week && both.innerRingWindow == fiveHour
+            && single.outerRingWindow == week && single.innerRingWindow == nil
+    }
+
+    private static func testResetSummary() -> Bool {
+        let sessionReset = now.addingTimeInterval(3_600)
+        let weekReset = now.addingTimeInterval(86_400)
+        func window(_ remaining: Int, _ reset: Date?, _ duration: TimeInterval) -> StatusPanelQuotaWindow {
+            StatusPanelQuotaWindow(remainingPercent: remaining, resetsAt: reset, windowDuration: duration)
+        }
+        let live = StatusPanelResetSummary(windows: [window(85, sessionReset, 18_000), window(97, weekReset, 604_800)])
+        let fullSession = StatusPanelResetSummary(windows: [window(100, nil, 18_000), window(97, weekReset, 604_800)])
+        let desktop = StatusPanelResetSummary(windows: [window(90, nil, 18_000), window(97, nil, 604_800)])
+        let desktopFullSession = StatusPanelResetSummary(windows: [window(100, nil, 18_000), window(97, nil, 604_800)])
+        let allFull = StatusPanelResetSummary(windows: [window(100, nil, 18_000), window(100, nil, 604_800)])
+        let mixed = StatusPanelResetSummary(windows: [window(85, sessionReset, 18_000), window(97, nil, 604_800)])
+        return live == .lines([.resets(.fiveHour, sessionReset), .resets(.weekly, weekReset)])
+            && fullSession == .lines([.resets(.weekly, weekReset)])
+            && desktop == .allUnknown
+            && desktopFullSession == .allUnknown
+            && allFull == .lines([])
+            && mixed == .lines([.resets(.fiveHour, sessionReset), .unknown(.weekly)])
     }
 
     private static func testSingleWindowFallback() -> Bool {

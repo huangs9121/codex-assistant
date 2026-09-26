@@ -7,9 +7,13 @@ import SwiftUI
 final class NotchPreview {
     let model = StatusPanelModel(defaults: UserDefaults(suiteName: "local.openclaw.codexquota.notch-preview")!)
     private var controller: NotchPanelController!
-    private let date = ISO8601DateFormatter().date(from: "2026-09-22T13:01:00Z")!
+    private let date: Date
+    private let claudeUsage = ClaudeUsageController()
 
     init(state: String) {
+        // Claude states reuse the confirmed mock-up's moment: 2026-09-25 17:31 Beijing time.
+        date = state == "claude-real" ? Date()
+            : ISO8601DateFormatter().date(from: state.hasPrefix("claude") ? "2026-09-25T09:31:00Z" : "2026-09-22T13:01:00Z")!
         model.displayMode = .island
         model.selectQuotaProvider(.codex)
         model.updateCodexStatus("")
@@ -48,6 +52,7 @@ final class NotchPreview {
                 model.update(showsResetForecast: true)
             }
         }
+        if state.hasPrefix("claude") { applyClaudeFixture(state) }
         model.tick(at: date)
         let actions = NotchActions(settings: { _ in }, quickTools: {}, openTasks: {}, scroll: {}, gestures: {}, mappings: {}, sleep: {}, reset: {},
             mode: { [weak self] mode in self?.model.displayMode = mode },
@@ -58,6 +63,41 @@ final class NotchPreview {
             })
         controller = NotchPanelController(model: model, text: AppText(language: .simplifiedChinese), actions: actions)
     }
+    /// Mirrors states ①–③ of work/claude-quota-review-20260925/dual-ring-states.png.
+    private func applyClaudeFixture(_ state: String) {
+        let desktop = state == "claude-desktop" || state == "claude-stale"
+        let week = QuotaWindow(usedPercent: 3, resetsAt: desktop ? nil : date.addingTimeInterval(4 * 86_400 + 10 * 3_600 + 28 * 60),
+                               windowDuration: 7 * 86_400)
+        switch state {
+        case "claude-real":
+            // One real check through the official Claude Code CLI. The app still never reads the Keychain.
+            model.updateClaude(snapshot: nil, status: "正在读取额度…")
+            claudeUsage.check { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case let .snapshot(snapshot, source, stale, _):
+                    model.updateClaude(snapshot: snapshot, status: source == .live ? "" : "数据来自 Claude 桌面记录", stale: stale)
+                case .unavailable:
+                    model.updateClaude(snapshot: nil, status: "Claude 额度暂不可用")
+                }
+                model.tick(at: Date())
+            }
+        case "claude-full":
+            model.updateClaude(snapshot: QuotaSnapshot(remainingPercent: 100, observedAt: date, windowDuration: 5 * 3_600,
+                planName: "Pro", planBadgeName: "Pro", secondaryWindow: week), status: "")
+        case "claude-desktop", "claude-stale":
+            let stale = state == "claude-stale"
+            let status = stale ? "数据来自 Claude 桌面记录（较旧）" : "数据来自 Claude 桌面记录"
+            model.updateClaude(snapshot: QuotaSnapshot(remainingPercent: 90, observedAt: date.addingTimeInterval(stale ? -3 * 3_600 : -9 * 60),
+                windowDuration: 5 * 3_600, secondaryWindow: week), status: status,
+                detail: status + "，尚未获取重置时间。 未找到可用的 Claude Code，请安装 Claude Code 或 Claude 桌面版。", stale: stale)
+        default:
+            model.updateClaude(snapshot: QuotaSnapshot(remainingPercent: 85, observedAt: date, resetsAt: date.addingTimeInterval(4 * 3_600 + 38 * 60),
+                windowDuration: 5 * 3_600, planName: "Pro", planBadgeName: "Pro", secondaryWindow: week), status: "")
+        }
+        model.selectQuotaProvider(.claude)
+    }
+
     func show() { controller.setEnabled(true, expand: true); controller.keepPreviewVisible(); model.tick(at: date) }
     func snapshot(to path: String) throws { try controller.snapshot(to: path) }
 

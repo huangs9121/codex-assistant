@@ -23,12 +23,21 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var selectedQuotaProvider: QuotaProvider
     @Published private(set) var codexQuotaStatus = "正在读取额度…"
     @Published private(set) var claudeQuotaStatus = "正在读取额度…"
+    @Published private(set) var claudeQuotaDetail = ""
+    @Published private(set) var claudeQuotaStale = false
     private var codexSnapshot: QuotaSnapshot?
     private var claudeSnapshot: QuotaSnapshot?
     private let defaults: UserDefaults
     var onQuotaProviderChange: (() -> Void)?
     var onRefreshQuota: (() -> Void)?
+    /// Short line shown in the panel.
     var quotaStatus: String { selectedQuotaProvider == .codex ? codexQuotaStatus : claudeQuotaStatus }
+    /// Full explanation for settings and the panel line's help.
+    var quotaDetail: String {
+        guard selectedQuotaProvider == .claude, !claudeQuotaDetail.isEmpty else { return quotaStatus }
+        return claudeQuotaDetail
+    }
+    var quotaStale: Bool { selectedQuotaProvider == .claude && claudeQuotaStale }
     @Published private(set) var tasks: [TaskStatusSnapshot] = []
     @Published private(set) var desktopThreads: [CodexDesktopThreadSnapshot] = []
     @Published private(set) var desktopThreadGroups: [CodexDesktopThreadGroup] = []
@@ -79,9 +88,11 @@ final class StatusPanelModel: ObservableObject {
         notifyContentChange()
     }
 
-    func updateClaude(snapshot: QuotaSnapshot?, status: String) {
+    func updateClaude(snapshot: QuotaSnapshot?, status: String, detail: String = "", stale: Bool = false) {
         claudeSnapshot = snapshot
         claudeQuotaStatus = status
+        claudeQuotaDetail = detail
+        claudeQuotaStale = stale
         if selectedQuotaProvider == .claude { self.snapshot = snapshot }
         notifyContentChange()
     }

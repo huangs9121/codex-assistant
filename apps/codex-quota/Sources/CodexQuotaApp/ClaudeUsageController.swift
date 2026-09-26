@@ -1,30 +1,19 @@
 import CodexQuotaCore
-import CryptoKit
 import Foundation
-import LocalAuthentication
 import Security
 
+/// Reads Claude usage through the user's own, unmodified Claude Code CLI.
+/// The app never touches Claude credentials in the Keychain, so macOS has nothing
+/// to prompt for, and Claude Code keeps refreshing its own login.
 @MainActor
 final class ClaudeUsageController {
-    enum Source: Sendable { case oauth, oauthCache, desktopCache }
+    enum Source: Sendable { case live, lastLive, desktopCache }
     enum Failure: Error, Sendable {
-        case credentialsMissing
-        case keychainPermission
-        case keychainAuthentication
-        case keychainWritePermission
-        case credentialChanged
-        case reauthenticationRequired
-        case missingUsageScope
-        case unauthorized
-        case rateLimited
-        case network
-        case invalidResponse
-        case httpStatus(Int)
-
-        var isCredentialChange: Bool {
-            if case .credentialChanged = self { return true }
-            return false
-        }
+        case cliMissing
+        case notLoggedIn
+        case noUsageWindows
+        case timedOut
+        case launchFailed
     }
     enum Result: Sendable {
         case snapshot(QuotaSnapshot, source: Source, stale: Bool, liveFailure: Failure?)
@@ -32,140 +21,47 @@ final class ClaudeUsageController {
     }
 
     private static let staleAfter: TimeInterval = 30 * 60
-    private var checking = false
-    private var lastOAuth: (snapshot: QuotaSnapshot, fingerprint: Data)?
-    private var cachedCredential: ClaudeOAuthUsageClient.Credential?
-    private var backgroundKeychainFailure: Failure?
-    private var automaticRetry: (after: Date, failure: Failure, fingerprint: Data?)?
+    private var lastLive: QuotaSnapshot?
 
-    /// Background refreshes should pass false. Pass true only for an explicit user refresh,
-    /// when a macOS Keychain authorization prompt can be shown and handled by the user.
-    func check(
-        allowKeychainPrompt: Bool = false,
-        completion: @escaping @MainActor (Result) -> Void
-    ) {
-        guard !checking else { completion(.unavailable(.network)); return }
-        checking = true
-        if allowKeychainPrompt { backgroundKeychainFailure = nil }
-        let retry = allowKeychainPrompt ? nil : automaticRetry
-        let cachedCredential = allowKeychainPrompt ? nil : self.cachedCredential
-        let keychainFailure = allowKeychainPrompt ? nil : backgroundKeychainFailure
+    /// Callers must not start a second check before the completion runs.
+    func check(completion: @escaping @MainActor (Result) -> Void) {
         Task { @MainActor in
-            let live: ClaudeOAuthUsageClient.Outcome
-            let usedCooldown: Bool
-            if let keychainFailure {
-                usedCooldown = true
-                live = .init(result: .failure(keychainFailure), fingerprint: nil,
-                             previousFingerprint: nil)
-            } else if let retry, retry.after > Date() {
-                // A cooldown must not read the protected item on every timer tick.
-                usedCooldown = true
-                live = .init(result: .failure(retry.failure),
-                             fingerprint: cachedCredential?.fingerprint ?? retry.fingerprint,
-                             previousFingerprint: nil)
-            } else {
-                usedCooldown = false
-                live = await Task.detached(priority: .utility) {
-                    await ClaudeOAuthUsageClient.fetch(
-                        allowKeychainPrompt: allowKeychainPrompt,
-                        cachedCredential: cachedCredential
-                    )
-                }.value
-            }
-            if allowKeychainPrompt,
-               let old = self.cachedCredential,
-               let new = live.fingerprint,
-               new != old.fingerprint {
-                // A user refresh is the supported way to rebind to another account.
-                lastOAuth = nil
-            }
-            let result: Result
-            switch live.result {
+            let live = await Task.detached(priority: .utility) { ClaudeCLIUsageClient.fetch() }.value
+            let now = Date()
+            switch live {
             case .success(let snapshot):
-                automaticRetry = nil
-                self.cachedCredential = live.credential
-                if let fingerprint = live.fingerprint {
-                    lastOAuth = (snapshot, fingerprint)
-                }
-                result = .snapshot(snapshot, source: .oauth, stale: false, liveFailure: nil)
+                lastLive = snapshot
+                completion(.snapshot(snapshot, source: .live, stale: false, liveFailure: nil))
             case .failure(let failure):
-                if case .keychainPermission = failure {
-                    backgroundKeychainFailure = failure
-                    self.cachedCredential = nil
-                } else if case .keychainAuthentication = failure {
-                    backgroundKeychainFailure = failure
-                    self.cachedCredential = nil
-                } else if case .keychainWritePermission = failure {
-                    backgroundKeychainFailure = failure
-                    self.cachedCredential = nil
-                } else if failure.isCredentialChange {
-                    self.cachedCredential = nil
-                    lastOAuth = nil
-                } else if let credential = live.credential {
-                    self.cachedCredential = credential
-                } else if !usedCooldown {
-                    self.cachedCredential = nil
+                if case .notLoggedIn = failure { lastLive = nil }
+                if let previous = lastLive, Self.cacheIsCurrent(previous, at: now) {
+                    completion(.snapshot(previous, source: .lastLive,
+                                         stale: Self.isStale(previous.observedAt, at: now), liveFailure: failure))
+                    return
                 }
-                if !usedCooldown {
-                    switch failure {
-                    case .rateLimited:
-                        automaticRetry = (Date().addingTimeInterval(15 * 60), failure, live.fingerprint)
-                    case .reauthenticationRequired, .missingUsageScope, .unauthorized:
-                        automaticRetry = (Date().addingTimeInterval(30 * 60), failure, live.fingerprint)
-                    case .keychainPermission, .keychainAuthentication, .keychainWritePermission,
-                         .credentialsMissing, .invalidResponse, .httpStatus:
-                        automaticRetry = (Date().addingTimeInterval(5 * 60), failure, live.fingerprint)
-                    case .network:
-                        automaticRetry = (Date().addingTimeInterval(60), failure, live.fingerprint)
-                    default:
-                        automaticRetry = nil
-                    }
-                }
-                if failure.isCredentialChange {
-                    result = .unavailable(failure)
-                } else if let previous = lastOAuth,
-                   let fingerprint = live.fingerprint,
-                   (fingerprint == previous.fingerprint
-                       || live.previousFingerprint == previous.fingerprint),
-                   Self.cacheIsCurrent(previous.snapshot, at: Date()) {
-                    // A refresh can rotate the token while keeping the same account.
-                    lastOAuth = (previous.snapshot, fingerprint)
-                    result = .snapshot(
-                        previous.snapshot,
-                        source: .oauthCache,
-                        stale: true,
-                        liveFailure: failure
-                    )
+                let cached = await Task.detached(priority: .utility) {
+                    ClaudeDesktopUsageStore.latestSnapshot()
+                }.value
+                if let cached {
+                    completion(.snapshot(cached, source: .desktopCache,
+                                         stale: Self.isStale(cached.observedAt, at: now), liveFailure: failure))
                 } else {
-                    let cached = await Task.detached(priority: .utility) {
-                        ClaudeDesktopUsageStore.latestSnapshot()
-                    }.value
-                    if let cached {
-                        let age = Date().timeIntervalSince(cached.observedAt)
-                        result = .snapshot(
-                            cached,
-                            source: .desktopCache,
-                            stale: age < 0 || age > Self.staleAfter,
-                            liveFailure: failure
-                        )
-                    } else {
-                        result = .unavailable(failure)
-                    }
+                    completion(.unavailable(failure))
                 }
             }
-            checking = false
-            completion(result)
         }
+    }
+
+    private static func isStale(_ observedAt: Date, at now: Date) -> Bool {
+        let age = now.timeIntervalSince(observedAt)
+        return age < 0 || age > staleAfter
     }
 
     private static func cacheIsCurrent(_ snapshot: QuotaSnapshot, at now: Date) -> Bool {
         let resetDates = [snapshot.resetsAt, snapshot.secondaryWindow?.resetsAt]
             .compactMap { $0 }
         if resetDates.contains(where: { $0 <= now }) { return false }
-        if resetDates.isEmpty {
-            let age = now.timeIntervalSince(snapshot.observedAt)
-            return age >= 0 && age <= staleAfter
-        }
+        if resetDates.isEmpty { return !isStale(snapshot.observedAt, at: now) }
         return true
     }
 }
@@ -185,463 +81,156 @@ private enum ClaudeDesktopUsageStore {
     }
 }
 
-/// The Claude Code item uses the traditional file-based macOS Keychain. For
-/// that implementation, LAContext and kSecUseAuthenticationUIFail alone do not
-/// reliably suppress ACL prompts. Keep this process-wide switch scoped to one
-/// synchronous SecItem call and restore its previous value before returning.
-private enum ClaudeKeychainInteraction {
-    private static let lock = NSLock()
+/// Runs `claude auth status` and `claude -p "/usage"` from an Anthropic-signed install.
+private enum ClaudeCLIUsageClient {
+    /// Anthropic PBC Developer ID. Unsigned npm shims or other signers are never run.
+    private static let requirement = """
+        anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] \
+        and certificate leaf[field.1.2.840.113635.100.6.1.13] \
+        and certificate leaf[subject.OU] = "Q6L2SF6YDW"
+        """
 
-    static func run<T>(
-        stage: String,
-        allowPrompt: Bool,
-        _ operation: () -> T
-    ) -> Swift.Result<T, ClaudeUsageController.Failure> {
-        lock.lock()
-        defer { lock.unlock() }
-        if allowPrompt { return .success(operation()) }
+    private struct Output: Sendable {
+        let status: Int32
+        let data: Data
+    }
 
-        var wasAllowed = DarwinBoolean(false)
-        let getStatus = SecKeychainGetUserInteractionAllowed(&wasAllowed)
-        guard getStatus == errSecSuccess else {
-            NSLog("ClaudeKeychain %@ Get status=%d", stage, getStatus)
-            return .failure(.keychainPermission)
+    static func fetch() -> Swift.Result<QuotaSnapshot, ClaudeUsageController.Failure> {
+        guard let cli = locate() else { return .failure(.cliMissing) }
+        var planName: String?
+        if case .success(let output) = run(cli, ["auth", "status"], timeout: 10),
+           let status = ClaudeUsageParser.cliAuthStatus(from: output.data) {
+            guard status.loggedIn else { return .failure(.notLoggedIn) }
+            planName = status.planName
         }
-        let setStatus = SecKeychainSetUserInteractionAllowed(false)
-        guard setStatus == errSecSuccess else {
-            NSLog("ClaudeKeychain %@ Set status=%d", stage, setStatus)
-            return .failure(.keychainPermission)
+        switch run(cli, ["-p", "/usage", "--no-session-persistence"], timeout: 30) {
+        case .failure(let failure):
+            return .failure(failure)
+        case .success(let output):
+            // Never log this output: it can include account and local session details.
+            let text = String(decoding: output.data, as: UTF8.self)
+            if let snapshot = ClaudeUsageParser.cliUsageSnapshot(from: text, now: Date(), planName: planName) {
+                return .success(snapshot)
+            }
+            let lowered = text.lowercased()
+            if lowered.contains("/login") || lowered.contains("not logged in") {
+                return .failure(.notLoggedIn)
+            }
+            return .failure(.noUsageWindows)
         }
-        let value = operation()
-        let restoreStatus = SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue)
-        guard restoreStatus == errSecSuccess else {
-            NSLog("ClaudeKeychain %@ Restore status=%d", stage, restoreStatus)
-            return .failure(.keychainPermission)
+    }
+
+    private static func locate() -> URL? {
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser
+        var candidates = [
+            home.appendingPathComponent(".local/bin/claude"),
+            URL(fileURLWithPath: "/opt/homebrew/bin/claude"),
+            URL(fileURLWithPath: "/usr/local/bin/claude")
+        ]
+        // Claude Desktop keeps its own signed copy in a versioned folder.
+        let bundled = home.appendingPathComponent("Library/Application Support/Claude/claude-code")
+        let versions = ((try? fileManager.contentsOfDirectory(atPath: bundled.path)) ?? [])
+            .compactMap { name in SemanticVersion(name).map { (version: $0, name: name) } }
+            .sorted { $0.version > $1.version }
+        candidates += versions.map {
+            bundled.appendingPathComponent("\($0.name)/claude.app/Contents/MacOS/claude")
         }
-        return .success(value)
+        return candidates.lazy
+            .map { $0.resolvingSymlinksInPath() }
+            .first { fileManager.isExecutableFile(atPath: $0.path) && isTrusted($0) }
+    }
+
+    private static func isTrusted(_ url: URL) -> Bool {
+        var code: SecStaticCode?
+        var trusted: SecRequirement?
+        guard
+            SecStaticCodeCreateWithPath(url as CFURL, [], &code) == errSecSuccess,
+            let code,
+            SecRequirementCreateWithString(requirement as CFString, [], &trusted) == errSecSuccess,
+            let trusted
+        else { return false }
+        return SecStaticCodeCheckValidity(code, [], trusted) == errSecSuccess
+    }
+
+    private static func run(
+        _ executable: URL,
+        _ arguments: [String],
+        timeout: TimeInterval
+    ) -> Swift.Result<Output, ClaudeUsageController.Failure> {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.environment = environment()
+        process.currentDirectoryURL = workingDirectory()
+        // A closed stdin avoids the CLI's three-second wait for piped input.
+        process.standardInput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        do { try process.run() } catch { return .failure(.launchFailed) }
+
+        let collector = OutputCollector(limit: 256 * 1_024)
+        let finished = DispatchSemaphore(value: 0)
+        let handle = pipe.fileHandleForReading
+        DispatchQueue.global(qos: .utility).async {
+            while true {
+                let chunk = handle.availableData
+                if chunk.isEmpty { break }
+                collector.append(chunk)
+            }
+            finished.signal()
+        }
+        if finished.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            if finished.wait(timeout: .now() + 2) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+            }
+            return .failure(.timedOut)
+        }
+        process.waitUntilExit()
+        return .success(Output(status: process.terminationStatus, data: collector.data))
+    }
+
+    /// Only what the CLI needs to find the user's own login. Tokens or API keys
+    /// inherited from a terminal or another agent are deliberately not passed on.
+    private static func environment() -> [String: String] {
+        let inherited = ProcessInfo.processInfo.environment
+        var environment = [
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "en_US.UTF-8",
+            "DISABLE_AUTOUPDATER": "1"
+        ]
+        for key in ["HOME", "USER", "LOGNAME", "TMPDIR"] { environment[key] = inherited[key] }
+        environment["HOME"] = environment["HOME"] ?? NSHomeDirectory()
+        return environment
+    }
+
+    /// A fixed folder keeps Claude Code's per-folder project record in one place.
+    private static func workingDirectory() -> URL {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CodexQuota/ClaudeUsage", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 }
 
-private enum ClaudeOAuthUsageClient {
-    private static let keychainService = "Claude Code-credentials"
-    private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
-    private static let refreshURL = URL(string: "https://platform.claude.com/v1/oauth/token")!
-    // Claude Code's public OAuth client identifier, as used by CodexBar.
-    private static let clientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+private final class OutputCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private let limit: Int
 
-    struct Credential: Sendable {
-        let originalData: Data
-        let account: String
-        let modifiedAt: Date
-        let accessToken: String
-        let refreshToken: String?
-        let expiresAt: Date?
-        let scopes: [String]?
-        let subscriptionType: String?
-        let rateLimitTier: String?
+    init(limit: Int) { self.limit = limit }
 
-        var fingerprint: Data {
-            let ownerToken = refreshToken.flatMap { $0.isEmpty ? nil : $0 } ?? accessToken
-            return Data(SHA256.hash(data: Data(ownerToken.utf8)))
-        }
+    func append(_ chunk: Data) {
+        lock.lock()
+        defer { lock.unlock() }
+        buffer.append(chunk.prefix(max(0, limit - buffer.count)))
     }
 
-    struct Outcome: Sendable {
-        let result: Swift.Result<QuotaSnapshot, ClaudeUsageController.Failure>
-        let fingerprint: Data?
-        let previousFingerprint: Data?
-        let credential: Credential?
-
-        init(
-            result: Swift.Result<QuotaSnapshot, ClaudeUsageController.Failure>,
-            fingerprint: Data?,
-            previousFingerprint: Data?,
-            credential: Credential? = nil
-        ) {
-            self.result = result
-            self.fingerprint = fingerprint
-            self.previousFingerprint = previousFingerprint
-            self.credential = credential
-        }
-    }
-
-    private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-        func urlSession(
-            _ session: URLSession,
-            task: URLSessionTask,
-            willPerformHTTPRedirection response: HTTPURLResponse,
-            newRequest request: URLRequest,
-            completionHandler: @escaping (URLRequest?) -> Void
-        ) {
-            completionHandler(nil)
-        }
-    }
-
-    private static func credentialStillCurrent(
-        _ credential: Credential
-    ) -> Swift.Result<Bool, ClaudeUsageController.Failure> {
-        switch credentialMetadata() {
-        case .success(let metadata):
-            return .success(metadata.account == credential.account
-                && metadata.modifiedAt == credential.modifiedAt)
-        case .failure(let failure): return .failure(failure)
-        }
-    }
-
-    private static func credentialMetadata()
-    -> Swift.Result<(account: String, modifiedAt: Date), ClaudeUsageController.Failure> {
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnAttributes as String: true,
-            kSecUseAuthenticationContext as String: context,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail
-        ]
-        let operation = ClaudeKeychainInteraction.run(stage: "attributes", allowPrompt: false) {
-            var item: CFTypeRef?
-            return (SecItemCopyMatching(query as CFDictionary, &item), item)
-        }
-        guard case .success(let (status, item)) = operation else {
-            return .failure(.keychainPermission)
-        }
-        if status != errSecSuccess {
-            NSLog("ClaudeKeychain attributes SecItemCopyMatching status=%d", status)
-        }
-        if status == errSecAuthFailed { return .failure(.keychainAuthentication) }
-        guard status == errSecSuccess,
-              let attributes = item as? [String: Any],
-              let account = attributes[kSecAttrAccount as String] as? String,
-              let modifiedAt = attributes[kSecAttrModificationDate as String] as? Date else {
-            return .failure(status == errSecItemNotFound
-                ? .credentialChanged : .keychainPermission)
-        }
-        return .success((account, modifiedAt))
-    }
-
-    static func fetch(
-        allowKeychainPrompt: Bool,
-        cachedCredential: Credential?
-    ) async -> Outcome {
-        var credential: Credential
-        if let cachedCredential, !allowKeychainPrompt {
-            switch credentialStillCurrent(cachedCredential) {
-            case .success(true): credential = cachedCredential
-            case .success(false):
-                return Outcome(result: .failure(.credentialChanged), fingerprint: nil,
-                               previousFingerprint: nil)
-            case .failure(let failure):
-                return Outcome(result: .failure(failure), fingerprint: nil,
-                               previousFingerprint: nil)
-            }
-        } else {
-            switch readCredential(allowKeychainPrompt: allowKeychainPrompt) {
-            case .success(let value): credential = value
-            case .failure(let failure):
-                return Outcome(result: .failure(failure), fingerprint: nil,
-                               previousFingerprint: nil)
-            }
-        }
-        let originalFingerprint = credential.fingerprint
-        if let scopes = credential.scopes, !scopes.isEmpty,
-           !scopes.contains("user:profile") {
-            return Outcome(
-                result: .failure(.missingUsageScope),
-                fingerprint: originalFingerprint,
-                previousFingerprint: nil,
-                credential: credential
-            )
-        }
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.urlCache = nil
-        configuration.httpCookieStorage = nil
-        configuration.urlCredentialStorage = nil
-        let session = URLSession(
-            configuration: configuration,
-            delegate: NoRedirectDelegate(),
-            delegateQueue: nil
-        )
-        defer { session.invalidateAndCancel() }
-        var refreshed = false
-        if credential.expiresAt.map({ $0 <= Date().addingTimeInterval(60) }) == true {
-            switch await refresh(credential, session: session) {
-            case .success(let value): credential = value; refreshed = true
-            case .failure(let failure):
-                // The write preflight may change modificationDate. Do not bind
-                // an old token to a later item by comparing the account alone.
-                return Outcome(
-                    result: .failure(failure),
-                    fingerprint: failure.isCredentialChange ? nil : originalFingerprint,
-                    previousFingerprint: nil,
-                    credential: nil
-                )
-            }
-        }
-        let first = await usage(credential: credential, session: session)
-        if case .failure(.unauthorized) = first, !refreshed {
-            switch await refresh(credential, session: session) {
-            case .success(let value):
-                let result = await usage(credential: value, session: session)
-                return Outcome(
-                    result: result,
-                    fingerprint: value.fingerprint,
-                    previousFingerprint: originalFingerprint,
-                    credential: value
-                )
-            case .failure(let failure):
-                return Outcome(
-                    result: .failure(failure),
-                    fingerprint: failure.isCredentialChange ? nil : originalFingerprint,
-                    previousFingerprint: nil,
-                    credential: nil
-                )
-            }
-        }
-        return Outcome(
-            result: first,
-            fingerprint: credential.fingerprint,
-            previousFingerprint: refreshed ? originalFingerprint : nil,
-            credential: credential
-        )
-    }
-
-    private static func usage(
-        credential: Credential,
-        session: URLSession
-    ) async -> Swift.Result<QuotaSnapshot, ClaudeUsageController.Failure> {
-        var request = URLRequest(url: usageURL)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
-        request.setValue("Bearer \(credential.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("CodexQuota/ClaudeUsage", forHTTPHeaderField: "User-Agent")
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  http.url?.scheme == "https",
-                  http.url?.host == "api.anthropic.com" else {
-                return .failure(.invalidResponse)
-            }
-            switch http.statusCode {
-            case 200:
-                guard let snapshot = ClaudeUsageParser.oauthSnapshot(
-                    from: data,
-                    subscriptionType: credential.subscriptionType,
-                    rateLimitTier: credential.rateLimitTier
-                ) else {
-                    return .failure(.invalidResponse)
-                }
-                return .success(snapshot)
-            case 401, 403: return .failure(.unauthorized)
-            case 429: return .failure(.rateLimited)
-            default: return .failure(.httpStatus(http.statusCode))
-            }
-        } catch {
-            // Never log a request or server body: both can include sensitive credentials.
-            return .failure(.network)
-        }
-    }
-
-    private static func refresh(
-        _ original: Credential,
-        session: URLSession
-    ) async -> Swift.Result<Credential, ClaudeUsageController.Failure> {
-        guard let refreshToken = original.refreshToken, !refreshToken.isEmpty else {
-            return .failure(.reauthenticationRequired)
-        }
-        // Check write permission before asking Anthropic to rotate the refresh token.
-        // Even an explicit refresh allows only the initial credential read to
-        // request authorization. A missing write ACL must fail before rotation.
-        switch writeCredential(original.originalData, replacing: original) {
-        case .success: break
-        case .failure(let failure): return .failure(failure)
-        }
-
-        var request = URLRequest(url: refreshURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = 30
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = formBody([
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refreshToken),
-            ("client_id", clientID)
-        ])
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  http.url?.scheme == "https",
-                  http.url?.host == "platform.claude.com" else {
-                return .failure(.invalidResponse)
-            }
-            switch http.statusCode {
-            case 200: break
-            case 400:
-                let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-                let errorCode = payload?["error"] as? String
-                return .failure(errorCode == "invalid_grant"
-                    ? .reauthenticationRequired : .invalidResponse)
-            case 401, 403: return .failure(.reauthenticationRequired)
-            case 429: return .failure(.rateLimited)
-            default: return .failure(.httpStatus(http.statusCode))
-            }
-            guard
-                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let accessToken = object["access_token"] as? String,
-                !accessToken.isEmpty,
-                let seconds = object["expires_in"] as? NSNumber,
-                CFGetTypeID(seconds) != CFBooleanGetTypeID(),
-                (1...604_800).contains(seconds.doubleValue)
-            else { return .failure(.invalidResponse) }
-            let nextRefresh = (object["refresh_token"] as? String)
-                .flatMap { $0.isEmpty ? nil : $0 } ?? refreshToken
-            let expiry = Date().addingTimeInterval(seconds.doubleValue)
-            guard let updated = ClaudeUsageParser.refreshedCredentialData(
-                from: original.originalData,
-                accessToken: accessToken,
-                refreshToken: nextRefresh,
-                expiresAt: expiry
-            ) else {
-                return .failure(.invalidResponse)
-            }
-            switch writeCredential(updated, replacing: original) {
-            case .success:
-                let metadataResult = credentialMetadata()
-                if case .failure(.keychainAuthentication) = metadataResult {
-                    return .failure(.keychainAuthentication)
-                }
-                guard case .success(let metadata) = metadataResult,
-                      metadata.account == original.account else {
-                    return .failure(.keychainPermission)
-                }
-                return .success(Credential(
-                    originalData: updated,
-                    account: original.account,
-                    modifiedAt: metadata.modifiedAt,
-                    accessToken: accessToken,
-                    refreshToken: nextRefresh,
-                    expiresAt: expiry,
-                    scopes: original.scopes,
-                    subscriptionType: original.subscriptionType,
-                    rateLimitTier: original.rateLimitTier
-                ))
-            case .failure(let failure): return .failure(failure)
-            }
-        } catch {
-            return .failure(.network)
-        }
-    }
-
-    private static func readCredential(
-        allowKeychainPrompt: Bool
-    ) -> Swift.Result<Credential, ClaudeUsageController.Failure> {
-        let context = LAContext()
-        context.interactionNotAllowed = !allowKeychainPrompt
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-            kSecReturnAttributes as String: true,
-            kSecUseAuthenticationContext as String: context
-        ]
-        if !allowKeychainPrompt {
-            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail
-        }
-        let operation = ClaudeKeychainInteraction.run(
-            stage: "read", allowPrompt: allowKeychainPrompt
-        ) {
-            var item: CFTypeRef?
-            return (SecItemCopyMatching(query as CFDictionary, &item), item)
-        }
-        guard case .success(let (status, item)) = operation else {
-            return .failure(.keychainPermission)
-        }
-        if status != errSecSuccess {
-            NSLog("ClaudeKeychain read SecItemCopyMatching status=%d", status)
-        }
-        switch status {
-        case errSecSuccess: break
-        case errSecItemNotFound: return .failure(.credentialsMissing)
-        case errSecAuthFailed: return .failure(.keychainAuthentication)
-        case errSecInteractionNotAllowed, errSecUserCanceled:
-            return .failure(.keychainPermission)
-        default: return .failure(.keychainPermission)
-        }
-        guard
-            let attributes = item as? [String: Any],
-            let data = attributes[kSecValueData as String] as? Data,
-            let account = attributes[kSecAttrAccount as String] as? String,
-            let modifiedAt = attributes[kSecAttrModificationDate as String] as? Date,
-            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let oauth = root["claudeAiOauth"] as? [String: Any],
-            let token = oauth["accessToken"] as? String,
-            !token.isEmpty
-        else { return .failure(.credentialsMissing) }
-        let expiry = oauth["expiresAt"] as? NSNumber
-        let date = expiry.flatMap {
-            CFGetTypeID($0) == CFBooleanGetTypeID() || !$0.doubleValue.isFinite
-                ? nil : Date(timeIntervalSince1970: $0.doubleValue / 1_000)
-        }
-        return .success(Credential(
-            originalData: data,
-            account: account,
-            modifiedAt: modifiedAt,
-            accessToken: token,
-            refreshToken: oauth["refreshToken"] as? String,
-            expiresAt: date,
-            scopes: oauth["scopes"] as? [String],
-            subscriptionType: oauth["subscriptionType"] as? String,
-            rateLimitTier: oauth["rateLimitTier"] as? String
-        ))
-    }
-
-    private static func writeCredential(
-        _ data: Data,
-        replacing original: Credential
-    ) -> Swift.Result<Void, ClaudeUsageController.Failure> {
-        switch readCredential(allowKeychainPrompt: false) {
-        case .success(let current) where current.account == original.account
-            && current.originalData == original.originalData: break
-        case .success: return .failure(.credentialChanged)
-        case .failure(.credentialsMissing): return .failure(.credentialChanged)
-        case .failure(.keychainAuthentication): return .failure(.keychainAuthentication)
-        case .failure(let failure):
-            return .failure(failure.isCredentialChange
-                ? .credentialChanged : .keychainWritePermission)
-        }
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: original.account,
-            kSecUseAuthenticationContext as String: context,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail
-        ]
-        let operation = ClaudeKeychainInteraction.run(stage: "write", allowPrompt: false) {
-            SecItemUpdate(query as CFDictionary, [
-                kSecValueData as String: data
-            ] as CFDictionary)
-        }
-        guard case .success(let status) = operation else {
-            return .failure(.keychainWritePermission)
-        }
-        if status != errSecSuccess {
-            NSLog("ClaudeKeychain write SecItemUpdate status=%d", status)
-        }
-        return status == errSecSuccess ? .success(()) : .failure(.keychainWritePermission)
-    }
-
-    private static func formBody(_ items: [(String, String)]) -> Data {
-        let allowed = CharacterSet(charactersIn:
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-        return Data(items.map { name, value in
-            let encoded = value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
-            return "\(name)=\(encoded)"
-        }.joined(separator: "&").utf8)
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer
     }
 }

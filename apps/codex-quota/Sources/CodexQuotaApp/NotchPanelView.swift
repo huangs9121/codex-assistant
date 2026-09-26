@@ -83,10 +83,11 @@ struct DailyPanelContent: View {
     let text: AppText
     let actions: NotchActions
     private var cn: Bool { text.language == .simplifiedChinese }
+    /// Outer ring and its text use the provider colour; the inner 5-hour ring uses a light tint of it.
     private var accent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.85, green: 0.49, blue: 0.36) : Color(red: 0.14, green: 0.55, blue: 1) }
+    private var innerAccent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.953, green: 0.749, blue: 0.663) : Color(red: 0.616, green: 0.796, blue: 1) }
     private var data: StatusPanelQuotaData { StatusPanelQuotaData(snapshot: model.snapshot, now: model.now) }
     private var windows: [StatusPanelQuotaWindow] { [data.primaryWindow, data.secondaryWindow].compactMap { $0 } }
-    private var mainWindow: StatusPanelQuotaWindow? { windows.first { StatusPanelQuotaWindowKind(windowDuration: $0.windowDuration) == .weekly } ?? windows.first }
     private var forecast: CodexResetEvent? {
         guard model.selectedQuotaProvider == .codex, model.showsResetForecast else { return nil }
         return model.resetCalendar?.feed.upcomingAnnouncement(now: model.now)
@@ -155,45 +156,32 @@ struct DailyPanelContent: View {
             }.font(.system(size: 11))
             HStack {
                 Spacer()
-                ZStack {
-                    Circle().stroke(.white.opacity(0.12), lineWidth: 6)
-                    if let window = mainWindow {
-                        Circle().trim(from: 0, to: CGFloat(window.remainingPercent) / 100)
-                            .stroke(accent, style: StrokeStyle(lineWidth: 6, lineCap: .round)).rotationEffect(.degrees(-90))
-                        VStack(spacing: 4) {
-                            Text("\(window.remainingPercent)%").font(.system(size: 25, weight: .semibold)).monospacedDigit()
-                            Text(windowLabel(window)).font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
-                        }
-                    } else { Text("—").font(.system(size: 26)).foregroundStyle(.secondary) }
-                }.frame(width: 92, height: 92).padding(4)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(model.selectedQuotaProvider.title) \(mainWindow.map { windowLabel($0) + String($0.remainingPercent) + "%" } ?? "暂无数据")")
+                QuotaRings(outer: data.outerRingWindow, inner: data.innerRingWindow,
+                           outerColor: accent, innerColor: innerAccent, label: windowLabel)
+                    .opacity(model.quotaStale ? 0.45 : 1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(model.selectedQuotaProvider.title) " + (windows.isEmpty ? "暂无数据"
+                        : [data.outerRingWindow, data.innerRingWindow].compactMap { $0 }
+                            .map { windowLabel($0) + " \($0.remainingPercent)%" }.joined(separator: "，")))
                 Spacer()
             }
-            ForEach(Array(windows.enumerated()), id: \.offset) { _, window in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(windowLabel(window)).foregroundStyle(.white.opacity(0.65))
-                        Spacer()
-                        Text("\(window.remainingPercent)%").fontWeight(.medium).monospacedDigit()
-                    }.font(.system(size: 12))
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(.white.opacity(0.12))
-                            Capsule().fill(accent).frame(width: g.size.width * CGFloat(window.remainingPercent) / 100)
-                        }
-                    }.frame(height: 4)
-                    if let reset = window.resetsAt {
-                        Text(ResetCountdownFormatter.compactString(resetsAt: reset, now: model.now, language: text.language) + (cn ? "后重置" : " to reset") + " · " + shortDate(reset))
-                            .font(.system(size: 10)).foregroundStyle(.white.opacity(0.6))
-                            .resetTimeHelp(resetTimeHelp(for: reset))
-                    } else {
-                        Text(cn ? "重置时间暂不可用" : "Reset time unavailable").font(.system(size: 10)).foregroundStyle(.secondary)
+            let resets = StatusPanelResetSummary(windows: windows)
+            if resets != .lines([]) || !model.quotaStatus.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    switch resets {
+                    case .allUnknown:
+                        Text(cn ? "尚未获取重置时间" : "Reset time not received yet")
+                            .fontWeight(.medium).foregroundStyle(.white.opacity(0.65))
+                    case .lines(let lines):
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in resetLine(line) }
                     }
-                }
-            }
-            if !model.quotaStatus.isEmpty {
-                Text(model.quotaStatus).font(.system(size: 11)).foregroundStyle(.white.opacity(0.6)).fixedSize(horizontal: false, vertical: true)
+                    if !model.quotaStatus.isEmpty {
+                        Text(model.quotaStatus).foregroundStyle(.white.opacity(0.55))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .buttonHelp(model.quotaDetail)
+                            .padding(.top, resets == .allUnknown ? -3 : 0)
+                    }
+                }.font(.system(size: 11))
             }
             HStack {
                 Button { model.onRefreshQuota?() } label: { Label(cn ? "刷新" : "Refresh", systemImage: "arrow.clockwise") }.buttonStyle(.plain)
@@ -209,9 +197,36 @@ struct DailyPanelContent: View {
     }
     private func windowLabel(_ window: StatusPanelQuotaWindow) -> String {
         switch StatusPanelQuotaWindowKind(windowDuration: window.windowDuration) {
-        case .fiveHour: cn ? "5 小时剩余" : "5h left"
+        case .fiveHour: cn ? "5小时剩余" : "5h left"
         case .weekly: cn ? "本周剩余" : "Week left"
         case .generic: cn ? "额度剩余" : "Remaining"
+        }
+    }
+
+    /// One reset line per window; the period name uses the colour of its ring.
+    @ViewBuilder private func resetLine(_ line: StatusPanelResetSummary.Line) -> some View {
+        switch line {
+        case let .resets(kind, date):
+            // Panel countdowns keep two units (days + hours, or hours + minutes).
+            resetRow(kind, (ResetCountdownFormatter.panelCountdownValue(resetsAt: date, now: model.now, language: text.language) ?? "--")
+                + (cn ? "后重置" : " to reset") + " · " + shortDate(date))
+                .resetTimeHelp(resetTimeHelp(for: date))
+        case let .unknown(kind):
+            resetRow(kind, cn ? "尚未获取重置时间" : "Reset time not received yet")
+        }
+    }
+
+    private func resetRow(_ kind: StatusPanelQuotaWindowKind, _ value: String) -> some View {
+        let inner = data.innerRingWindow.map { StatusPanelQuotaWindowKind(windowDuration: $0.windowDuration) == kind } ?? false
+        let period = switch kind {
+        case .fiveHour: cn ? "5小时" : "5h"
+        case .weekly: cn ? "本周" : "Week"
+        case .generic: cn ? "额度" : "Quota"
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(period).fontWeight(.semibold).foregroundStyle(inner ? innerAccent : accent)
+                .frame(width: cn ? 36 : 40, alignment: .leading)
+            Text(value).foregroundStyle(.white.opacity(0.55)).monospacedDigit().lineLimit(1)
         }
     }
     private func resetTimeHelp(for date: Date) -> ResetTimeHelp {
@@ -234,6 +249,53 @@ struct DailyPanelContent: View {
     private func shortDate(_ date: Date) -> String {
         let f = DateFormatter(); f.locale = text.language.locale; f.dateFormat = "M/d HH:mm"
         return f.string(from: date)
+    }
+}
+
+/// Outer ring: weekly window. Inner ring: 5-hour window, only when both exist.
+/// Each number and label uses the colour of its ring; the weekly number stays white as the main reading.
+private struct QuotaRings: View {
+    let outer: StatusPanelQuotaWindow?
+    let inner: StatusPanelQuotaWindow?
+    let outerColor: Color
+    let innerColor: Color
+    let label: (StatusPanelQuotaWindow) -> String
+    private let size: CGFloat = 136
+    private let lineWidth: CGFloat = 7
+    private let gap: CGFloat = 4
+
+    var body: some View {
+        ZStack {
+            ring(outer, color: outerColor, diameter: size)
+            if inner != nil { ring(inner, color: innerColor, diameter: size - 2 * (lineWidth + gap)) }
+            VStack(spacing: 0) {
+                if let outer {
+                    Text("\(outer.remainingPercent)%").font(.system(size: 25, weight: .semibold)).monospacedDigit()
+                    Text(label(outer)).font(.system(size: 10)).foregroundStyle(outerColor).padding(.top, 4)
+                    if let inner {
+                        Text("\(inner.remainingPercent)%").font(.system(size: 16, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(innerColor).padding(.top, 7)
+                        Text(label(inner)).font(.system(size: 10)).foregroundStyle(innerColor).padding(.top, 4)
+                    }
+                } else {
+                    Text("—").font(.system(size: 26)).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+    }
+
+    private func ring(_ window: StatusPanelQuotaWindow?, color: Color, diameter: CGFloat) -> some View {
+        ZStack {
+            Circle().stroke(.white.opacity(0.11), lineWidth: lineWidth)
+            if let window {
+                Circle().trim(from: 0, to: CGFloat(window.remainingPercent) / 100)
+                    .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+        }
+        // Strokes straddle the path; inset so the ring's outer edge matches the diameter.
+        .frame(width: diameter - lineWidth, height: diameter - lineWidth)
     }
 }
 
