@@ -181,6 +181,9 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
             defer: false
         )
         window.title = "趁手设置"
+        // The settings design is light with fixed light backgrounds; keep the whole window, its
+        // controls and sheets in the light appearance so text stays readable in Dark Mode.
+        window.appearance = NSAppearance(named: .aqua)
         window.contentMinSize = NSSize(width: 880, height: 620)
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
@@ -271,6 +274,9 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
             button.alignment = .left
             button.font = .systemFont(ofSize: 13)
             button.contentTintColor = NSColor(srgbRed: 0.35, green: 0.40, blue: 0.48, alpha: 1)
+            // With keyboard navigation on, the first item gets focus when the window opens and the
+            // ring hugs the symbol, leaving a blue blob on the gear. The row highlight shows selection.
+            button.focusRingType = .none
             button.wantsLayer = true
             button.layer?.cornerRadius = 7
             button.translatesAutoresizingMaskIntoConstraints = false
@@ -287,6 +293,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         quitButton.alignment = .left
         quitButton.font = .systemFont(ofSize: 11)
         quitButton.contentTintColor = .tertiaryLabelColor
+        quitButton.focusRingType = .none
         quitButton.translatesAutoresizingMaskIntoConstraints = false
         sidebar.addSubview(quitButton)
         NSLayoutConstraint.activate([
