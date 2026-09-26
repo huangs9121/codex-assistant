@@ -259,9 +259,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         onToggleSleep: { [weak self] in
             self?.toggleTaskSleep()
         },
-        onDisplayMode: { [weak self] mode in
-            self?.setPanelDisplayMode(mode)
-        },
         onOpenClaudeSession: { [weak self] in self?.openClaudeSession($0) }
     )
 
@@ -296,6 +293,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         statusItem.isVisible = mode == .menuBar
         if reveal, mode == .menuBar, let button = statusItem.button {
             DispatchQueue.main.async { [weak self] in self?.panelController.toggle(relativeTo: button) }
+        }
+    }
+
+    /// Verification flag: right after launch the status item has no on-screen frame yet, so a
+    /// popover anchored to it would not appear. Retry for a few seconds until it is placed.
+    private func showPanelWhenStatusItemIsPlaced(attempt: Int = 0) {
+        guard let button = statusItem.button else { return }
+        if let window = button.window, window.frame.width > 0, window.frame.height > 0 {
+            panelController.toggle(relativeTo: button)
+        } else if attempt < 12 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                self?.showPanelWhenStatusItemIsPlaced(attempt: attempt + 1)
+            }
         }
     }
 
@@ -417,11 +427,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             DispatchQueue.main.async { [weak self] in self?.quickToolsPanelController.show() }
         }
         if CommandLine.arguments.contains("--show-panel") {
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let button = statusItem.button else { return }
-                setPanelDisplayMode(.menuBar, reveal: false)
-                panelController.toggle(relativeTo: button)
-            }
+            setPanelDisplayMode(.menuBar, reveal: false)
+            showPanelWhenStatusItemIsPlaced()
         }
         if CommandLine.arguments.contains("--show-node-scores") {
             DispatchQueue.main.async { [weak self] in self?.nodeScoreWindowController.show() }
@@ -1702,7 +1709,9 @@ if CommandLine.arguments.contains("--notch-preview") {
         Task { @MainActor in
             // claude-real waits for one real Claude Code CLI check.
             try? await Task.sleep(for: .milliseconds(state == "claude-real" ? 15_000 : 700))
-            do { try preview.snapshot(to: path) } catch { print(error) }
+            do {
+                if args.contains("--status-panel") { try preview.snapshotStatusPanel(to: path) } else { try preview.snapshot(to: path) }
+            } catch { print(error) }
             application.terminate(nil)
         }
     }

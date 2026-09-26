@@ -197,7 +197,8 @@ final class StatusPanelModel: ObservableObject {
 
 @MainActor
 final class StatusPanelController: NSObject, NSPopoverDelegate {
-    static let panelWidth: CGFloat = 750
+    /// The menu bar keeps the compact 1.4.5 panel; the island has its own wide layout.
+    static let panelWidth: CGFloat = 320
 
     private let popover = NSPopover()
     private let hostingController: NSHostingController<StatusPanelView>
@@ -221,7 +222,6 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         onClearCompletedTasks: @escaping () -> Void,
         onClearFinishedThreads: @escaping () -> Void,
         onToggleSleep: @escaping () -> Void,
-        onDisplayMode: @escaping (PanelDisplayMode) -> Void,
         onOpenClaudeSession: @escaping (ClaudeCodeSession) -> Void
     ) {
         self.model = model
@@ -252,7 +252,6 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 onClearCompletedTasks: onClearCompletedTasks,
                 onClearFinishedThreads: onClearFinishedThreads,
                 onToggleSleep: onToggleSleep,
-                onDisplayMode: onDisplayMode,
                 onOpenClaudeSession: { session in
                     panelPopover.performClose(nil)
                     onOpenClaudeSession(session)

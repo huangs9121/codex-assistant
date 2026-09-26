@@ -120,6 +120,32 @@ final class NotchPreview {
     func show() { controller.setEnabled(true, expand: true); controller.keepPreviewVisible(); model.tick(at: date) }
     func snapshot(to path: String) throws { try controller.snapshot(to: path) }
 
+    /// Renders the 1.4.5-style menu bar panel with the same fixture data. The popover's
+    /// material is approximated with a dark popover background.
+    func snapshotStatusPanel(to path: String) throws {
+        let view = StatusPanelView(
+            model: model, text: AppText(language: .simplifiedChinese), onSettingsMenu: { _ in }, onQuickTools: {},
+            onNodeScores: {}, onOpenResetAnnouncement: {}, canResumeTaskSessions: false,
+            onResumeSession: { _, _ in .unavailable }, onOpenCodexThread: { _ in .unavailable },
+            onOpenCLIProcess: { _, _ in .unavailable }, onArchiveTask: { _ in }, onClearCompletedTasks: {},
+            onClearFinishedThreads: {}, onToggleSleep: {})
+        let hosting = NSHostingView(rootView: view)
+        hosting.appearance = NSAppearance(named: .darkAqua)
+        hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
+        let background = NSVisualEffectView(frame: hosting.frame)
+        background.material = .popover
+        background.state = .active
+        background.appearance = NSAppearance(named: .darkAqua)
+        background.addSubview(hosting)
+        let window = NSWindow(contentRect: hosting.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = background
+        background.layoutSubtreeIfNeeded()
+        guard let bitmap = background.bitmapImageRepForCachingDisplay(in: background.bounds) else { return }
+        background.cacheDisplay(in: background.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { return }
+        try png.write(to: URL(fileURLWithPath: path))
+    }
+
     func recordAnimation(to directory: String) {
         controller.setEnabled(true)
         Task { @MainActor in
