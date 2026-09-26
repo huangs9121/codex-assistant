@@ -5,7 +5,30 @@ import Foundation
 final class CodexRateLimitController {
     enum Result {
         case snapshot(QuotaSnapshot)
-        case failure
+        case failure(Failure)
+    }
+
+    enum Failure: Equatable {
+        case cliMissing
+        case launchFailed
+        case exited
+        case timedOut
+        case busy
+        case serverError(String)
+        case unreadable
+
+        /// Shown in the quota line's help so a failed read explains itself.
+        var message: String {
+            switch self {
+            case .cliMissing: "未找到 Codex 命令行（ChatGPT 或 Codex 应用内）"
+            case .launchFailed: "无法启动 Codex 命令行"
+            case .exited: "Codex 命令行意外退出"
+            case .timedOut: "Codex 在 8 秒内没有返回额度"
+            case .busy: "上一次读取尚未结束"
+            case let .serverError(message): "Codex 返回错误：\(message)"
+            case .unreadable: "返回的额度数据无法识别"
+            }
+        }
     }
 
     private static let initializeRequestID = 1
@@ -29,11 +52,11 @@ final class CodexRateLimitController {
 
     func check(completion: @escaping @MainActor (Result) -> Void) {
         guard !invalidated else {
-            completion(.failure)
+            completion(.failure(.launchFailed))
             return
         }
         guard waitingForInitialization == nil, pendingRequest == nil else {
-            completion(.failure)
+            completion(.failure(.busy))
             return
         }
 
@@ -43,8 +66,8 @@ final class CodexRateLimitController {
         }
 
         waitingForInitialization = completion
-        guard startServer() else {
-            finishInitialization(with: .failure)
+        if let failure = startServer() {
+            finishInitialization(with: .failure(failure))
             return
         }
         let timeout = DispatchWorkItem { [weak self] in
@@ -52,7 +75,7 @@ final class CodexRateLimitController {
                 guard self?.waitingForInitialization != nil else {
                     return
                 }
-                self?.finishInitialization(with: .failure)
+                self?.finishInitialization(with: .failure(.timedOut))
                 self?.stopServer()
             }
         }
@@ -90,10 +113,10 @@ final class CodexRateLimitController {
         ) as? String ?? "unknown"
     }
 
-    private func startServer() -> Bool {
+    private func startServer() -> Failure? {
         stopServer()
         guard let executable = codexExecutable() else {
-            return false
+            return .cliMissing
         }
 
         let process = Process()
@@ -128,7 +151,7 @@ final class CodexRateLimitController {
         } catch {
             outputHandle.readabilityHandler = nil
             errorHandle.readabilityHandler = nil
-            return false
+            return .launchFailed
         }
 
         self.process = process
@@ -137,7 +160,7 @@ final class CodexRateLimitController {
         self.errorHandle = errorHandle
         outputBuffer.removeAll(keepingCapacity: true)
         initialized = false
-        return true
+        return nil
     }
 
     private func requestRateLimits(
@@ -166,14 +189,14 @@ final class CodexRateLimitController {
             JSONSerialization.isValidJSONObject(object),
             var data = try? JSONSerialization.data(withJSONObject: object)
         else {
-            failAllRequests()
+            failAllRequests(with: .launchFailed)
             return
         }
         data.append(0x0A)
         do {
             try inputHandle?.write(contentsOf: data)
         } catch {
-            failAllRequests()
+            failAllRequests(with: .exited)
             stopServer()
         }
     }
@@ -203,7 +226,7 @@ final class CodexRateLimitController {
             initializationTimeout?.cancel()
             initializationTimeout = nil
             guard root["result"] != nil else {
-                finishInitialization(with: .failure)
+                finishInitialization(with: .failure(Self.failure(in: root)))
                 stopServer()
                 return
             }
@@ -227,8 +250,18 @@ final class CodexRateLimitController {
         if let snapshot = AccountRateLimitsParser.snapshot(from: data) {
             request.completion(.snapshot(snapshot))
         } else {
-            request.completion(.failure)
+            // Start from a fresh server next time in case this one has gone bad.
+            stopServer()
+            request.completion(.failure(Self.failure(in: root)))
         }
+    }
+
+    private static func failure(in root: [String: Any]) -> Failure {
+        guard let error = root["error"] as? [String: Any] else {
+            return .unreadable
+        }
+        let message = (error["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return .serverError(message.isEmpty ? "未知错误" : String(message.prefix(160)))
     }
 
     private func requestTimedOut(id: Int) {
@@ -236,7 +269,7 @@ final class CodexRateLimitController {
             return
         }
         pendingRequest = nil
-        request.completion(.failure)
+        request.completion(.failure(.timedOut))
         stopServer()
     }
 
@@ -250,21 +283,21 @@ final class CodexRateLimitController {
         completion(result)
     }
 
-    private func failAllRequests() {
-        finishInitialization(with: .failure)
+    private func failAllRequests(with failure: Failure) {
+        finishInitialization(with: .failure(failure))
         guard let request = pendingRequest else {
             return
         }
         request.timeout.cancel()
         pendingRequest = nil
-        request.completion(.failure)
+        request.completion(.failure(failure))
     }
 
     private func serverTerminated() {
         guard process != nil else {
             return
         }
-        failAllRequests()
+        failAllRequests(with: .exited)
         stopServer(terminate: false)
     }
 

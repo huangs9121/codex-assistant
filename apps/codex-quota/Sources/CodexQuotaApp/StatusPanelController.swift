@@ -22,6 +22,7 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var snapshot: QuotaSnapshot?
     @Published private(set) var selectedQuotaProvider: QuotaProvider
     @Published private(set) var codexQuotaStatus = "正在读取额度…"
+    @Published private(set) var codexQuotaDetail = ""
     @Published private(set) var claudeQuotaStatus = "正在读取额度…"
     @Published private(set) var claudeQuotaDetail = ""
     @Published private(set) var claudeQuotaStale = false
@@ -34,8 +35,8 @@ final class StatusPanelModel: ObservableObject {
     var quotaStatus: String { selectedQuotaProvider == .codex ? codexQuotaStatus : claudeQuotaStatus }
     /// Full explanation for settings and the panel line's help.
     var quotaDetail: String {
-        guard selectedQuotaProvider == .claude, !claudeQuotaDetail.isEmpty else { return quotaStatus }
-        return claudeQuotaDetail
+        let detail = selectedQuotaProvider == .codex ? codexQuotaDetail : claudeQuotaDetail
+        return detail.isEmpty ? quotaStatus : detail
     }
     var quotaStale: Bool { selectedQuotaProvider == .claude && claudeQuotaStale }
     @Published private(set) var tasks: [TaskStatusSnapshot] = []
@@ -130,7 +131,10 @@ final class StatusPanelModel: ObservableObject {
         notifyContentChange()
     }
 
-    func updateCodexStatus(_ status: String) { codexQuotaStatus = status }
+    func updateCodexStatus(_ status: String, detail: String = "") {
+        codexQuotaStatus = status
+        codexQuotaDetail = detail
+    }
 
     func selectQuotaProvider(_ provider: QuotaProvider) {
         selectedQuotaProvider = provider

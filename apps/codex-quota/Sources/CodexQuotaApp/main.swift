@@ -138,6 +138,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var currentResetCalendar: CodexResetCache?
     private var resetNotificationsInFlight: Set<String> = []
     private var isRefreshing = false
+    /// The last reading from the Codex CLI, kept through brief live-read failures.
+    private var lastLiveCodexSnapshot: QuotaSnapshot?
+    private var codexLiveFailingSince: Date?
+    private static let codexLiveFailureGrace: TimeInterval = 180
     private var isUpdateCheckInFlight = false
     private var isUpdateInstallInFlight = false
     private var isResetMonitorInFlight = false
@@ -1163,14 +1167,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
                     self.isRefreshing = false
                     switch result {
                     case let .snapshot(snapshot):
+                        self.lastLiveCodexSnapshot = snapshot
+                        self.codexLiveFailingSince = nil
                         self.panelModel.updateCodexStatus("")
                         self.apply(snapshot)
-                    case .failure:
-                        self.panelModel.updateCodexStatus(fallbackSnapshot == nil ? "暂未读取到 Codex 额度" : "实时读取失败，显示本地记录")
-                        self.apply(fallbackSnapshot)
+                    case let .failure(failure):
+                        self.applyCodexLiveFailure(failure, fallback: fallbackSnapshot)
                     }
                 }
             }
+        }
+    }
+
+    /// A single failed read keeps the last live reading; only a failure that lasts replaces it.
+    private func applyCodexLiveFailure(_ failure: CodexRateLimitController.Failure, fallback: QuotaSnapshot?) {
+        let now = Date()
+        let since = codexLiveFailingSince ?? now
+        codexLiveFailingSince = since
+        if lastLiveCodexSnapshot != nil, now.timeIntervalSince(since) < Self.codexLiveFailureGrace {
+            return
+        }
+        let reason = "实时读取失败：\(failure.message)。"
+        if let fallback, lastLiveCodexSnapshot.map({ fallback.observedAt > $0.observedAt }) ?? true {
+            panelModel.updateCodexStatus("实时读取失败，显示本地记录", detail: reason + "当前显示本机会话里记录的额度。")
+            apply(fallback)
+        } else if let live = lastLiveCodexSnapshot {
+            let time = DateFormatter.localizedString(from: live.observedAt, dateStyle: .none, timeStyle: .short)
+            panelModel.updateCodexStatus("实时读取失败，显示上次结果", detail: reason + "当前显示 \(time) 读取的额度。")
+            apply(live)
+        } else {
+            panelModel.updateCodexStatus("暂未读取到 Codex 额度", detail: reason)
+            apply(nil)
         }
     }
 
