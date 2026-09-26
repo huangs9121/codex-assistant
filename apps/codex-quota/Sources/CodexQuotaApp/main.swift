@@ -215,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private let claudeUsageController = ClaudeUsageController()
     private var lastClaudeCheck: Date?
     private var isRefreshingClaude = false
+    private var isScanningClaudeSessions = false
     private let nodeScoreWindowController = NodeScoreWindowController()
     private let taskStatusController = TaskStatusController()
     private lazy var panelController = StatusPanelController(
@@ -260,7 +261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         },
         onDisplayMode: { [weak self] mode in
             self?.setPanelDisplayMode(mode)
-        }
+        },
+        onOpenClaudeSession: { [weak self] in self?.openClaudeSession($0) }
     )
 
     private lazy var notchController: NotchPanelController = NotchPanelController(model: panelModel, text: text, actions: NotchActions(
@@ -282,7 +284,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         thread: { [weak self] in self?.openCodexThread($0) ?? .unavailable },
         cli: { [weak self] id, process in self?.openCLIProcess(id: id, process: process) ?? .unavailable },
         archive: { [weak self] in self?.archiveTask($0) },
-        clear: { [weak self] in self?.confirmClearCompletedTasks() }
+        clear: { [weak self] in self?.confirmClearCompletedTasks() },
+        claude: { [weak self] in self?.openClaudeSession($0) }
     ))
 
     private func setPanelDisplayMode(_ mode: PanelDisplayMode, reveal: Bool = true) {
@@ -298,11 +301,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
 
     private func openTasksApplication() {
         notchController.collapse()
-        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
-            showAlert(message: language == .simplifiedChinese ? "未找到 Codex 应用" : "Codex is not installed")
+        let claude = panelModel.selectedQuotaProvider == .claude
+        let bundleID = claude ? "com.anthropic.claudefordesktop" : "com.openai.codex"
+        guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            let name = claude ? "Claude" : "Codex"
+            showAlert(message: language == .simplifiedChinese ? "未找到 \(name) 应用" : "\(name) is not installed")
             return
         }
         NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    /// The task list shows one source at a time, so Claude sessions are scanned only while Claude is selected.
+    private func refreshClaudeSessions() {
+        guard panelModel.selectedQuotaProvider == .claude, !isScanningClaudeSessions else { return }
+        isScanningClaudeSessions = true
+        Task { @MainActor [weak self] in
+            let sessions = await Task.detached(priority: .utility) { ClaudeSessionScanner.scan() }.value
+            guard let self else { return }
+            isScanningClaudeSessions = false
+            panelModel.updateClaudeSessions(sessions)
+        }
+    }
+
+    private func openClaudeSession(_ session: ClaudeCodeSession) {
+        notchController.collapse()
+        let cn = language == .simplifiedChinese
+        switch session.origin {
+        case .desktop(let id):
+            // Claude Desktop's own deep link, also used by its Dock menu and Spotlight.
+            if let url = ClaudeCodeSessionParser.openURL(forDesktopSession: id), NSWorkspace.shared.open(url) { return }
+            showAlert(message: cn ? "未能在 Claude 中打开这个会话。" : "Could not open this session in Claude.")
+        case .terminal(let process):
+            if let tty = process.tty, activateTerminalTab(tty) { return }
+            if activateOwningApplication(for: process) { return }
+            showAlert(message: cn ? "这个 Claude Code 终端会话已结束，或不在“终端”中。" : "This Claude Code terminal session has ended or is not in Terminal.")
+        }
+    }
+
+    private func confirmClearCompletedClaudeSessions() {
+        let alert = NSAlert()
+        alert.messageText = "清理已完成的 Claude 会话？"
+        alert.informativeText = "只从趁手的列表中隐藏，不会归档或删除 Claude 里的会话；运行中的会话仍会显示。"
+        alert.addButton(withTitle: "清理完成项")
+        alert.addButton(withTitle: "取消")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runWithButtonHelp() == .alertFirstButtonReturn else { return }
+        panelModel.hideCompletedClaudeSessions()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -480,6 +524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         panelModel.onQuotaProviderChange = { [weak self] in
             self?.updateStatusPresentation()
             self?.quickToolsPanelController.refreshSettings()
+            self?.refreshClaudeSessions()
         }
         panelModel.onRefreshQuota = { [weak self] in self?.refreshQuotaManually() }
         let appMenu = NSMenu()
@@ -1093,6 +1138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         refreshClaudeQuota()
         panelModel.tick()
         refreshTaskStatuses()
+        refreshClaudeSessions()
         guard !isRefreshing else {
             return
         }
@@ -1214,6 +1260,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     private func confirmClearCompletedTasks() {
+        if panelModel.selectedQuotaProvider == .claude {
+            confirmClearCompletedClaudeSessions()
+            return
+        }
         let alert = NSAlert()
         alert.messageText = "清理已完成的任务？"
         alert.informativeText = "从列表中移除已完成项，保留运行中、状态未知和终端占用的任务。不会删除项目源码或工作区。"

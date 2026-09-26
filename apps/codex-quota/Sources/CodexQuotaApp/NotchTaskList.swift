@@ -10,6 +10,7 @@ struct NotchTaskList: View {
     let onOpenCLIProcess: (String, CodexCLIProcess) -> CodexCLIProcessOpenActionResult
     let onArchiveTask: (TaskStatusSnapshot) -> Void
     let onClearCompleted: () -> Void
+    var onOpenClaudeSession: (ClaudeCodeSession) -> Void = { _ in }
 
     private static let rowHeight: CGFloat = 50
     private static let rowSpacing: CGFloat = 4
@@ -50,13 +51,21 @@ struct NotchTaskList: View {
     }
 
     static func totalCount(model: StatusPanelModel) -> Int {
-        model.tasks.count
+        if model.selectedQuotaProvider == .claude { return model.claudeSessions.count }
+        return model.tasks.count
             + model.desktopThreadGroups.reduce(0) { $0 + logicalThreadCount($1) }
             + model.cliProcesses.count
     }
 
     static func runningCount(model: StatusPanelModel) -> Int {
-        TaskStatusPresentationFormatter.runningCount(in: model.tasks)
+        if model.selectedQuotaProvider == .claude {
+            // Like Codex, terminal CLI rows are not counted as running tasks.
+            return model.claudeSessions.filter {
+                guard $0.status == .running, case .desktop = $0.origin else { return false }
+                return true
+            }.count
+        }
+        return TaskStatusPresentationFormatter.runningCount(in: model.tasks)
             + model.desktopThreadGroups.reduce(0) { $0 + $1.runningCount }
     }
 
@@ -111,8 +120,74 @@ struct NotchTaskList: View {
             missingParentRow(group)
         case let .cli(id, title, process):
             cliRow(id: id, title: title, process: process)
+        case let .claude(session):
+            claudeRow(session)
         }
     }
+
+    /// Whole row opens the session: Claude Desktop sessions in Claude, terminal ones in their terminal.
+    private func claudeRow(_ session: ClaudeCodeSession) -> some View {
+        let terminal: Bool = if case .terminal = session.origin { true } else { false }
+        let help = terminal ? text.openCLIProcessHelp : (cn ? "在 Claude 中打开" : "Open in Claude")
+        // Activity can be a few seconds newer than the panel clock; never show a future time.
+        let activity = model.now.timeIntervalSince(session.lastActiveAt) < 60
+            ? (cn ? "刚刚" : "Just now") : relativeTime(session.lastActiveAt)
+        let subtitle = [activity, session.folderName].compactMap { $0 }.joined(separator: " · ")
+        return Button {
+            onOpenClaudeSession(session)
+        } label: {
+            HStack(spacing: 10) {
+                if terminal {
+                    sourceBadge(systemName: "terminal.fill", color: .orange)
+                } else {
+                    claudeStatusBadge(session.status)
+                }
+                rowTitle(session.title, depth: 0, subtitle: terminal ? nil : subtitle)
+                Text(terminal ? cliOccupiedTitle : claudeStatusTitle(session.status))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(terminal ? Color.orange.opacity(0.9) : claudeStatusColor(session.status))
+                    .fixedSize()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: Self.rowHeight)
+            .background(cardBackground)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .buttonHelp(help)
+        .accessibilityLabel(session.title + "，" + (terminal ? cliOccupiedTitle : claudeStatusTitle(session.status)))
+        .accessibilityHint(help)
+    }
+
+    private func claudeStatusBadge(_ status: ClaudeCodeSession.Status) -> some View {
+        ZStack {
+            Circle().fill(claudeStatusColor(status)).frame(width: 5, height: 5)
+            if status == .running { Circle().fill(.white).frame(width: 6, height: 6) }
+            if status == .completed { Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)) }
+        }
+        .foregroundStyle(.white)
+        .frame(width: 18, height: 18)
+        .help(claudeStatusTitle(status))
+        .accessibilityHidden(true)
+    }
+
+    private func claudeStatusColor(_ status: ClaudeCodeSession.Status) -> Color {
+        switch status {
+        case .running: Color(nsColor: .controlAccentColor)
+        case .waiting: .orange
+        case .completed: .green
+        }
+    }
+
+    private func claudeStatusTitle(_ status: ClaudeCodeSession.Status) -> String {
+        switch status {
+        case .running: cn ? "运行中" : "Running"
+        case .waiting: cn ? "等待你" : "Needs you"
+        case .completed: cn ? "已完成" : "Completed"
+        }
+    }
+
+    private var cn: Bool { text.language == .simplifiedChinese }
 
     private func taskRow(_ task: TaskStatusSnapshot) -> some View {
         let title = task.taskName
@@ -361,14 +436,16 @@ struct NotchTaskList: View {
     }
 
     private var canClearCompleted: Bool {
-        model.hasCompletedTasks || model.canClearCompletedSessions
+        if model.selectedQuotaProvider == .claude { return model.canClearClaudeSessions }
+        return model.hasCompletedTasks || model.canClearCompletedSessions
     }
 
     private var taskTitle: String {
         let count = Self.totalCount(model: model)
+        let source = model.selectedQuotaProvider.title
         return text.language == .simplifiedChinese
-            ? "Codex 任务 (\(count))"
-            : "Codex Tasks (\(count))"
+            ? "\(source) 任务 (\(count))"
+            : "\(source) Tasks (\(count))"
     }
 
     private func runningTitle(_ count: Int) -> String {
@@ -474,6 +551,9 @@ struct NotchTaskList: View {
     }
 
     private static func rows(model: StatusPanelModel) -> [Row] {
+        if model.selectedQuotaProvider == .claude {
+            return model.claudeSessions.map { Row(id: "claude:\($0.id)", kind: .claude($0)) }
+        }
         var rows = model.tasks.map { task in
             Row(id: "task:\(task.id)", kind: .task(task))
         }
@@ -558,6 +638,7 @@ struct NotchTaskList: View {
             )
             case missingParent(CodexDesktopThreadGroup)
             case cli(String, String, CodexCLIProcess)
+            case claude(ClaudeCodeSession)
         }
     }
 }

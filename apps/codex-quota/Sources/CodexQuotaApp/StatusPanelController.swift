@@ -42,6 +42,10 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var desktopThreads: [CodexDesktopThreadSnapshot] = []
     @Published private(set) var desktopThreadGroups: [CodexDesktopThreadGroup] = []
     @Published private(set) var cliProcesses: [String: CodexCLIProcess] = [:]
+    /// Claude Code sessions shown instead of Codex tasks while Claude is selected.
+    @Published private(set) var claudeSessions: [ClaudeCodeSession] = []
+    private var scannedClaudeSessions: [ClaudeCodeSession] = []
+    private var hiddenClaudeSessionIDs: Set<String>
     @Published private(set) var expandedDesktopThreadGroupIDs: Set<String>
     @Published private(set) var hasCompletedTasks = false
     @Published private(set) var showsResetForecast = false
@@ -80,6 +84,35 @@ final class StatusPanelModel: ObservableObject {
         selectedQuotaProvider = QuotaProvider(rawValue: defaults.string(forKey: "selectedQuotaProvider") ?? "") ?? .codex
         store = TaskStatusStore(defaults: defaults)
         expandedDesktopThreadGroupIDs = store.expandedDesktopThreadGroupIDs
+        hiddenClaudeSessionIDs = Set(defaults.stringArray(forKey: Self.hiddenClaudeSessionsKey) ?? [])
+    }
+
+    private static let hiddenClaudeSessionsKey = "hiddenClaudeSessionIDs"
+
+    var canClearClaudeSessions: Bool { claudeSessions.contains { $0.status == .completed } }
+
+    func updateClaudeSessions(_ sessions: [ClaudeCodeSession]) {
+        scannedClaudeSessions = sessions
+        // Forget hidden ids that no longer exist so the list cannot grow without bound.
+        let known = hiddenClaudeSessionIDs.intersection(sessions.map(\.id))
+        if known != hiddenClaudeSessionIDs { setHiddenClaudeSessionIDs(known) }
+        applyClaudeSessions()
+    }
+
+    /// Hides completed sessions from this list only; Claude itself keeps them.
+    func hideCompletedClaudeSessions() {
+        setHiddenClaudeSessionIDs(hiddenClaudeSessionIDs.union(claudeSessions.filter { $0.status == .completed }.map(\.id)))
+        applyClaudeSessions()
+    }
+
+    private func setHiddenClaudeSessionIDs(_ ids: Set<String>) {
+        hiddenClaudeSessionIDs = ids
+        defaults.set(ids.sorted(), forKey: Self.hiddenClaudeSessionsKey)
+    }
+
+    private func applyClaudeSessions() {
+        claudeSessions = ClaudeCodeSessionParser.visible(scannedClaudeSessions, hiddenIDs: hiddenClaudeSessionIDs, limit: 10)
+        notifyContentChange()
     }
 
     func update(snapshot: QuotaSnapshot?) {
@@ -188,7 +221,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         onClearCompletedTasks: @escaping () -> Void,
         onClearFinishedThreads: @escaping () -> Void,
         onToggleSleep: @escaping () -> Void,
-        onDisplayMode: @escaping (PanelDisplayMode) -> Void
+        onDisplayMode: @escaping (PanelDisplayMode) -> Void,
+        onOpenClaudeSession: @escaping (ClaudeCodeSession) -> Void
     ) {
         self.model = model
         let panelPopover = popover
@@ -218,7 +252,11 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 onClearCompletedTasks: onClearCompletedTasks,
                 onClearFinishedThreads: onClearFinishedThreads,
                 onToggleSleep: onToggleSleep,
-                onDisplayMode: onDisplayMode
+                onDisplayMode: onDisplayMode,
+                onOpenClaudeSession: { session in
+                    panelPopover.performClose(nil)
+                    onOpenClaudeSession(session)
+                }
             )
         )
         super.init()

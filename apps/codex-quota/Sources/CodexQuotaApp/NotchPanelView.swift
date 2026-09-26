@@ -27,6 +27,7 @@ struct NotchActions {
     var cli: (String, CodexCLIProcess) -> CodexCLIProcessOpenActionResult
     var archive: (TaskStatusSnapshot) -> Void
     var clear: () -> Void
+    var claude: (ClaudeCodeSession) -> Void = { _ in }
 }
 
 struct NotchPanelView: View {
@@ -83,6 +84,7 @@ struct DailyPanelContent: View {
     let text: AppText
     let actions: NotchActions
     private var cn: Bool { text.language == .simplifiedChinese }
+    private var source: String { model.selectedQuotaProvider.title }
     /// Outer ring and its text use the provider colour; the inner 5-hour ring uses a light tint of it.
     private var accent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.85, green: 0.49, blue: 0.36) : Color(red: 0.14, green: 0.55, blue: 1) }
     private var innerAccent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.953, green: 0.749, blue: 0.663) : Color(red: 0.616, green: 0.796, blue: 1) }
@@ -114,10 +116,11 @@ struct DailyPanelContent: View {
                 VStack(spacing: 0) {
                     if NotchTaskList.totalCount(model: model) > 0 {
                         NotchTaskList(model: model, text: text, onResumeSession: actions.resume, onOpenCodexThread: actions.thread,
-                                      onOpenCLIProcess: actions.cli, onArchiveTask: actions.archive, onClearCompleted: actions.clear)
+                                      onOpenCLIProcess: actions.cli, onArchiveTask: actions.archive, onClearCompleted: actions.clear,
+                                      onOpenClaudeSession: actions.claude)
                     } else {
                         VStack(spacing: 12) {
-                            Text(cn ? "Codex 任务" : "Codex tasks").frame(maxWidth: .infinity, alignment: .leading)
+                            Text(cn ? "\(source) 任务" : "\(source) tasks").frame(maxWidth: .infinity, alignment: .leading)
                             Spacer()
                             Image(systemName: "checkmark.circle").font(.system(size: 28)).foregroundStyle(.secondary)
                             Text(cn ? "当前没有任务" : "No current tasks").foregroundStyle(.secondary)
@@ -126,9 +129,11 @@ struct DailyPanelContent: View {
                     }
                     Spacer(minLength: 0)
                     HStack {
-                        Text(cn ? "桌面任务与终端会话" : "Desktop and terminal sessions").foregroundStyle(.white.opacity(0.45))
+                        Text(model.selectedQuotaProvider == .claude
+                             ? (cn ? "Claude 桌面会话与终端会话" : "Claude Desktop and terminal sessions")
+                             : (cn ? "桌面任务与终端会话" : "Desktop and terminal sessions")).foregroundStyle(.white.opacity(0.45))
                         Spacer()
-                        Button(action: actions.openTasks) { Label(cn ? "打开 Codex" : "Open Codex", systemImage: "arrow.up.right") }
+                        Button(action: actions.openTasks) { Label(cn ? "打开 \(source)" : "Open \(source)", systemImage: "arrow.up.right") }
                             .buttonStyle(.plain).foregroundStyle(.white.opacity(0.7))
                     }.font(.system(size: 11)).frame(height: 36)
                 }.frame(maxWidth: .infinity, alignment: .top)

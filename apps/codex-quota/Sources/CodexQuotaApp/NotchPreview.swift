@@ -96,6 +96,25 @@ final class NotchPreview {
                 windowDuration: 5 * 3_600, planName: "Pro", planBadgeName: "Pro", secondaryWindow: week), status: "")
         }
         model.selectQuotaProvider(.claude)
+        if state == "claude-real" {
+            let sessions = ClaudeSessionScanner.scan()
+            model.updateClaudeSessions(sessions)
+            return
+        }
+        // Mirrors work/claude-tasks-proposal-20260926/claude-tasks-panel.png.
+        func sample(_ id: String, _ title: String, _ minutes: Double, _ status: ClaudeCodeSession.Status) -> ClaudeCodeSession {
+            ClaudeCodeSession(id: "local_preview-\(id)", title: title, folderName: "codex助手",
+                              lastActiveAt: date.addingTimeInterval(-minutes * 60), status: status,
+                              origin: .desktop(sessionID: "local_preview-\(id)"))
+        }
+        model.updateClaudeSessions([
+            sample("1", "Claude 额度改走官方 CLI 并实施双圈", 0, .running),
+            sample("2", "趁手首页任务区改版", 8, .waiting),
+            ClaudeCodeSessionParser.terminalSession(process: CodexCLIProcess(pid: 4242, tty: "ttys003"),
+                                                    cwd: "/Users/openclaw/Projects/aihot", now: date),
+            sample("3", "整理 1.4.6 发布说明", 120, .completed),
+            sample("4", "检查自动更新链路", 26 * 60, .completed)
+        ])
     }
 
     func show() { controller.setEnabled(true, expand: true); controller.keepPreviewVisible(); model.tick(at: date) }

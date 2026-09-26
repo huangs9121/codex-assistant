@@ -220,6 +220,7 @@ enum QuotaParserTests {
             + MouseGesturePreferencesTests.all.map { ($0.name, $0.run) }
             + KeyMappingTests.all.map { ($0.name, $0.run) }
             + ClaudeUsageTests.all
+            + ClaudeCodeSessionTests.all
             + CodexResetCalendarTests.all
 
         var failureCount = 0

@@ -429,7 +429,8 @@ final class TaskStatusController {
         return (cli, Set(owners.keys))
     }
 
-    nonisolated private static func processOutput(_ executable: String, _ arguments: [String], allowPartial: Bool = false) -> String? {
+    /// Shared by the Codex and Claude session scanners.
+    nonisolated static func processOutput(_ executable: String, _ arguments: [String], allowPartial: Bool = false) -> String? {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -438,9 +439,12 @@ final class TaskStatusController {
         process.standardError = Pipe()
         do {
             try process.run()
+            // Read before waiting: output larger than the pipe buffer would otherwise block
+            // the child forever (for example `ps -axo` listing every process).
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             guard process.terminationStatus == 0 || allowPartial else { return nil }
-            return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            return String(decoding: output, as: UTF8.self)
         } catch { return nil }
     }
 
