@@ -43,6 +43,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     }
 
     private let tableView = NSTableView()
+    private let rulesScrollView = NSScrollView()
     private let enabledButton = HelpButton(checkboxWithTitle: "", target: nil, action: nil)
     private let exclusionsButton = HelpButton(title: "", target: nil, action: nil)
     private let hint = NSTextField(wrappingLabelWithString: "")
@@ -75,6 +76,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         reloadRules()
         refreshGlobalSettings()
         refreshPermissionStatus()
+        adjustRuleColumns()
     }
 
     func didHide() {
@@ -105,13 +107,20 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         hint.translatesAutoresizingMaskIntoConstraints = false
 
         configureTable()
-        let scrollView = NSScrollView()
+        let scrollView = rulesScrollView
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(adjustRuleColumns),
+            name: NSView.frameDidChangeNotification,
+            object: scrollView
+        )
 
         let addButton = HelpButton(title: "+", target: self, action: #selector(addRule))
         addButton.bezelStyle = .rounded
@@ -309,11 +318,13 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         tableView.delegate = self
         tableView.dataSource = self
         QuickToolsTableStyle.configure(tableView)
-        // 列宽总和 650：系统新表格样式会按列累加约 11-17pt 装饰宽度，
-        // 膨胀后约 720-752pt，仍小于最窄可视区（竖向滚动条占位后的 743pt）。
+        tableView.columnAutoresizingStyle = .noColumnAutoresizing
+        // The unified 880pt window leaves about 650pt for this scroll view.
+        // NSTableView adds roughly 17pt of cell decoration per column, so
+        // the columns themselves must be narrower than the visible viewport.
         for (column, width) in [
-            (Column.gesture, 127.0), (Column.filter, 158.0), (Column.action, 144.0),
-            (Column.note, 143.0), (Column.immediate, 36.0), (Column.enabled, 42.0)
+            (Column.gesture, 114.0), (Column.filter, 95.0), (Column.action, 130.0),
+            (Column.note, 100.0), (Column.immediate, 40.0), (Column.enabled, 44.0)
         ] {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
             tableColumn.title = columnTitle(column)
@@ -321,6 +332,15 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             tableColumn.minWidth = width
             tableView.addTableColumn(tableColumn)
         }
+    }
+
+    @objc private func adjustRuleColumns() {
+        let visibleWidth = rulesScrollView.contentView.bounds.width
+        guard visibleWidth > 0, tableView.tableColumns.count == 6 else { return }
+        // Leave room for native cell margins and the scroll view border.
+        let extra = max(0, floor(visibleWidth - 523 - 6 * 17 - 8))
+        tableView.tableColumns[1].width = 95 + floor(extra * 0.3)
+        tableView.tableColumns[3].width = 100 + ceil(extra * 0.7)
     }
 
     private func columnTitle(_ column: Column) -> String {
@@ -525,6 +545,11 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     private func gestureControls(row: Int) -> NSView {
         let first = HelpPopUpButton(frame: .zero, pullsDown: false)
         let second = HelpPopUpButton(frame: .zero, pullsDown: false)
+        for popup in [first, second] {
+            popup.controlSize = .small
+            popup.font = .systemFont(ofSize: 11)
+            popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         for direction in MouseGestureDirection.allCases {
             first.addItem(withTitle: direction.symbol)
             second.addItem(withTitle: direction.symbol)
@@ -542,7 +567,12 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             : "Choose the second gesture direction"
         first.target = self; second.target = self
         first.action = #selector(changeGesture(_:)); second.action = #selector(changeGesture(_:))
-        return NSStackView(views: [first, second])
+        let controls = NSStackView(views: [first, second])
+        controls.orientation = .horizontal
+        controls.distribution = .fillEqually
+        controls.spacing = 4
+        first.widthAnchor.constraint(equalTo: second.widthAnchor).isActive = true
+        return controls
     }
 
     @objc private func changeGesture(_ sender: NSPopUpButton) {

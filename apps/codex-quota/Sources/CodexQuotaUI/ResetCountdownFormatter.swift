@@ -2,6 +2,21 @@ import CodexQuotaCore
 import Foundation
 
 public enum ResetCountdownFormatter {
+    public static func exactResetValue(
+        resetsAt: Date?,
+        timeZone: TimeZone = .current,
+        language: AppLanguage = .simplifiedChinese
+    ) -> String? {
+        guard let resetsAt, resetsAt.timeIntervalSince1970.isFinite else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = language.locale
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = language == .simplifiedChinese
+            ? "yyyy年M月d日 HH:mm（ZZZZ）" : "MMM d, yyyy HH:mm (ZZZZ)"
+        return formatter.string(from: resetsAt)
+    }
+
     public static func panelCountdownValue(
         resetsAt: Date?,
         now: Date = Date(),

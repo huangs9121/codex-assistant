@@ -41,12 +41,24 @@ enum StatusPanelPresentationTests {
             run: testSingleWindowFallback
         ),
         TaskStatusParserTestCase(
+            name: "quota rings put the weekly window outside",
+            run: testQuotaRingAssignment
+        ),
+        TaskStatusParserTestCase(
+            name: "quota reset lines only show times given by the source",
+            run: testResetSummary
+        ),
+        TaskStatusParserTestCase(
             name: "status panel orders quota windows by duration",
             run: testWindowOrdering
         ),
         TaskStatusParserTestCase(
             name: "status panel reset countdown formats hour boundary",
             run: testResetCountdown
+        ),
+        TaskStatusParserTestCase(
+            name: "exact reset time preserves minutes across date and time zone boundaries",
+            run: testExactResetTime
         ),
         TaskStatusParserTestCase(
             name: "status panel weekly reset follows locale and time zone",
@@ -230,6 +242,35 @@ enum StatusPanelPresentationTests {
         return visible.map(\.id) == ["running-1"]
     }
 
+    private static func testQuotaRingAssignment() -> Bool {
+        let fiveHour = StatusPanelQuotaWindow(remainingPercent: 85, resetsAt: nil, windowDuration: 18_000)
+        let week = StatusPanelQuotaWindow(remainingPercent: 97, resetsAt: nil, windowDuration: 604_800)
+        let both = StatusPanelQuotaData(planName: nil, observedAt: now, primaryWindow: fiveHour, secondaryWindow: week)
+        let single = StatusPanelQuotaData(planName: nil, observedAt: now, primaryWindow: week, secondaryWindow: nil)
+        return both.outerRingWindow == week && both.innerRingWindow == fiveHour
+            && single.outerRingWindow == week && single.innerRingWindow == nil
+    }
+
+    private static func testResetSummary() -> Bool {
+        let sessionReset = now.addingTimeInterval(3_600)
+        let weekReset = now.addingTimeInterval(86_400)
+        func window(_ remaining: Int, _ reset: Date?, _ duration: TimeInterval) -> StatusPanelQuotaWindow {
+            StatusPanelQuotaWindow(remainingPercent: remaining, resetsAt: reset, windowDuration: duration)
+        }
+        let live = StatusPanelResetSummary(windows: [window(85, sessionReset, 18_000), window(97, weekReset, 604_800)])
+        let fullSession = StatusPanelResetSummary(windows: [window(100, nil, 18_000), window(97, weekReset, 604_800)])
+        let desktop = StatusPanelResetSummary(windows: [window(90, nil, 18_000), window(97, nil, 604_800)])
+        let desktopFullSession = StatusPanelResetSummary(windows: [window(100, nil, 18_000), window(97, nil, 604_800)])
+        let allFull = StatusPanelResetSummary(windows: [window(100, nil, 18_000), window(100, nil, 604_800)])
+        let mixed = StatusPanelResetSummary(windows: [window(85, sessionReset, 18_000), window(97, nil, 604_800)])
+        return live == .lines([.resets(.fiveHour, sessionReset), .resets(.weekly, weekReset)])
+            && fullSession == .lines([.resets(.weekly, weekReset)])
+            && desktop == .allUnknown
+            && desktopFullSession == .allUnknown
+            && allFull == .lines([])
+            && mixed == .lines([.resets(.fiveHour, sessionReset), .unknown(.weekly)])
+    }
+
     private static func testSingleWindowFallback() -> Bool {
         let snapshot = QuotaSnapshot(
             remainingPercent: 72,
@@ -237,6 +278,7 @@ enum StatusPanelPresentationTests {
             resetsAt: now.addingTimeInterval(3_600),
             windowDuration: 5 * 3_600,
             planName: "Pro",
+            planBadgeName: "Pro 20X",
             secondaryWindow: nil
         )
         let data = StatusPanelQuotaData(snapshot: snapshot, now: now)
@@ -244,6 +286,7 @@ enum StatusPanelPresentationTests {
             && data.primaryWindow?.windowDuration == 5 * 3_600
             && data.secondaryWindow == nil
             && data.planName == "Pro"
+            && data.planBadgeName == "Pro 20X"
             && data.observedAt == now
     }
 
@@ -264,6 +307,7 @@ enum StatusPanelPresentationTests {
             && data.primaryWindow?.windowDuration == 5 * 3_600
             && data.secondaryWindow?.remainingPercent == 30
             && data.secondaryWindow?.windowDuration == 7 * 86_400
+            && data.planBadgeName == nil
     }
 
     private static func testResetCountdown() -> Bool {
@@ -292,6 +336,18 @@ enum StatusPanelPresentationTests {
             && ResetCountdownFormatter.panelCountdownValue(
                 resetsAt: Date(timeIntervalSince1970: 1e308), now: now
             ) == nil
+    }
+
+    private static func testExactResetTime() -> Bool {
+        let reset = ISO8601DateFormatter().date(from: "2026-12-31T18:07:59Z")!
+        let beijing = TimeZone(secondsFromGMT: 8 * 3_600)!
+        let utc = TimeZone(secondsFromGMT: 0)!
+        return ResetCountdownFormatter.exactResetValue(resetsAt: reset, timeZone: beijing)
+            == "2027年1月1日 02:07（GMT+08:00）"
+            && ResetCountdownFormatter.exactResetValue(resetsAt: reset, timeZone: utc, language: .english)
+            == "Dec 31, 2026 18:07 (GMT+00:00)"
+            && ResetCountdownFormatter.exactResetValue(resetsAt: nil) == nil
+            && ResetCountdownFormatter.exactResetValue(resetsAt: Date(timeIntervalSince1970: .infinity)) == nil
     }
 
     private static func testWeeklyReset() -> Bool {

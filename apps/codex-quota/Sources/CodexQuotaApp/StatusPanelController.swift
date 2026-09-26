@@ -1,5 +1,6 @@
 import AppKit
 import CodexQuotaCore
+import CodexQuotaUI
 import SwiftUI
 
 enum TaskResumeActionResult: Equatable {
@@ -19,10 +20,32 @@ enum CodexCLIProcessOpenActionResult: Equatable { case opened, unavailable }
 @MainActor
 final class StatusPanelModel: ObservableObject {
     @Published private(set) var snapshot: QuotaSnapshot?
+    @Published private(set) var selectedQuotaProvider: QuotaProvider
+    @Published private(set) var codexQuotaStatus = "正在读取额度…"
+    @Published private(set) var claudeQuotaStatus = "正在读取额度…"
+    @Published private(set) var claudeQuotaDetail = ""
+    @Published private(set) var claudeQuotaStale = false
+    private var codexSnapshot: QuotaSnapshot?
+    private var claudeSnapshot: QuotaSnapshot?
+    private let defaults: UserDefaults
+    var onQuotaProviderChange: (() -> Void)?
+    var onRefreshQuota: (() -> Void)?
+    /// Short line shown in the panel.
+    var quotaStatus: String { selectedQuotaProvider == .codex ? codexQuotaStatus : claudeQuotaStatus }
+    /// Full explanation for settings and the panel line's help.
+    var quotaDetail: String {
+        guard selectedQuotaProvider == .claude, !claudeQuotaDetail.isEmpty else { return quotaStatus }
+        return claudeQuotaDetail
+    }
+    var quotaStale: Bool { selectedQuotaProvider == .claude && claudeQuotaStale }
     @Published private(set) var tasks: [TaskStatusSnapshot] = []
     @Published private(set) var desktopThreads: [CodexDesktopThreadSnapshot] = []
     @Published private(set) var desktopThreadGroups: [CodexDesktopThreadGroup] = []
     @Published private(set) var cliProcesses: [String: CodexCLIProcess] = [:]
+    /// Claude Code sessions shown instead of Codex tasks while Claude is selected.
+    @Published private(set) var claudeSessions: [ClaudeCodeSession] = []
+    private var scannedClaudeSessions: [ClaudeCodeSession] = []
+    private var hiddenClaudeSessionIDs: Set<String>
     @Published private(set) var expandedDesktopThreadGroupIDs: Set<String>
     @Published private(set) var hasCompletedTasks = false
     @Published private(set) var showsResetForecast = false
@@ -31,6 +54,11 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var now = Date()
     @Published private(set) var sleepState: ManualSleepState = .off
     @Published private(set) var sleepDetail = ""
+    @Published var displayMode: PanelDisplayMode = .menuBar
+    @Published private(set) var scrollEnabled = false
+    @Published private(set) var gesturesEnabled = false
+    @Published private(set) var keyMappingCount = 0
+    @Published private(set) var keyMappingEnabled = false
 
     var canClearCompletedSessions: Bool {
         !CodexDesktopThreadTree.clearableThreadIDs(
@@ -39,16 +67,77 @@ final class StatusPanelModel: ObservableObject {
     }
 
     var onContentChange: (() -> Void)?
+    var onIslandContentChange: (() -> Void)?
 
-    private let store = TaskStatusStore()
+    func updateQuickTools(scroll: Bool, gestures: Bool, mappingCount: Int, mappingEnabled: Bool) {
+        scrollEnabled = scroll
+        gesturesEnabled = gestures
+        keyMappingCount = mappingCount
+        keyMappingEnabled = mappingEnabled
+        notifyContentChange()
+    }
 
-    init() {
+    private let store: TaskStatusStore
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        selectedQuotaProvider = QuotaProvider(rawValue: defaults.string(forKey: "selectedQuotaProvider") ?? "") ?? .codex
+        store = TaskStatusStore(defaults: defaults)
         expandedDesktopThreadGroupIDs = store.expandedDesktopThreadGroupIDs
+        hiddenClaudeSessionIDs = Set(defaults.stringArray(forKey: Self.hiddenClaudeSessionsKey) ?? [])
+    }
+
+    private static let hiddenClaudeSessionsKey = "hiddenClaudeSessionIDs"
+
+    var canClearClaudeSessions: Bool { claudeSessions.contains { $0.status == .completed } }
+
+    func updateClaudeSessions(_ sessions: [ClaudeCodeSession]) {
+        scannedClaudeSessions = sessions
+        // Forget hidden ids that no longer exist so the list cannot grow without bound.
+        let known = hiddenClaudeSessionIDs.intersection(sessions.map(\.id))
+        if known != hiddenClaudeSessionIDs { setHiddenClaudeSessionIDs(known) }
+        applyClaudeSessions()
+    }
+
+    /// Hides completed sessions from this list only; Claude itself keeps them.
+    func hideCompletedClaudeSessions() {
+        setHiddenClaudeSessionIDs(hiddenClaudeSessionIDs.union(claudeSessions.filter { $0.status == .completed }.map(\.id)))
+        applyClaudeSessions()
+    }
+
+    private func setHiddenClaudeSessionIDs(_ ids: Set<String>) {
+        hiddenClaudeSessionIDs = ids
+        defaults.set(ids.sorted(), forKey: Self.hiddenClaudeSessionsKey)
+    }
+
+    private func applyClaudeSessions() {
+        claudeSessions = ClaudeCodeSessionParser.visible(scannedClaudeSessions, hiddenIDs: hiddenClaudeSessionIDs, limit: 10)
+        notifyContentChange()
     }
 
     func update(snapshot: QuotaSnapshot?) {
-        self.snapshot = snapshot
+        codexSnapshot = snapshot
+        if selectedQuotaProvider == .codex { self.snapshot = snapshot }
         notifyContentChange()
+    }
+
+    func updateClaude(snapshot: QuotaSnapshot?, status: String, detail: String = "", stale: Bool = false) {
+        claudeSnapshot = snapshot
+        claudeQuotaStatus = status
+        claudeQuotaDetail = detail
+        claudeQuotaStale = stale
+        if selectedQuotaProvider == .claude { self.snapshot = snapshot }
+        notifyContentChange()
+    }
+
+    func updateCodexStatus(_ status: String) { codexQuotaStatus = status }
+
+    func selectQuotaProvider(_ provider: QuotaProvider) {
+        selectedQuotaProvider = provider
+        defaults.set(provider.rawValue, forKey: "selectedQuotaProvider")
+        snapshot = provider == .codex ? codexSnapshot : claudeSnapshot
+        notifyContentChange()
+        onQuotaProviderChange?()
     }
 
     func update(
@@ -101,12 +190,14 @@ final class StatusPanelModel: ObservableObject {
     private func notifyContentChange() {
         DispatchQueue.main.async { [weak self] in
             self?.onContentChange?()
+            self?.onIslandContentChange?()
         }
     }
 }
 
 @MainActor
 final class StatusPanelController: NSObject, NSPopoverDelegate {
+    /// The menu bar keeps the compact 1.4.5 panel; the island has its own wide layout.
     static let panelWidth: CGFloat = 320
 
     private let popover = NSPopover()
@@ -130,7 +221,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         onArchiveTask: @escaping (TaskStatusSnapshot) -> Void,
         onClearCompletedTasks: @escaping () -> Void,
         onClearFinishedThreads: @escaping () -> Void,
-        onToggleSleep: @escaping () -> Void
+        onToggleSleep: @escaping () -> Void,
+        onOpenClaudeSession: @escaping (ClaudeCodeSession) -> Void
     ) {
         self.model = model
         let panelPopover = popover
@@ -159,7 +251,11 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
                 onArchiveTask: onArchiveTask,
                 onClearCompletedTasks: onClearCompletedTasks,
                 onClearFinishedThreads: onClearFinishedThreads,
-                onToggleSleep: onToggleSleep
+                onToggleSleep: onToggleSleep,
+                onOpenClaudeSession: { session in
+                    panelPopover.performClose(nil)
+                    onOpenClaudeSession(session)
+                }
             )
         )
         super.init()

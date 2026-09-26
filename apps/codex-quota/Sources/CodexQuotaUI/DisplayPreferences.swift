@@ -15,7 +15,7 @@ public struct DisplayPreferences {
     public static let quotaResetNotificationStateKey = "quotaResetNotificationState"
     public static let resetCalendarCacheKey = "aihotResetCalendarCache"
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

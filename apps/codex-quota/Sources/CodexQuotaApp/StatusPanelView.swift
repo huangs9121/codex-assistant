@@ -21,6 +21,14 @@ struct StatusPanelView: View {
     let onClearCompletedTasks: () -> Void
     let onClearFinishedThreads: () -> Void
     let onToggleSleep: () -> Void
+    var onOpenClaudeSession: (ClaudeCodeSession) -> Void = { _ in }
+
+    private var cn: Bool { text.language == .simplifiedChinese }
+    private var isClaude: Bool { model.selectedQuotaProvider == .claude }
+    /// Codex keeps the system accent of the 1.4.5 panel; Claude uses its own colour.
+    private var barColor: Color {
+        isClaude ? Color(red: 0.85, green: 0.49, blue: 0.36) : Color(nsColor: .controlAccentColor)
+    }
 
     private var quotaData: StatusPanelQuotaData {
         StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
@@ -29,20 +37,27 @@ struct StatusPanelView: View {
     var body: some View {
         VStack(spacing: 0) {
             quotaSection
-            if model.showsResetForecast {
-                resetForecastSection
-            }
-            if !model.tasks.isEmpty {
-                Divider()
-                taskSection
-            }
-            if !model.desktopThreadGroups.isEmpty {
-                Divider()
-                codexDesktopSection
-            }
-            if !model.cliProcesses.isEmpty {
-                Divider()
-                cliSection
+            if isClaude {
+                if !model.claudeSessions.isEmpty {
+                    Divider()
+                    claudeSection
+                }
+            } else {
+                if model.showsResetForecast {
+                    resetForecastSection
+                }
+                if !model.tasks.isEmpty {
+                    Divider()
+                    taskSection
+                }
+                if !model.desktopThreadGroups.isEmpty {
+                    Divider()
+                    codexDesktopSection
+                }
+                if !model.cliProcesses.isEmpty {
+                    Divider()
+                    cliSection
+                }
             }
             Divider()
             toolbar
@@ -55,39 +70,70 @@ struct StatusPanelView: View {
     private var quotaSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text(text.quotaTitle)
+                Picker(text.quotaTitle, selection: Binding(
+                    get: { model.selectedQuotaProvider },
+                    set: { model.selectQuotaProvider($0) }
+                )) {
+                    ForEach(QuotaProvider.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                Text(cn ? "配额" : "Quota")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 8)
-                Text(quotaData.planName ?? "--")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Color(nsColor: .separatorColor).opacity(0.22),
-                        in: Capsule()
-                    )
+                if !(isClaude && quotaData.planName == nil) {
+                    Text(quotaData.planName ?? "--")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            Color(nsColor: .separatorColor).opacity(0.22),
+                            in: Capsule()
+                        )
+                }
             }
 
-            if let primaryWindow = quotaData.primaryWindow {
-                primaryQuotaRow(primaryWindow)
-                    .padding(.top, 9)
-            }
+            Group {
+                if let primaryWindow = quotaData.primaryWindow {
+                    primaryQuotaRow(primaryWindow)
+                        .padding(.top, 9)
+                }
 
-            if let secondaryWindow = quotaData.secondaryWindow {
-                secondaryQuotaRow(secondaryWindow)
-                    .padding(.top, 10)
+                if let secondaryWindow = quotaData.secondaryWindow {
+                    secondaryQuotaRow(secondaryWindow)
+                        .padding(.top, 10)
+                }
             }
+            .opacity(model.quotaStale ? 0.45 : 1)
 
             if
                 quotaData.primaryWindow == nil,
                 quotaData.secondaryWindow == nil
             {
-                Text(text.waitingForData)
+                Text(model.quotaStatus.isEmpty ? text.waitingForData : model.quotaStatus)
                     .font(.system(size: 13))
                     .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 12)
+            } else {
+                if allResetsUnknown {
+                    Text(missingResetText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 7)
+                }
+                if !model.quotaStatus.isEmpty {
+                    Text(model.quotaStatus)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                        .buttonHelp(model.quotaDetail)
+                        .padding(.top, allResetsUnknown ? 3 : 9)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -110,12 +156,10 @@ struct StatusPanelView: View {
             }
             QuotaProgressBar(
                 percent: window.remainingPercent,
-                height: 5
+                height: 5,
+                color: barColor
             )
-            Text(primaryResetLabel(for: window))
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-                .monospacedDigit()
+            resetTimeRow(primaryResetLabel(for: window), window: window)
         }
     }
 
@@ -132,12 +176,49 @@ struct StatusPanelView: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
-            QuotaProgressBar(percent: window.remainingPercent, height: 4)
-            Text(secondaryResetLabel(for: window))
-                .font(.system(size: 11))
+            QuotaProgressBar(percent: window.remainingPercent, height: 4, color: barColor)
+            resetTimeRow(secondaryResetLabel(for: window), window: window)
+        }
+    }
+
+    @ViewBuilder
+    private func resetTimeRow(_ label: String?, window: StatusPanelQuotaWindow) -> some View {
+        if let label {
+            resetTimeLine(label, window: window)
+        }
+    }
+
+    private func resetTimeLine(_ label: String, window: StatusPanelQuotaWindow) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
+            if let reset = window.resetsAt, reset.timeIntervalSince1970.isFinite {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                    .resetTimeHelp(resetTimeHelp(for: reset))
+                    .accessibilityLabel(text.language == .simplifiedChinese ? "查看重置时间" : "View reset time")
+            }
         }
+        .font(.system(size: 11))
+    }
+
+    private func resetTimeHelp(for date: Date) -> ResetTimeHelp {
+        let formatter = DateFormatter()
+        formatter.locale = text.language.locale
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = text.language == .simplifiedChinese ? "yyyy年M月d日 HH:mm" : "MMM d, yyyy HH:mm"
+        let value = formatter.string(from: date)
+        formatter.dateFormat = "ZZZZ"
+        let zoneName = TimeZone.current.identifier == "Asia/Shanghai"
+            ? (text.language == .simplifiedChinese ? "北京时间" : "Beijing time")
+            : (text.language == .simplifiedChinese ? "本地时间" : "Local time")
+        return ResetTimeHelp(
+            title: text.language == .simplifiedChinese ? "重置时间" : "Reset time",
+            date: value, timeZone: "\(zoneName) · \(formatter.string(from: date))"
+        )
     }
 
     private var resetForecastSection: some View {
@@ -271,6 +352,51 @@ struct StatusPanelView: View {
                         )
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
+                    }
+                }
+            }
+            .frame(maxHeight: 260)
+        }
+        .padding(.bottom, 5)
+    }
+
+    private var claudeSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Text(cn ? "Claude 会话" : "Claude Sessions")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 8)
+                Button(action: onClearCompletedTasks) {
+                    Image(systemName: "eraser")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color(nsColor: .controlAccentColor))
+                .disabled(!model.canClearClaudeSessions)
+                .buttonHelp(cn ? "清理已完成" : "Clear completed")
+                let running = model.claudeSessions.filter {
+                    guard $0.status == .running, case .desktop = $0.origin else { return false }
+                    return true
+                }.count
+                if running > 0 {
+                    Circle()
+                        .fill(Color(nsColor: .controlAccentColor))
+                        .frame(width: 6, height: 6)
+                    Text(text.runningTaskCount(running))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(nsColor: .controlAccentColor))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 5)
+
+            ScrollView(.vertical) {
+                VStack(spacing: 0) {
+                    ForEach(model.claudeSessions) { session in
+                        ClaudeSessionRow(session: session, text: text, onOpen: onOpenClaudeSession)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
                     }
                 }
             }
@@ -455,9 +581,24 @@ struct StatusPanelView: View {
         }
     }
 
+    /// A full window without a reset time needs no line; otherwise say it was not received,
+    /// never "--" that could read as "cannot reset".
+    private func missingResetLabel(for window: StatusPanelQuotaWindow) -> String? {
+        guard !allResetsUnknown, window.remainingPercent < 100 else { return nil }
+        return missingResetText
+    }
+
+    /// When no window has a reset time, one line below the rows says so instead of one per row.
+    private var allResetsUnknown: Bool {
+        StatusPanelResetSummary(windows: [quotaData.primaryWindow, quotaData.secondaryWindow].compactMap { $0 }) == .allUnknown
+    }
+
+    private var missingResetText: String { cn ? "尚未获取重置时间" : "Reset time not received yet" }
+
     private func primaryResetLabel(
         for window: StatusPanelQuotaWindow
-    ) -> String {
+    ) -> String? {
+        guard window.resetsAt != nil else { return missingResetLabel(for: window) }
         guard let value = ResetCountdownFormatter.panelCountdownValue(
             resetsAt: window.resetsAt,
             now: model.now,
@@ -470,7 +611,8 @@ struct StatusPanelView: View {
 
     private func secondaryResetLabel(
         for window: StatusPanelQuotaWindow
-    ) -> String {
+    ) -> String? {
+        guard window.resetsAt != nil else { return missingResetLabel(for: window) }
         if StatusPanelQuotaWindowKind(
             windowDuration: window.windowDuration
         ) == .weekly {
@@ -555,6 +697,7 @@ private struct ResetCalendarRow: View {
 private struct QuotaProgressBar: View {
     let percent: Int?
     let height: CGFloat
+    var color = Color(nsColor: .controlAccentColor)
 
     var body: some View {
         GeometryReader { proxy in
@@ -562,7 +705,7 @@ private struct QuotaProgressBar: View {
                 Capsule()
                     .fill(Color(nsColor: .separatorColor).opacity(0.32))
                 Capsule()
-                    .fill(Color(nsColor: .controlAccentColor))
+                    .fill(color)
                     .frame(
                         width: proxy.size.width
                             * CGFloat(min(max(percent ?? 0, 0), 100)) / 100
@@ -572,6 +715,77 @@ private struct QuotaProgressBar: View {
         .frame(height: height)
         .accessibilityElement(children: .ignore)
         .accessibilityValue(percent.map { "\($0)%" } ?? "--")
+    }
+}
+
+/// Same card as the 1.4.5 Codex session rows. Desktop sessions open in Claude; terminal ones
+/// return to their terminal.
+private struct ClaudeSessionRow: View {
+    let session: ClaudeCodeSession
+    let text: AppText
+    let onOpen: (ClaudeCodeSession) -> Void
+
+    private var cn: Bool { text.language == .simplifiedChinese }
+
+    var body: some View {
+        Button { onOpen(session) } label: {
+            HStack(spacing: 8) {
+                icon.frame(width: 18, height: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.title).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
+                    Text(subtitle).font(.system(size: 12)).foregroundStyle(.tertiary).monospacedDigit().lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.tertiary).frame(width: 20, height: 20)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            Color(nsColor: .separatorColor).opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .buttonHelp(terminalProcess == nil ? (cn ? "在 Claude 中打开" : "Open in Claude") : text.openCLIProcessHelp)
+        .accessibilityLabel(session.title)
+    }
+
+    private var terminalProcess: CodexCLIProcess? {
+        if case let .terminal(process) = session.origin { return process }
+        return nil
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if terminalProcess != nil {
+            Image(systemName: "terminal.fill").font(.system(size: 12)).foregroundStyle(.orange)
+        } else {
+            Circle().fill(statusColor).frame(width: 7, height: 7)
+        }
+    }
+
+    private var statusColor: Color {
+        switch session.status {
+        case .running: Color(nsColor: .controlAccentColor)
+        case .waiting: .orange
+        case .completed: .green
+        }
+    }
+
+    private var subtitle: String {
+        if let process = terminalProcess { return text.cliOccupied(process.pid, tty: process.tty) }
+        let status = switch session.status {
+        case .running: cn ? "运行中" : "Running"
+        case .waiting: cn ? "等待你" : "Needs you"
+        case .completed: cn ? "已完成" : "Completed"
+        }
+        let formatter = DateFormatter()
+        formatter.locale = text.language.locale
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return [status, text.codexClientLastActive(formatter.string(from: session.lastActiveAt)), session.folderName]
+            .compactMap { $0 }.joined(separator: " · ")
     }
 }
 

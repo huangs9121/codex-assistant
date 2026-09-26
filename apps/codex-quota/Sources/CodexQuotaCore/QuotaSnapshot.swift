@@ -1,5 +1,12 @@
 import Foundation
 
+public enum QuotaProvider: String, CaseIterable, Sendable {
+    case codex
+    case claude
+
+    public var title: String { self == .codex ? "Codex" : "Claude" }
+}
+
 public struct QuotaWindow: Equatable, Sendable {
     public let usedPercent: Double
     public let resetsAt: Date?
@@ -29,6 +36,7 @@ public struct QuotaSnapshot: Equatable, Sendable {
     public let resetsAt: Date?
     public let windowDuration: TimeInterval?
     public let planName: String?
+    public let planBadgeName: String?
     public let secondaryWindow: QuotaWindow?
 
     public init(
@@ -37,6 +45,7 @@ public struct QuotaSnapshot: Equatable, Sendable {
         resetsAt: Date? = nil,
         windowDuration: TimeInterval? = nil,
         planName: String? = nil,
+        planBadgeName: String? = nil,
         secondaryWindow: QuotaWindow? = nil
     ) {
         self.remainingPercent = remainingPercent
@@ -44,6 +53,7 @@ public struct QuotaSnapshot: Equatable, Sendable {
         self.resetsAt = resetsAt
         self.windowDuration = windowDuration
         self.planName = planName
+        self.planBadgeName = planBadgeName
         self.secondaryWindow = secondaryWindow
     }
 

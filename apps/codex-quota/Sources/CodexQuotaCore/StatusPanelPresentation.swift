@@ -38,17 +38,20 @@ public enum StatusPanelQuotaWindowKind: Equatable, Sendable {
 
 public struct StatusPanelQuotaData: Equatable, Sendable {
     public let planName: String?
+    public let planBadgeName: String?
     public let observedAt: Date?
     public let primaryWindow: StatusPanelQuotaWindow?
     public let secondaryWindow: StatusPanelQuotaWindow?
 
     public init(
         planName: String?,
+        planBadgeName: String? = nil,
         observedAt: Date?,
         primaryWindow: StatusPanelQuotaWindow?,
         secondaryWindow: StatusPanelQuotaWindow?
     ) {
         self.planName = planName
+        self.planBadgeName = planBadgeName
         self.observedAt = observedAt
         self.primaryWindow = primaryWindow
         self.secondaryWindow = secondaryWindow
@@ -58,6 +61,7 @@ public struct StatusPanelQuotaData: Equatable, Sendable {
         guard let snapshot else {
             self.init(
                 planName: nil,
+                planBadgeName: nil,
                 observedAt: nil,
                 primaryWindow: nil,
                 secondaryWindow: nil
@@ -91,10 +95,44 @@ public struct StatusPanelQuotaData: Equatable, Sendable {
         }
         self.init(
             planName: snapshot.planName,
+            planBadgeName: snapshot.planBadgeName,
             observedAt: snapshot.observedAt,
             primaryWindow: windows.first,
             secondaryWindow: windows.dropFirst().first
         )
+    }
+}
+
+public extension StatusPanelQuotaData {
+    /// The outer ring shows the longer (weekly) window; the inner ring shows the
+    /// 5-hour window only when both exist.
+    var outerRingWindow: StatusPanelQuotaWindow? { secondaryWindow ?? primaryWindow }
+    var innerRingWindow: StatusPanelQuotaWindow? { secondaryWindow == nil ? nil : primaryWindow }
+}
+
+/// Reset lines under the quota rings. Only times given by the source are shown:
+/// a full window without a reset time needs no line, and when every remaining line
+/// lacks a time they merge into one "not obtained yet" line.
+public enum StatusPanelResetSummary: Equatable, Sendable {
+    public enum Line: Equatable, Sendable {
+        case resets(StatusPanelQuotaWindowKind, Date)
+        case unknown(StatusPanelQuotaWindowKind)
+    }
+
+    case lines([Line])
+    case allUnknown
+
+    public init(windows: [StatusPanelQuotaWindow]) {
+        let lines = windows.compactMap { window -> Line? in
+            let kind = StatusPanelQuotaWindowKind(windowDuration: window.windowDuration)
+            if let resetsAt = window.resetsAt { return .resets(kind, resetsAt) }
+            return window.remainingPercent >= 100 ? nil : .unknown(kind)
+        }
+        let allUnknown = !lines.isEmpty && lines.allSatisfy {
+            if case .unknown = $0 { return true }
+            return false
+        }
+        self = allUnknown ? .allUnknown : .lines(lines)
     }
 }
 

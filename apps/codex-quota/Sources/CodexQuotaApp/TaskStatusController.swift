@@ -22,12 +22,16 @@ final class TaskStatusController {
         qos: .utility
     )
     private var pendingClear: (@MainActor (Result) -> Void)?
+    private var pendingArchive: (@MainActor (Result) -> Void)?
     private var isChecking = false {
         didSet {
-            guard !isChecking, let pending = pendingClear else { return }
-            pendingClear = nil
-            DispatchQueue.main.async { [weak self] in
-                self?.clearEndedDesktopThreads(completion: pending)
+            guard !isChecking else { return }
+            if let pending = pendingArchive {
+                pendingArchive = nil
+                DispatchQueue.main.async { [weak self] in self?.archiveCompletedTasks(completion: pending) }
+            } else if let pending = pendingClear {
+                pendingClear = nil
+                DispatchQueue.main.async { [weak self] in self?.clearEndedDesktopThreads(completion: pending) }
             }
         }
     }
@@ -51,9 +55,10 @@ final class TaskStatusController {
                     .standardizedFileURL
             ]
         } else {
-            let workspaceDirectory = URL(
-                fileURLWithPath:
-                    "/Users/openclaw/Projects/codex助手",
+            // The workspace that hosts `.codex-tasks`, relative to the current home folder so the
+            // same build finds it on any Mac and account.
+            let workspaceDirectory = homeDirectory.appendingPathComponent(
+                "Projects/codex助手",
                 isDirectory: true
             )
             let appsDirectory = workspaceDirectory.appendingPathComponent(
@@ -187,7 +192,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: snapshots,
                         desktopThreadGroups: desktopThreadGroups(snapshots),
                         cliProcesses: cliProcesses,
@@ -235,7 +240,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: desktopSnapshots,
                         desktopThreadGroups: desktopThreadGroups(desktopSnapshots),
                         cliProcesses: cliProcesses,
@@ -258,9 +263,8 @@ final class TaskStatusController {
     func archiveCompletedTasks(
         completion: @escaping @MainActor (Result) -> Void
     ) {
-        guard !invalidated, !isChecking else {
-            return
-        }
+        guard !invalidated else { return }
+        guard !isChecking else { pendingArchive = completion; return }
         isChecking = true
         let parsers = parsers
         let desktopSessionScanner = desktopSessionScanner
@@ -292,7 +296,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: desktopSnapshots,
                         desktopThreadGroups: desktopThreadGroups(desktopSnapshots),
                         cliProcesses: cliProcesses,
@@ -371,7 +375,7 @@ final class TaskStatusController {
                 store.notificationState = detection.state
                 completion(
                     Result(
-                        tasks: Array(tasks.prefix(5)),
+                        tasks: tasks,
                         desktopThreads: desktopSnapshots,
                         desktopThreadGroups: desktopThreadGroups(desktopSnapshots),
                         cliProcesses: cliProcesses,
@@ -426,7 +430,8 @@ final class TaskStatusController {
         return (cli, Set(owners.keys))
     }
 
-    nonisolated private static func processOutput(_ executable: String, _ arguments: [String], allowPartial: Bool = false) -> String? {
+    /// Shared by the Codex and Claude session scanners.
+    nonisolated static func processOutput(_ executable: String, _ arguments: [String], allowPartial: Bool = false) -> String? {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -435,9 +440,12 @@ final class TaskStatusController {
         process.standardError = Pipe()
         do {
             try process.run()
+            // Read before waiting: output larger than the pipe buffer would otherwise block
+            // the child forever (for example `ps -axo` listing every process).
+            let output = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             guard process.terminationStatus == 0 || allowPartial else { return nil }
-            return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            return String(decoding: output, as: UTF8.self)
         } catch { return nil }
     }
 
@@ -458,6 +466,8 @@ final class TaskStatusController {
             candidates.append(URL(fileURLWithPath: override))
         }
         candidates += [
+            // ChatGPT 26.924 moved the CLI into a nested app; its bin/codex wrapper only execs this.
+            URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
             URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
             URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex"),
             homeDirectory.appendingPathComponent(".local/bin/codex"),

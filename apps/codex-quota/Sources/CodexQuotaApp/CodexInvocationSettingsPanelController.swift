@@ -13,6 +13,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
     private let onPermissionRefresh: () -> Void
     private var rules: [KeyMappingRule] = []
     private let table = NSTableView()
+    private let rulesScrollView = NSScrollView()
     private let enabledButton = HelpButton(checkboxWithTitle: "", target: nil, action: nil)
     private let permissionLabel = NSTextField(labelWithString: "")
     private var permissionTimer: Timer?
@@ -47,7 +48,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
     var contentView: NSView { embeddedContentView }
     func didBecomeVisible() {
         rules = DoubleCommandTapController.loadRules(from: defaults)
-        table.reloadData(); refreshPermissionStatus()
+        table.reloadData(); refreshPermissionStatus(); adjustRuleColumns()
         permissionTimer?.invalidate()
         let timer = Timer(timeInterval: 2, target: self, selector: #selector(refreshPermissionStatus), userInfo: nil, repeats: true)
         RunLoop.main.add(timer, forMode: .common); permissionTimer = timer
@@ -65,14 +66,18 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
         table.delegate = self; table.dataSource = self
         table.frame = NSRect(x: 0, y: 0, width: 650, height: 230)
         QuickToolsTableStyle.configure(table)
-        for (column, title, width) in [(Column.source, text.originalShortcut, 230.0), (.target, text.mappedShortcut, 230.0), (.note, text.description, 148.0), (.enabled, text.enabled, 42.0)] {
+        table.columnAutoresizingStyle = .noColumnAutoresizing
+        for (column, title, width) in [(Column.source, text.originalShortcut, 180.0), (.target, text.mappedShortcut, 180.0), (.note, text.description, 120.0), (.enabled, text.enabled, 44.0)] {
             let item = NSTableColumn(identifier: .init(column.rawValue))
             item.title = title; item.width = width; item.minWidth = width
             table.addTableColumn(item)
         }
-        let scroll = NSScrollView()
+        let scroll = rulesScrollView
         scroll.documentView = table; scroll.hasVerticalScroller = true; scroll.hasHorizontalScroller = true
         scroll.autohidesScrollers = true; scroll.borderType = .bezelBorder
+        scroll.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(adjustRuleColumns),
+                                               name: NSView.frameDidChangeNotification, object: scroll)
         let add = HelpButton(title: "+", target: self, action: #selector(addRule))
         let remove = HelpButton(title: "−", target: self, action: #selector(removeRule))
         for button in [add, remove] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 18) }
@@ -105,6 +110,15 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
             permissionLabel.trailingAnchor.constraint(lessThanOrEqualTo: settings.leadingAnchor, constant: -12)
         ])
         return view
+    }
+    @objc private func adjustRuleColumns() {
+        let visibleWidth = rulesScrollView.contentView.bounds.width
+        guard visibleWidth > 0, table.tableColumns.count == 4 else { return }
+        // Keep native cell margins and the enabled column fully visible.
+        let extra = max(0, floor(visibleWidth - 524 - 4 * 17 - 8))
+        table.tableColumns[0].width = 180 + floor(extra * 0.25)
+        table.tableColumns[1].width = 180 + floor(extra * 0.25)
+        table.tableColumns[2].width = 120 + ceil(extra * 0.5)
     }
     func numberOfRows(in tableView: NSTableView) -> Int { rules.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
