@@ -1703,7 +1703,7 @@ if CommandLine.arguments.contains("--notch-preview") {
     application.setActivationPolicy(.accessory)
     if let index = args.firstIndex(of: "--animation-dir"), args.count > index + 1 {
         preview.recordAnimation(to: args[index + 1])
-    } else { preview.show() }
+    } else if args.contains("--demo-cycle") { preview.demoCycle() } else { preview.show() }
     if let index = args.firstIndex(of: "--snapshot"), args.count > index + 1 {
         let path = args[index + 1]
         Task { @MainActor in

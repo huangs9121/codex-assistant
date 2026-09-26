@@ -118,6 +118,14 @@ final class NotchPreview {
     }
 
     func show() { controller.setEnabled(true, expand: true); controller.keepPreviewVisible(); model.tick(at: date) }
+
+    /// Opens and closes the island on screen once, for recording the real animation.
+    func demoCycle() {
+        controller.setEnabled(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [self] in controller.expand(); model.tick(at: date) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [self] in controller.collapse() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { NSApp.terminate(nil) }
+    }
     func snapshot(to path: String) throws { try controller.snapshot(to: path) }
 
     /// Renders the 1.4.5-style menu bar panel with the same fixture data. The popover's

@@ -5,11 +5,17 @@ import SwiftUI
 
 @MainActor
 final class NotchPresentation: ObservableObject {
+    /// Drives the island's size; changed inside a spring so the outline grows out of the notch.
     @Published var expanded = false
+    /// The daily panel exists only while the island is open or animating.
+    @Published var contentMounted = false
     @Published var contentVisible = false
     @Published var neckHeight: CGFloat = 32
     @Published var neckWidth: CGFloat = 340
     @Published var panelWidth: CGFloat = 750
+    /// Open height measured from the top of the screen.
+    @Published var panelHeight: CGFloat = 500
+    var collapsedHeight: CGFloat { neckHeight + 3 }
 }
 
 struct NotchActions {
@@ -43,38 +49,53 @@ struct NotchPanelView: View {
         return data.secondaryWindow?.remainingPercent ?? data.primaryWindow?.remainingPercent
     }
     var body: some View {
+        let expanded = presentation.expanded
+        let outline = IslandShape(neckWidth: presentation.neckWidth, neckHeight: presentation.neckHeight)
+        // The window is already at its open size while this frame animates, so the outline and
+        // the revealed content move at display rate instead of following window resizes.
         ZStack(alignment: .top) {
-            NotchOutline(neckWidth: presentation.neckWidth, neckHeight: presentation.neckHeight, expanded: presentation.expanded).fill(.black)
-            if presentation.expanded {
+            outline.fill(.black)
+            if presentation.contentMounted {
                 VStack(spacing: 0) {
                     Color.clear.frame(height: presentation.neckHeight).contentShape(Rectangle()).onTapGesture(perform: open)
                     DailyPanelContent(model: model, text: text, actions: actions)
-                        .opacity(presentation.contentVisible ? 1 : 0)
-                        .offset(y: presentation.contentVisible ? 0 : -10)
-                        .allowsHitTesting(presentation.contentVisible)
                 }
-            } else {
-                HStack {
-                    Button(action: open) {
-                        HStack(spacing: 7) {
-                            ChenshouMark().frame(width: 18, height: 18)
-                            if model.sleepState == .on { Circle().fill(.orange).frame(width: 5, height: 5) }
-                        }.frame(width: 46, height: presentation.neckHeight + 3)
-                    }.accessibilityLabel("展开趁手灵动岛")
-                    Spacer(minLength: 0)
-                    Button(action: open) {
-                        HStack(spacing: 4) {
-                            Text(model.selectedQuotaProvider == .claude ? "Cl" : "Cx").font(.system(size: 9))
-                            Text(mainPercent.map { "\($0)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                        }.frame(width: 62, height: presentation.neckHeight + 3)
-                    }.accessibilityLabel("\(model.selectedQuotaProvider.title) 额度与任务")
-                }.padding(.horizontal, 8).buttonStyle(.plain)
+                .frame(width: presentation.panelWidth, height: presentation.panelHeight, alignment: .top)
+                .opacity(presentation.contentVisible ? 1 : 0)
+                .blur(radius: presentation.contentVisible ? 0 : 3)
+                .offset(y: presentation.contentVisible ? 0 : -8)
+                .allowsHitTesting(presentation.contentVisible)
             }
+            HStack {
+                Button(action: open) {
+                    HStack(spacing: 7) {
+                        ChenshouMark().frame(width: 18, height: 18)
+                        if model.sleepState == .on { Circle().fill(.orange).frame(width: 5, height: 5) }
+                    }.frame(width: 46, height: presentation.collapsedHeight)
+                }.accessibilityLabel("展开趁手灵动岛")
+                Spacer(minLength: 0)
+                Button(action: open) {
+                    HStack(spacing: 4) {
+                        Text(model.selectedQuotaProvider == .claude ? "Cl" : "Cx").font(.system(size: 9))
+                        Text(mainPercent.map { "\($0)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    }.frame(width: 62, height: presentation.collapsedHeight)
+                }.accessibilityLabel("\(model.selectedQuotaProvider.title) 额度与任务")
+            }
+            .padding(.horizontal, 8).buttonStyle(.plain)
+            .frame(width: presentation.neckWidth, height: presentation.collapsedHeight)
+            .opacity(expanded ? 0 : 1)
+            // Leaves quickly on open and returns only as the outline closes around it.
+            .animation(expanded ? .easeOut(duration: 0.1) : .easeInOut(duration: 0.16).delay(0.16), value: expanded)
+            .allowsHitTesting(!expanded)
         }
+        .frame(width: expanded ? presentation.panelWidth : presentation.neckWidth,
+               height: expanded ? presentation.panelHeight : presentation.collapsedHeight, alignment: .top)
+        .clipShape(outline)
+        .contentShape(outline)
+        .onHover(perform: hover)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
-        .clipShape(NotchOutline(neckWidth: presentation.neckWidth, neckHeight: presentation.neckHeight, expanded: presentation.expanded))
-        .onHover(perform: hover)
     }
 }
 
@@ -312,33 +333,43 @@ private struct ChenshouMark: View {
     }
 }
 
-struct NotchOutline: Shape {
+/// One outline for every size, so opening is a continuous grow instead of a swap between shapes.
+/// A neck fills the menu bar around the notch and a body hangs below the menu bar; the top edge is
+/// always flush with the screen and the body's top corners are square, so the island stays attached.
+/// At the neck's width it is simply the collapsed island: square top, rounded bottom.
+struct IslandShape: Shape {
     var neckWidth: CGFloat
     var neckHeight: CGFloat
-    var expanded: Bool
+
     func path(in rect: CGRect) -> Path {
-        if !expanded || rect.width < neckWidth + 40 || rect.height < neckHeight + 40 {
-            return Path(roundedRect: rect, cornerRadius: 12)
-        }
-        let w = rect.width, h = rect.height, top = min(neckHeight, h), r: CGFloat = 20
-        let l = max(r, (w - neckWidth) / 2), right = w - l
+        let w = rect.width, h = rect.height
+        let side = max(0, (w - neckWidth) / 2)
+        let bottom = min(10 + 10 * min(1, side / 24), w / 2, h / 2)
+        // While the island is still short, the body's top rises with its bottom corners.
+        let join = max(0, min(neckHeight, h - bottom))
+        let flare = min(12, side, join / 2)
+        let shoulder = min(20, side, join - flare)
+        let left = side, right = w - side
         var p = Path()
-        p.move(to: CGPoint(x: l-r, y: 0))
-        p.addQuadCurve(to: CGPoint(x: l, y: min(r, top)), control: CGPoint(x: l, y: 0))
-        p.addLine(to: CGPoint(x: l, y: max(r, top-r)))
-        p.addQuadCurve(to: CGPoint(x: l-r, y: top), control: CGPoint(x: l, y: top))
-        p.addLine(to: CGPoint(x: r, y: top))
-        p.addQuadCurve(to: CGPoint(x: 0, y: top+r), control: CGPoint(x: 0, y: top))
-        p.addLine(to: CGPoint(x: 0, y: h-r))
-        p.addQuadCurve(to: CGPoint(x: r, y: h), control: CGPoint(x: 0, y: h))
-        p.addLine(to: CGPoint(x: w-r, y: h))
-        p.addQuadCurve(to: CGPoint(x: w, y: h-r), control: CGPoint(x: w, y: h))
-        p.addLine(to: CGPoint(x: w, y: top+r))
-        p.addQuadCurve(to: CGPoint(x: w-r, y: top), control: CGPoint(x: w, y: top))
-        p.addLine(to: CGPoint(x: right+r, y: top))
-        p.addQuadCurve(to: CGPoint(x: right, y: max(r, top-r)), control: CGPoint(x: right, y: top))
-        p.addLine(to: CGPoint(x: right, y: min(r, top)))
-        p.addQuadCurve(to: CGPoint(x: right+r, y: 0), control: CGPoint(x: right, y: 0))
+        p.move(to: CGPoint(x: left - shoulder, y: 0))
+        p.addLine(to: CGPoint(x: right + shoulder, y: 0))
+        if side > 0 {
+            p.addQuadCurve(to: CGPoint(x: right, y: shoulder), control: CGPoint(x: right, y: 0))
+            p.addLine(to: CGPoint(x: right, y: join - flare))
+            p.addQuadCurve(to: CGPoint(x: right + flare, y: join), control: CGPoint(x: right, y: join))
+            p.addLine(to: CGPoint(x: w, y: join))
+        }
+        p.addLine(to: CGPoint(x: w, y: h - bottom))
+        p.addQuadCurve(to: CGPoint(x: w - bottom, y: h), control: CGPoint(x: w, y: h))
+        p.addLine(to: CGPoint(x: bottom, y: h))
+        p.addQuadCurve(to: CGPoint(x: 0, y: h - bottom), control: CGPoint(x: 0, y: h))
+        if side > 0 {
+            p.addLine(to: CGPoint(x: 0, y: join))
+            p.addLine(to: CGPoint(x: left - flare, y: join))
+            p.addQuadCurve(to: CGPoint(x: left, y: join - flare), control: CGPoint(x: left, y: join))
+            p.addLine(to: CGPoint(x: left, y: shoulder))
+            p.addQuadCurve(to: CGPoint(x: left - shoulder, y: 0), control: CGPoint(x: left, y: 0))
+        }
         p.closeSubpath()
         return p
     }
