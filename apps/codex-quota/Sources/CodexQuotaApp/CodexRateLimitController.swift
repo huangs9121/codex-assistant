@@ -17,6 +17,13 @@ final class CodexRateLimitController {
         case serverError(String)
         case unreadable
 
+        /// The CLI reports an unreachable chatgpt.com (network or proxy down) as a request error.
+        private static func isNetworkError(_ message: String) -> Bool {
+            let lowered = message.lowercased()
+            return ["error sending request", "timed out", "dns error", "connection refused", "connection reset"]
+                .contains { lowered.contains($0) }
+        }
+
         /// Shown in the quota line's help so a failed read explains itself.
         var message: String {
             switch self {
@@ -25,6 +32,8 @@ final class CodexRateLimitController {
             case .exited: "Codex 命令行意外退出"
             case .timedOut: "Codex 在 8 秒内没有返回额度"
             case .busy: "上一次读取尚未结束"
+            case let .serverError(message) where Self.isNetworkError(message):
+                "无法连接 ChatGPT 服务器，请检查网络或代理（\(message)）"
             case let .serverError(message): "Codex 返回错误：\(message)"
             case .unreadable: "返回的额度数据无法识别"
             }
