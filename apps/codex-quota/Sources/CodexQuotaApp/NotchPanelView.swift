@@ -88,8 +88,8 @@ struct NotchPanelView: View {
                 }.accessibilityLabel("展开趁手灵动岛")
                 Spacer(minLength: 0)
                 Button(action: open) {
-                    HStack(spacing: 4) {
-                        Text(model.selectedQuotaProvider == .claude ? "Cl" : "Cx").font(.system(size: 9))
+                    HStack(spacing: 5) {
+                        ProviderMark(provider: model.selectedQuotaProvider)
                         Text(collapsedWindow.map { "\($0.remainingPercent)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
                     }.frame(width: 62, height: presentation.collapsedHeight)
                 }
@@ -346,6 +346,68 @@ private struct QuotaRings: View {
         }
         // Strokes straddle the path; inset so the ring's outer edge matches the diameter.
         .frame(width: diameter - lineWidth, height: diameter - lineWidth)
+    }
+}
+
+/// The provider's own menu bar glyph, read from its installed app so 趁手 never ships another
+/// company's artwork. Without the app it falls back to a short text tag.
+private struct ProviderMark: View {
+    let provider: QuotaProvider
+    private let size: CGFloat = 14
+
+    var body: some View {
+        if let glyph = ProviderGlyph.glyph(for: provider) {
+            // Scale so the visible glyph, not its padded canvas, is `size` points.
+            Image(nsImage: glyph.image).renderingMode(.template).resizable().interpolation(.high).scaledToFit()
+                .frame(width: size / glyph.fill, height: size / glyph.fill)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        } else {
+            Text(provider == .claude ? "Cl" : "Cx").font(.system(size: 9))
+        }
+    }
+}
+
+@MainActor
+private enum ProviderGlyph {
+    private static var cache: [QuotaProvider: (image: NSImage, fill: CGFloat)?] = [:]
+
+    static func glyph(for provider: QuotaProvider) -> (image: NSImage, fill: CGFloat)? {
+        if let cached = cache[provider] { return cached }
+        let glyph = load(provider)
+        cache[provider] = glyph
+        return glyph
+    }
+
+    private static func load(_ provider: QuotaProvider) -> (image: NSImage, fill: CGFloat)? {
+        let (bundleIDs, name) = switch provider {
+        case .codex: (["com.openai.codex", "com.openai.chat"], "chatgptTemplate")
+        case .claude: (["com.anthropic.claudefordesktop"], "TrayIconTemplate")
+        }
+        for id in bundleIDs {
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id),
+                  let image = Bundle(url: url)?.image(forResource: name) else { continue }
+            image.isTemplate = true
+            return (image, fill(of: image))
+        }
+        return nil
+    }
+
+    /// Share of the canvas the glyph occupies; tray icons carry different amounts of padding.
+    private static func fill(of image: NSImage) -> CGFloat {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return 1 }
+        let width = cg.width, height = cg.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return 1 }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height { for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 24 {
+            minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+        } }
+        guard maxX >= minX, maxY >= minY else { return 1 }
+        return CGFloat(max(maxX - minX + 1, maxY - minY + 1)) / CGFloat(max(width, height))
     }
 }
 
