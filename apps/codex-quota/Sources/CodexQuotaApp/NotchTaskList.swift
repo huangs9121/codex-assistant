@@ -11,22 +11,30 @@ struct NotchTaskList: View {
     let onArchiveTask: (TaskStatusSnapshot) -> Void
     let onClearCompleted: () -> Void
     var onOpenClaudeSession: (ClaudeCodeSession) -> Void = { _ in }
+    var onOpenTasks: () -> Void = {}
 
-    private static let rowHeight: CGFloat = 50
-    private static let rowSpacing: CGFloat = 4
-    private static let headerHeight: CGFloat = 36
-    private static let bottomPadding: CGFloat = 12
+    // Single-line rows keep the island compact; more than six rows scroll inside the list.
+    private static let rowHeight: CGFloat = 34
+    private static let headerHeight: CGFloat = 28
+    private static let headerGap: CGFloat = 6
+    private static let emptyHeight: CGFloat = 28
     private static let visibleRowLimit = 6
 
     var body: some View {
         let rows = Self.rows(model: model)
-        if !rows.isEmpty {
-            VStack(spacing: 0) {
-                header
-                    .frame(height: Self.headerHeight)
-
+        VStack(spacing: 0) {
+            header(empty: rows.isEmpty)
+                .frame(height: Self.headerHeight)
+            if rows.isEmpty {
+                Label(cn ? "当前没有任务" : "No current tasks", systemImage: "checkmark.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: Self.emptyHeight)
+                    .padding(.top, Self.headerGap)
+            } else {
                 ScrollView(.vertical, showsIndicators: rows.count > Self.visibleRowLimit) {
-                    LazyVStack(spacing: Self.rowSpacing) {
+                    LazyVStack(spacing: 0) {
                         ForEach(rows) { row in
                             rowView(row)
                                 .frame(height: Self.rowHeight)
@@ -34,8 +42,7 @@ struct NotchTaskList: View {
                     }
                 }
                 .frame(height: Self.rowsHeight(rows.count))
-
-                Color.clear.frame(height: Self.bottomPadding)
+                .padding(.top, Self.headerGap)
             }
         }
     }
@@ -44,10 +51,10 @@ struct NotchTaskList: View {
         rows(model: model).count
     }
 
-    static func contentHeight(model: StatusPanelModel) -> CGFloat {
+    /// Height of the task column in the island, header included.
+    static func columnHeight(model: StatusPanelModel) -> CGFloat {
         let count = rowCount(model: model)
-        guard count > 0 else { return 0 }
-        return headerHeight + rowsHeight(count) + bottomPadding
+        return headerHeight + headerGap + (count == 0 ? emptyHeight : rowsHeight(count))
     }
 
     static func totalCount(model: StatusPanelModel) -> Int {
@@ -69,38 +76,51 @@ struct NotchTaskList: View {
             + model.desktopThreadGroups.reduce(0) { $0 + $1.runningCount }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Text(taskTitle)
-                .font(.system(size: 14, weight: .semibold))
+    /// Title, running count, then clearing and opening the source app on the right.
+    private func header(empty: Bool) -> some View {
+        HStack(spacing: 9) {
+            Text(taskTitle(empty: empty))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
-
-            Spacer(minLength: 8)
 
             let running = Self.runningCount(model: model)
             if running > 0 {
                 Text(runningTitle(running))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color(nsColor: .controlAccentColor))
                     .monospacedDigit()
                     .fixedSize()
             }
 
-            Button(action: onClearCompleted) {
-                Text(clearTitle)
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 8)
-                    .frame(height: 22)
-                    .background(
-                        Color.white.opacity(0.10),
-                        in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    )
+            Spacer(minLength: 8)
+
+            if !empty {
+                Button(action: onClearCompleted) {
+                    Text(clearTitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 8)
+                        .frame(height: 20)
+                        .background(
+                            Color.white.opacity(0.10),
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(canClearCompleted ? 0.88 : 0.35))
+                .disabled(!canClearCompleted)
+                .buttonHelp(clearTitle)
             }
+
+            let source = model.selectedQuotaProvider.title
+            Button(action: onOpenTasks) {
+                Label(cn ? "打开" : "Open", systemImage: "arrow.up.right")
+            }
+            .font(.system(size: 11))
             .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(canClearCompleted ? 0.88 : 0.35))
-            .disabled(!canClearCompleted)
-            .buttonHelp(clearTitle)
+            .foregroundStyle(.white.opacity(0.72))
+            .fixedSize()
+            .buttonHelp(cn ? "打开 \(source)" : "Open \(source)")
         }
     }
 
@@ -128,27 +148,27 @@ struct NotchTaskList: View {
     /// Whole row opens the session: Claude Desktop sessions in Claude, terminal ones in their terminal.
     private func claudeRow(_ session: ClaudeCodeSession) -> some View {
         let terminal: Bool = if case .terminal = session.origin { true } else { false }
-        let help = terminal ? text.openCLIProcessHelp : (cn ? "在 Claude 中打开" : "Open in Claude")
+        let help = (terminal ? text.openCLIProcessHelp : (cn ? "在 Claude 中打开" : "Open in Claude"))
+            + (session.folderName.map { " · " + $0 } ?? "")
         // Activity can be a few seconds newer than the panel clock; never show a future time.
         let activity = model.now.timeIntervalSince(session.lastActiveAt) < 60
             ? (cn ? "刚刚" : "Just now") : relativeTime(session.lastActiveAt)
-        let subtitle = [activity, session.folderName].compactMap { $0 }.joined(separator: " · ")
         return Button {
             onOpenClaudeSession(session)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 if terminal {
                     sourceBadge(systemName: "terminal.fill", color: .orange)
                 } else {
                     claudeStatusBadge(session.status)
                 }
-                rowTitle(session.title, depth: 0, subtitle: terminal ? nil : subtitle)
+                rowTitle(session.title, depth: 0, subtitle: terminal ? nil : activity)
                 Text(terminal ? cliOccupiedTitle : claudeStatusTitle(session.status))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(terminal ? Color.orange.opacity(0.9) : claudeStatusColor(session.status))
                     .fixedSize()
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 4)
             .frame(height: Self.rowHeight)
             .background(cardBackground)
             .contentShape(Rectangle())
@@ -236,12 +256,12 @@ struct NotchTaskList: View {
         _ task: TaskStatusSnapshot,
         title: String
     ) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             taskStatusBadge(task.status)
             rowTitle(title, depth: 0, subtitle: relativeTime(task.startedAt))
             taskStatus(task.status)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 4)
         .frame(height: Self.rowHeight)
         .background(cardBackground)
         .contentShape(Rectangle())
@@ -257,7 +277,7 @@ struct NotchTaskList: View {
         let isRoot = depth == 0
         let status = aggregateStatus ?? thread.status
 
-        return HStack(spacing: 10) {
+        return HStack(spacing: 8) {
             if isRoot, childCount > 0 {
                 disclosureButton(thread.id, status: status)
             } else {
@@ -268,7 +288,7 @@ struct NotchTaskList: View {
                 guard canOpen else { return }
                 _ = onOpenCodexThread(thread)
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     rowTitle(thread.title, depth: depth, subtitle: relativeTime(thread.lastActiveAt))
                     desktopStatus(status)
                 }
@@ -278,7 +298,7 @@ struct NotchTaskList: View {
             .disabled(!canOpen)
             .buttonHelp(canOpen ? openThreadTitle(thread) : unavailableThreadTitle)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 4)
         .frame(height: Self.rowHeight)
         .background(cardBackground)
         .accessibilityLabel(thread.title + "，" + desktopStatusTitle(aggregateStatus ?? thread.status))
@@ -286,7 +306,7 @@ struct NotchTaskList: View {
     }
 
     private func missingParentRow(_ group: CodexDesktopThreadGroup) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             if group.descendantCount > 0 {
                 disclosureButton(group.id, status: .unknown)
             } else {
@@ -295,7 +315,7 @@ struct NotchTaskList: View {
             rowTitle(missingParentTitle, depth: 0)
             desktopStatus(.unknown)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 4)
         .frame(height: Self.rowHeight)
         .background(cardBackground)
         .accessibilityLabel(missingParentTitle)
@@ -305,16 +325,16 @@ struct NotchTaskList: View {
         Button {
             _ = onOpenCLIProcess(id, process)
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 sourceBadge(systemName: "terminal.fill", color: .orange)
                 rowTitle(title, depth: 0)
                 Text(cliOccupiedTitle)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.orange.opacity(0.9))
                     .fixedSize()
                     .accessibilityLabel(cliOccupiedTitle)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 4)
             .frame(height: Self.rowHeight)
             .background(cardBackground)
             .contentShape(Rectangle())
@@ -386,10 +406,11 @@ struct NotchTaskList: View {
         .accessibilityHidden(true)
     }
 
+    /// Title and time on one line; the title gives way first.
     private func rowTitle(_ title: String, depth: Int, subtitle: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.system(size: 12)).foregroundStyle(.white).lineLimit(1).truncationMode(.tail).help(title)
-            if let subtitle { Text(subtitle).font(.system(size: 10)).foregroundStyle(.white.opacity(0.48)).lineLimit(1) }
+        HStack(spacing: 8) {
+            Text(title).font(.system(size: 13)).foregroundStyle(.white).lineLimit(1).truncationMode(.tail).help(title)
+            if let subtitle { Text(subtitle).font(.system(size: 11)).foregroundStyle(.white.opacity(0.42)).lineLimit(1).fixedSize() }
         }.padding(.leading, CGFloat(depth) * 12).frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -440,16 +461,15 @@ struct NotchTaskList: View {
         return model.hasCompletedTasks || model.canClearCompletedSessions
     }
 
-    private var taskTitle: String {
-        let count = Self.totalCount(model: model)
+    private func taskTitle(empty: Bool) -> String {
         let source = model.selectedQuotaProvider.title
-        return text.language == .simplifiedChinese
-            ? "\(source) 任务 (\(count))"
-            : "\(source) Tasks (\(count))"
+        if empty { return cn ? "\(source) 任务" : "\(source) Tasks" }
+        let count = Self.totalCount(model: model)
+        return cn ? "\(source) 任务 \(count)" : "\(source) Tasks \(count)"
     }
 
     private func runningTitle(_ count: Int) -> String {
-        text.language == .simplifiedChinese ? "\(count)运行中" : "\(count) running"
+        cn ? "\(count) 运行中" : "\(count) running"
     }
 
     private var clearTitle: String {
@@ -536,9 +556,7 @@ struct NotchTaskList: View {
     }
 
     private static func rowsHeight(_ count: Int) -> CGFloat {
-        let visible = min(count, visibleRowLimit)
-        guard visible > 0 else { return 0 }
-        return CGFloat(visible) * (rowHeight + rowSpacing) - rowSpacing
+        CGFloat(min(count, visibleRowLimit)) * rowHeight
     }
 
     private static func logicalThreadCount(_ group: CodexDesktopThreadGroup) -> Int {

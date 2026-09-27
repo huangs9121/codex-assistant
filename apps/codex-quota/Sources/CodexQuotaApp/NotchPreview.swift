@@ -119,12 +119,14 @@ final class NotchPreview {
 
     func show() { controller.setEnabled(true, expand: true); controller.keepPreviewVisible(); model.tick(at: date) }
 
-    /// Opens and closes the island on screen once, for recording the real animation.
+    /// Opens and closes the island on screen twice, for recording the real animation.
     func demoCycle() {
         controller.setEnabled(true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [self] in controller.expand(); model.tick(at: date) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [self] in controller.collapse() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) { NSApp.terminate(nil) }
+        for start in [1.5, 3.3] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + start) { [self] in controller.expand(); model.tick(at: date) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + start + 1.1) { [self] in controller.collapse() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.2) { NSApp.terminate(nil) }
     }
     func snapshot(to path: String) throws { try controller.snapshot(to: path) }
 

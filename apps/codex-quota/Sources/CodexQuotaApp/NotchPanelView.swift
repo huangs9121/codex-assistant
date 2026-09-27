@@ -7,15 +7,16 @@ import SwiftUI
 final class NotchPresentation: ObservableObject {
     /// Drives the island's size; changed inside a spring so the outline grows out of the notch.
     @Published var expanded = false
-    /// The daily panel exists only while the island is open or animating.
+    /// The daily panel is built once and then kept, hidden while the island is collapsed.
     @Published var contentMounted = false
     @Published var contentVisible = false
     @Published var neckHeight: CGFloat = 32
     @Published var neckWidth: CGFloat = 340
-    @Published var panelWidth: CGFloat = 750
+    @Published var panelWidth: CGFloat = 600
     /// Open height measured from the top of the screen.
     @Published var panelHeight: CGFloat = 500
-    var collapsedHeight: CGFloat { neckHeight + 3 }
+    /// The collapsed island is exactly as tall as the menu bar.
+    var collapsedHeight: CGFloat { neckHeight }
 }
 
 struct NotchActions {
@@ -44,9 +45,21 @@ struct NotchPanelView: View {
     let open: () -> Void
     let hover: (Bool) -> Void
 
-    private var mainPercent: Int? {
+    /// The collapsed island shows the 5-hour window when there is one, otherwise the weekly one.
+    private var collapsedWindow: StatusPanelQuotaWindow? {
         let data = StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
-        return data.secondaryWindow?.remainingPercent ?? data.primaryWindow?.remainingPercent
+        let windows = [data.primaryWindow, data.secondaryWindow].compactMap { $0 }
+        return windows.first { StatusPanelQuotaWindowKind(windowDuration: $0.windowDuration) == .fiveHour }
+            ?? data.outerRingWindow
+    }
+    private var collapsedWindowTitle: String {
+        guard let window = collapsedWindow else { return "暂无额度" }
+        let name = switch StatusPanelQuotaWindowKind(windowDuration: window.windowDuration) {
+        case .fiveHour: "5小时剩余"
+        case .weekly: "本周剩余"
+        case .generic: "额度剩余"
+        }
+        return "\(model.selectedQuotaProvider.title) \(name) \(window.remainingPercent)%"
     }
     var body: some View {
         let expanded = presentation.expanded
@@ -62,9 +75,9 @@ struct NotchPanelView: View {
                 }
                 .frame(width: presentation.panelWidth, height: presentation.panelHeight, alignment: .top)
                 .opacity(presentation.contentVisible ? 1 : 0)
-                .blur(radius: presentation.contentVisible ? 0 : 3)
                 .offset(y: presentation.contentVisible ? 0 : -8)
                 .allowsHitTesting(presentation.contentVisible)
+                .accessibilityHidden(!presentation.contentVisible)
             }
             HStack {
                 Button(action: open) {
@@ -77,9 +90,11 @@ struct NotchPanelView: View {
                 Button(action: open) {
                     HStack(spacing: 4) {
                         Text(model.selectedQuotaProvider == .claude ? "Cl" : "Cx").font(.system(size: 9))
-                        Text(mainPercent.map { "\($0)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                        Text(collapsedWindow.map { "\($0.remainingPercent)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
                     }.frame(width: 62, height: presentation.collapsedHeight)
-                }.accessibilityLabel("\(model.selectedQuotaProvider.title) 额度与任务")
+                }
+                .buttonHelp(collapsedWindowTitle)
+                .accessibilityLabel(collapsedWindowTitle + "，展开额度与任务")
             }
             .padding(.horizontal, 8).buttonStyle(.plain)
             .frame(width: presentation.neckWidth, height: presentation.collapsedHeight)
@@ -99,13 +114,12 @@ struct NotchPanelView: View {
     }
 }
 
-/// The same daily surface is used by the island and menu bar popover.
+/// The island's open panel: quota on the left, tasks on the right, as tall as the taller column.
 struct DailyPanelContent: View {
     @ObservedObject var model: StatusPanelModel
     let text: AppText
     let actions: NotchActions
     private var cn: Bool { text.language == .simplifiedChinese }
-    private var source: String { model.selectedQuotaProvider.title }
     /// Outer ring and its text use the provider colour; the inner 5-hour ring uses a light tint of it.
     private var accent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.85, green: 0.49, blue: 0.36) : Color(red: 0.14, green: 0.55, blue: 1) }
     private var innerAccent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.953, green: 0.749, blue: 0.663) : Color(red: 0.616, green: 0.796, blue: 1) }
@@ -115,13 +129,36 @@ struct DailyPanelContent: View {
         guard model.selectedQuotaProvider == .codex, model.showsResetForecast else { return nil }
         return model.resetCalendar?.feed.upcomingAnnouncement(now: model.now)
     }
+    private static let headerHeight: CGFloat = 40
+    private static let bottomPadding: CGFloat = 16
+    private static let quotaWidth: CGFloat = 196
+    private static let lineHeight: CGFloat = 15
+
+    /// Height below the neck. The island is as tall as its content, with no fixed minimum.
     static func contentHeight(model: StatusPanelModel) -> CGFloat {
-        max(390, NotchTaskList.contentHeight(model: model) + 40) + 78
+        headerHeight + bodyHeight(model: model) + bottomPadding
     }
+    private static func bodyHeight(model: StatusPanelModel) -> CGFloat {
+        max(quotaHeight(model: model), NotchTaskList.columnHeight(model: model))
+    }
+    /// Mirrors the fixed row heights in `quota`, so the island can be sized before it opens.
+    private static func quotaHeight(model: StatusPanelModel) -> CGFloat {
+        let data = StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
+        var lines = switch StatusPanelResetSummary(windows: [data.primaryWindow, data.secondaryWindow].compactMap { $0 }) {
+        case .allUnknown: 1
+        case let .lines(lines): lines.count
+        }
+        if !model.quotaStatus.isEmpty { lines += 1 }
+        var height = 16 + 10 + QuotaRings.size + 8 + 16
+        if lines > 0 { height += 12 + CGFloat(lines) * lineHeight + CGFloat(lines - 1) * 4 }
+        if model.selectedQuotaProvider == .codex, model.showsResetForecast { height += 8 + lineHeight }
+        return height
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 9) {
-                ChenshouMark().frame(width: 22, height: 22)
+            HStack(spacing: 8) {
+                ChenshouMark().frame(width: 18, height: 18)
                 Text("趁手").font(.system(size: 13, weight: .medium))
                 if model.sleepState == .on {
                     Button(action: actions.sleep) { Label(cn ? "正在防睡眠" : "Awake", systemImage: "moon") }
@@ -129,95 +166,81 @@ struct DailyPanelContent: View {
                         .help(model.sleepDetail)
                 }
                 Spacer()
-                NotchSettingsButton(action: actions.settings).frame(width: 66, height: 30)
-            }.frame(height: 56)
-            HStack(alignment: .top, spacing: 24) {
-                quota.frame(width: 198)
+                Picker(cn ? "额度账户" : "Quota account", selection: Binding(get: { model.selectedQuotaProvider }, set: { model.selectQuotaProvider($0) })) {
+                    ForEach(QuotaProvider.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().controlSize(.small).frame(width: 128)
+                NotchSettingsButton(action: actions.settings).frame(width: 60, height: 26).padding(.leading, 8)
+            }.frame(height: Self.headerHeight)
+            HStack(alignment: .top, spacing: 14) {
+                quota.frame(width: Self.quotaWidth, alignment: .topLeading)
                 Rectangle().fill(.white.opacity(0.13)).frame(width: 1)
-                VStack(spacing: 0) {
-                    if NotchTaskList.totalCount(model: model) > 0 {
-                        NotchTaskList(model: model, text: text, onResumeSession: actions.resume, onOpenCodexThread: actions.thread,
-                                      onOpenCLIProcess: actions.cli, onArchiveTask: actions.archive, onClearCompleted: actions.clear,
-                                      onOpenClaudeSession: actions.claude)
-                    } else {
-                        VStack(spacing: 12) {
-                            Text(cn ? "\(source) 任务" : "\(source) tasks").frame(maxWidth: .infinity, alignment: .leading)
-                            Spacer()
-                            Image(systemName: "checkmark.circle").font(.system(size: 28)).foregroundStyle(.secondary)
-                            Text(cn ? "当前没有任务" : "No current tasks").foregroundStyle(.secondary)
-                            Spacer()
-                        }.font(.system(size: 13))
-                    }
-                    Spacer(minLength: 0)
-                    HStack {
-                        Text(model.selectedQuotaProvider == .claude
-                             ? (cn ? "Claude 桌面会话与终端会话" : "Claude Desktop and terminal sessions")
-                             : (cn ? "桌面任务与终端会话" : "Desktop and terminal sessions")).foregroundStyle(.white.opacity(0.45))
-                        Spacer()
-                        Button(action: actions.openTasks) { Label(cn ? "打开 \(source)" : "Open \(source)", systemImage: "arrow.up.right") }
-                            .buttonStyle(.plain).foregroundStyle(.white.opacity(0.7))
-                    }.font(.system(size: 11)).frame(height: 36)
-                }.frame(maxWidth: .infinity, alignment: .top)
+                NotchTaskList(model: model, text: text, onResumeSession: actions.resume, onOpenCodexThread: actions.thread,
+                              onOpenCLIProcess: actions.cli, onArchiveTask: actions.archive, onClearCompleted: actions.clear,
+                              onOpenClaudeSession: actions.claude, onOpenTasks: actions.openTasks)
+                    .frame(maxWidth: .infinity, alignment: .top)
             }
-            .frame(height: Self.contentHeight(model: model) - 78)
-            Color.clear.frame(height: 22)
+            .frame(height: Self.bodyHeight(model: model), alignment: .top)
+            Color.clear.frame(height: Self.bottomPadding)
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 20)
         .background(.black)
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
     }
+    /// Every row has a fixed height; `quotaHeight` depends on it.
     private var quota: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Picker(cn ? "额度账户" : "Quota account", selection: Binding(get: { model.selectedQuotaProvider }, set: { model.selectQuotaProvider($0) })) {
-                ForEach(QuotaProvider.allCases, id: \.self) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden()
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(cn ? "剩余额度" : "Remaining quota").foregroundStyle(.white.opacity(0.65))
                 Spacer()
                 if let plan = data.planBadgeName ?? data.planName {
-                    Text(plan).font(.system(size: 10)).padding(.horizontal, 5).padding(.vertical, 2)
+                    Text(plan).font(.system(size: 10)).padding(.horizontal, 5).padding(.vertical, 1)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.25), lineWidth: 1))
                 }
-            }.font(.system(size: 11))
-            HStack {
-                Spacer()
-                QuotaRings(outer: data.outerRingWindow, inner: data.innerRingWindow,
-                           outerColor: accent, innerColor: innerAccent, label: windowLabel)
-                    .opacity(model.quotaStale ? 0.45 : 1)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(model.selectedQuotaProvider.title) " + (windows.isEmpty ? "暂无数据"
-                        : [data.outerRingWindow, data.innerRingWindow].compactMap { $0 }
-                            .map { windowLabel($0) + " \($0.remainingPercent)%" }.joined(separator: "，")))
-                Spacer()
-            }
+            }.font(.system(size: 11)).frame(height: 16)
+            QuotaRings(outer: data.outerRingWindow, inner: data.innerRingWindow,
+                       outerColor: accent, innerColor: innerAccent, label: windowLabel)
+                .opacity(model.quotaStale ? 0.45 : 1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(model.selectedQuotaProvider.title) " + (windows.isEmpty ? "暂无数据"
+                    : [data.outerRingWindow, data.innerRingWindow].compactMap { $0 }
+                        .map { windowLabel($0) + " \($0.remainingPercent)%" }.joined(separator: "，")))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 10)
             let resets = StatusPanelResetSummary(windows: windows)
             if resets != .lines([]) || !model.quotaStatus.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 4) {
                     switch resets {
                     case .allUnknown:
                         Text(cn ? "尚未获取重置时间" : "Reset time not received yet")
-                            .fontWeight(.medium).foregroundStyle(.white.opacity(0.65))
+                            .fontWeight(.medium).foregroundStyle(.white.opacity(0.65)).frame(height: Self.lineHeight)
                     case .lines(let lines):
-                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in resetLine(line) }
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in resetLine(line).frame(height: Self.lineHeight) }
                     }
                     if !model.quotaStatus.isEmpty {
                         Text(model.quotaStatus).foregroundStyle(.white.opacity(0.55))
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1).truncationMode(.tail)
+                            .frame(height: Self.lineHeight)
                             .buttonHelp(model.quotaDetail)
-                            .padding(.top, resets == .allUnknown ? -3 : 0)
                     }
-                }.font(.system(size: 11))
+                }.font(.system(size: 11)).padding(.top, 12)
             }
             HStack {
                 Button { model.onRefreshQuota?() } label: { Label(cn ? "刷新" : "Refresh", systemImage: "arrow.clockwise") }.buttonStyle(.plain)
                 Spacer()
                 if let date = data.observedAt { Text(shortDate(date)).font(.system(size: 10)).help(cn ? "最近成功读取时间" : "Last successful read") }
-            }.font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+            }.font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)).frame(height: 16).padding(.top, 8)
             if model.selectedQuotaProvider == .codex, model.showsResetForecast {
+                let detail = forecast.map { $0.detailText(now: model.now, language: text.language) }
                 Button(action: actions.reset) {
-                    Label(forecast.map { $0.detailText(now: model.now, language: text.language) } ?? (cn ? "重置日历" : "Reset calendar"), systemImage: "calendar").lineLimit(2).multilineTextAlignment(.leading)
-                }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(accent)
+                    // The forecast's first two lines on one line; the full record is in the help.
+                    Label(detail.map { $0.split(separator: "\n").prefix(2).joined(separator: " · ") } ?? (cn ? "重置日历" : "Reset calendar"),
+                          systemImage: "calendar").lineLimit(1).truncationMode(.tail)
+                }
+                .font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(accent)
+                .frame(height: Self.lineHeight).padding(.top, 8)
+                .buttonHelp(detail ?? (cn ? "打开重置日历" : "Open reset calendar"))
             }
         }
     }
@@ -251,7 +274,7 @@ struct DailyPanelContent: View {
         }
         return HStack(alignment: .firstTextBaseline, spacing: 0) {
             Text(period).fontWeight(.semibold).foregroundStyle(inner ? innerAccent : accent)
-                .frame(width: cn ? 36 : 40, alignment: .leading)
+                .frame(width: cn ? 32 : 38, alignment: .leading)
             Text(value).foregroundStyle(.white.opacity(0.55)).monospacedDigit().lineLimit(1)
         }
     }
@@ -286,29 +309,30 @@ private struct QuotaRings: View {
     let outerColor: Color
     let innerColor: Color
     let label: (StatusPanelQuotaWindow) -> String
-    private let size: CGFloat = 136
-    private let lineWidth: CGFloat = 7
+    static let size: CGFloat = 108
+    private let lineWidth: CGFloat = 6
     private let gap: CGFloat = 4
 
     var body: some View {
         ZStack {
-            ring(outer, color: outerColor, diameter: size)
-            if inner != nil { ring(inner, color: innerColor, diameter: size - 2 * (lineWidth + gap)) }
+            ring(outer, color: outerColor, diameter: Self.size)
+            if inner != nil { ring(inner, color: innerColor, diameter: Self.size - 2 * (lineWidth + gap)) }
             VStack(spacing: 0) {
                 if let outer {
-                    Text("\(outer.remainingPercent)%").font(.system(size: 25, weight: .semibold)).monospacedDigit()
-                    Text(label(outer)).font(.system(size: 10)).foregroundStyle(outerColor).padding(.top, 4)
+                    let dual = inner != nil
+                    Text("\(outer.remainingPercent)%").font(.system(size: dual ? 19 : 22, weight: .semibold)).monospacedDigit()
+                    Text(label(outer)).font(.system(size: dual ? 9 : 10)).foregroundStyle(outerColor).padding(.top, dual ? 1 : 3)
                     if let inner {
-                        Text("\(inner.remainingPercent)%").font(.system(size: 16, weight: .semibold)).monospacedDigit()
-                            .foregroundStyle(innerColor).padding(.top, 7)
-                        Text(label(inner)).font(.system(size: 10)).foregroundStyle(innerColor).padding(.top, 4)
+                        Text("\(inner.remainingPercent)%").font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(innerColor).padding(.top, 3)
+                        Text(label(inner)).font(.system(size: 9)).foregroundStyle(innerColor).padding(.top, 1)
                     }
                 } else {
-                    Text("—").font(.system(size: 26)).foregroundStyle(.secondary)
+                    Text("—").font(.system(size: 22)).foregroundStyle(.secondary)
                 }
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: Self.size, height: Self.size)
     }
 
     private func ring(_ window: StatusPanelQuotaWindow?, color: Color, diameter: CGFloat) -> some View {
