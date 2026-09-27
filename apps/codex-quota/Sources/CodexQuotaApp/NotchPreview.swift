@@ -53,6 +53,9 @@ final class NotchPreview {
             }
         }
         if state.hasPrefix("claude") { applyClaudeFixture(state) }
+        // The preview has its own defaults suite, so set the island layout explicitly every run.
+        model.setIslandDual(CommandLine.arguments.contains("--dual"))
+        model.setIslandDualLeft(CommandLine.arguments.contains("--claude-left") ? .claude : .codex)
         model.tick(at: date)
         let actions = NotchActions(settings: { _ in }, quickTools: {}, openTasks: {}, scroll: {}, gestures: {}, mappings: {}, sleep: {}, reset: {},
             mode: { [weak self] mode in self?.model.displayMode = mode },

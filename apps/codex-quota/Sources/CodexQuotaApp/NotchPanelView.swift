@@ -48,20 +48,41 @@ struct NotchPanelView: View {
     let hover: (Bool) -> Void
 
     /// The collapsed island shows the 5-hour window when there is one, otherwise the weekly one.
-    private var collapsedWindow: StatusPanelQuotaWindow? {
-        let data = StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
+    private func collapsedWindow(_ provider: QuotaProvider) -> StatusPanelQuotaWindow? {
+        let data = StatusPanelQuotaData(snapshot: model.quotaSnapshot(for: provider), now: model.now)
         let windows = [data.primaryWindow, data.secondaryWindow].compactMap { $0 }
         return windows.first { StatusPanelQuotaWindowKind(windowDuration: $0.windowDuration) == .fiveHour }
             ?? data.outerRingWindow
     }
-    private var collapsedWindowTitle: String {
-        guard let window = collapsedWindow else { return "暂无额度" }
+    private func collapsedWindowTitle(_ provider: QuotaProvider) -> String {
+        guard let window = collapsedWindow(provider) else { return "\(provider.title) 暂无额度" }
         let name = switch StatusPanelQuotaWindowKind(windowDuration: window.windowDuration) {
         case .fiveHour: "5小时剩余"
         case .weekly: "本周剩余"
         case .generic: "额度剩余"
         }
-        return "\(model.selectedQuotaProvider.title) \(name) \(window.remainingPercent)%"
+        return "\(provider.title) \(name) \(window.remainingPercent)%"
+    }
+    /// One provider's mark and percentage in the visible strip beside the notch, kept at least 3pt
+    /// clear of it; "100%" shrinks slightly if needed. Clicking opens the island on that provider.
+    private func quotaSide(_ provider: QuotaProvider, trailing: Bool, width side: CGFloat) -> some View {
+        Button {
+            if model.selectedQuotaProvider != provider { model.selectQuotaProvider(provider) }
+            open()
+        } label: {
+            HStack(spacing: 4) {
+                ProviderMark(provider: provider)
+                Text(collapsedWindow(provider).map { "\($0.remainingPercent)%" } ?? "—")
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    .minimumScaleFactor(0.8).lineLimit(1)
+            }
+            .frame(maxWidth: max(0, side - 11), alignment: trailing ? .trailing : .leading)
+            .padding(trailing ? .trailing : .leading, 8)
+            .frame(width: side, height: presentation.collapsedHeight, alignment: trailing ? .trailing : .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonHelp(collapsedWindowTitle(provider))
+        .accessibilityLabel(collapsedWindowTitle(provider) + "，展开额度与任务")
     }
     var body: some View {
         let expanded = presentation.expanded
@@ -84,28 +105,28 @@ struct NotchPanelView: View {
             // Each side only uses the visible strip beside the notch; nothing is drawn under the camera housing.
             let side = max(0, (presentation.neckWidth - presentation.notchWidth) / 2)
             HStack(spacing: 0) {
-                Button(action: open) {
-                    HStack(spacing: 7) {
-                        ChenshouMark().frame(width: 18, height: 18)
-                        if model.sleepState == .on { Circle().fill(.orange).frame(width: 5, height: 5) }
-                    }.frame(width: side, height: presentation.collapsedHeight)
-                }.accessibilityLabel("展开趁手灵动岛")
-                Spacer(minLength: 0)
-                Button(action: open) {
-                    HStack(spacing: 4) {
-                        ProviderMark(provider: model.selectedQuotaProvider)
-                        Text(collapsedWindow.map { "\($0.remainingPercent)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                            .minimumScaleFactor(0.8).lineLimit(1)
-                    }
-                    // Keep at least 3pt between the content and the notch; "100%" shrinks slightly if needed.
-                    .frame(maxWidth: max(0, side - 11), alignment: .trailing)
-                    .padding(.trailing, 8)
-                    .frame(width: side, height: presentation.collapsedHeight, alignment: .trailing)
+                if model.islandDual {
+                    let left = model.islandDualLeft
+                    quotaSide(left, trailing: false, width: side)
+                    Spacer(minLength: 0)
+                    quotaSide(left == .codex ? .claude : .codex, trailing: true, width: side)
+                } else {
+                    Button(action: open) {
+                        HStack(spacing: 7) {
+                            ChenshouMark().frame(width: 18, height: 18)
+                            if model.sleepState == .on { Circle().fill(.orange).frame(width: 5, height: 5) }
+                        }.frame(width: side, height: presentation.collapsedHeight)
+                    }.accessibilityLabel("展开趁手灵动岛")
+                    Spacer(minLength: 0)
+                    quotaSide(model.selectedQuotaProvider, trailing: true, width: side)
                 }
-                .buttonHelp(collapsedWindowTitle)
-                .accessibilityLabel(collapsedWindowTitle + "，展开额度与任务")
             }
             .buttonStyle(.plain)
+            .contextMenu {
+                if model.islandDual {
+                    Button("左右互换") { model.swapIslandDualSides() }
+                }
+            }
             .frame(width: presentation.neckWidth, height: presentation.collapsedHeight)
             .opacity(expanded ? 0 : 1)
             // Leaves quickly on open and returns only as the outline closes around it.

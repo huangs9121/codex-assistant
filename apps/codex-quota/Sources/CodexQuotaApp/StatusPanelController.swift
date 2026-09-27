@@ -26,8 +26,12 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var claudeQuotaStatus = "正在读取额度…"
     @Published private(set) var claudeQuotaDetail = ""
     @Published private(set) var claudeQuotaStale = false
-    private var codexSnapshot: QuotaSnapshot?
-    private var claudeSnapshot: QuotaSnapshot?
+    @Published private(set) var codexSnapshot: QuotaSnapshot?
+    @Published private(set) var claudeSnapshot: QuotaSnapshot?
+    /// Island only: both providers beside the notch, one per side.
+    @Published private(set) var islandDual: Bool
+    @Published private(set) var islandDualLeft: QuotaProvider
+    var onIslandLayoutChange: (() -> Void)?
     private let defaults: UserDefaults
     var onQuotaProviderChange: (() -> Void)?
     var onRefreshQuota: (() -> Void)?
@@ -83,12 +87,34 @@ final class StatusPanelModel: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         selectedQuotaProvider = QuotaProvider(rawValue: defaults.string(forKey: "selectedQuotaProvider") ?? "") ?? .codex
+        islandDual = defaults.bool(forKey: Self.islandDualKey)
+        islandDualLeft = QuotaProvider(rawValue: defaults.string(forKey: Self.islandDualLeftKey) ?? "") ?? .codex
         store = TaskStatusStore(defaults: defaults)
         expandedDesktopThreadGroupIDs = store.expandedDesktopThreadGroupIDs
         hiddenClaudeSessionIDs = Set(defaults.stringArray(forKey: Self.hiddenClaudeSessionsKey) ?? [])
     }
 
     private static let hiddenClaudeSessionsKey = "hiddenClaudeSessionIDs"
+    private static let islandDualKey = "islandDualProviders"
+    private static let islandDualLeftKey = "islandDualLeftProvider"
+
+    func quotaSnapshot(for provider: QuotaProvider) -> QuotaSnapshot? {
+        provider == .codex ? codexSnapshot : claudeSnapshot
+    }
+
+    func setIslandDual(_ value: Bool) {
+        islandDual = value
+        defaults.set(value, forKey: Self.islandDualKey)
+        onIslandLayoutChange?()
+    }
+
+    func setIslandDualLeft(_ provider: QuotaProvider) {
+        islandDualLeft = provider
+        defaults.set(provider.rawValue, forKey: Self.islandDualLeftKey)
+        onIslandLayoutChange?()
+    }
+
+    func swapIslandDualSides() { setIslandDualLeft(islandDualLeft == .codex ? .claude : .codex) }
 
     var canClearClaudeSessions: Bool { claudeSessions.contains { $0.status == .completed } }
 

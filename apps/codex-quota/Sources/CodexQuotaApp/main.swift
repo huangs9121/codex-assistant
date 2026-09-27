@@ -485,6 +485,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         var actions = QuickToolsPanelController.SettingsActions()
         actions.setLaunchAtLogin = { [weak self] in self?.setLaunchAtLogin($0) }
         actions.setDisplayMode = { [weak self] in self?.setPanelDisplayMode($0 == 0 ? .island : .menuBar, reveal: false) }
+        actions.setIslandDual = { [weak self] in self?.panelModel.setIslandDual($0 == 1) }
+        actions.setIslandDualLeft = { [weak self] in self?.panelModel.setIslandDualLeft($0 == 0 ? .codex : .claude) }
         actions.setManualSleep = { [weak self] desired in
             guard let self, desired != taskSleepController.isEnabled else { return }
             toggleTaskSleep()
@@ -517,6 +519,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             var state = QuickToolsPanelController.SettingsState()
             state.launchAtLogin = launchAtLoginController.state == .enabled
             state.displayModeIndex = preferences.panelDisplayMode == .island ? 0 : 1
+            state.islandDualIndex = panelModel.islandDual ? 1 : 0
+            state.islandDualLeftIndex = panelModel.islandDualLeft == .codex ? 0 : 1
             state.manualSleepEnabled = taskSleepController.isEnabled
             state.quotaProviderIndex = panelModel.selectedQuotaProvider == .codex ? 0 : 1
             state.batteryStyleIndex = BatteryStyle.allCases.firstIndex(of: preferences.batteryStyle) ?? 0
@@ -530,6 +534,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             state.version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.5"
             return state
         }, actions: actions)
+        panelModel.onIslandLayoutChange = { [weak self] in
+            guard let self else { return }
+            quickToolsPanelController.refreshSettings()
+            // Showing Claude on the island needs its reading as fresh as when it is selected.
+            if panelModel.islandDual { refreshClaudeQuota() }
+        }
         panelModel.onQuotaProviderChange = { [weak self] in
             self?.updateStatusPresentation()
             self?.quickToolsPanelController.refreshSettings()
@@ -1210,8 +1220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private func refreshClaudeQuota(manual: Bool = false) {
         guard !isRefreshingClaude else { return }
         // Each check starts the official Claude Code CLI, so keep background checks sparse:
-        // every 5 minutes while Claude is shown, otherwise every 15 minutes for reset notices.
-        let interval: TimeInterval = panelModel.selectedQuotaProvider == .claude ? 300 : 900
+        // every 5 minutes while Claude is shown (selected, or on the dual island), otherwise every 15 minutes.
+        let claudeShown = panelModel.selectedQuotaProvider == .claude
+            || (preferences.panelDisplayMode == .island && panelModel.islandDual)
+        let interval: TimeInterval = claudeShown ? 300 : 900
         if !manual, let lastClaudeCheck, Date().timeIntervalSince(lastClaudeCheck) < interval { return }
         isRefreshingClaude = true
         lastClaudeCheck = Date()

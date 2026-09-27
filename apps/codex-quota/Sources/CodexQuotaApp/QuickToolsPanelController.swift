@@ -41,6 +41,8 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         var launchAtLogin = false
         var launchAtLoginDetail = "登录 Mac 后自动在菜单栏运行趁手。"
         var displayModeIndex = 0
+        var islandDualIndex = 0
+        var islandDualLeftIndex = 0
         var manualSleepEnabled = false
         var manualSleepDetail = "合盖后继续运行，直到手动关闭或退出趁手。"
         var quotaProviderIndex = 0
@@ -55,6 +57,8 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     struct SettingsActions {
         var setLaunchAtLogin: (Bool) -> Void = { _ in }
         var setDisplayMode: (Int) -> Void = { _ in }
+        var setIslandDual: (Int) -> Void = { _ in }
+        var setIslandDualLeft: (Int) -> Void = { _ in }
         var setManualSleep: (Bool) -> Void = { _ in }
         var setQuotaProvider: (Int) -> Void = { _ in }
         var setBatteryStyle: (Int) -> Void = { _ in }
@@ -584,6 +588,16 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
             card.addArrangedSubview(makeRow("显示入口", detail: "选择趁手的主要常驻入口。", symbol: "display",
                 accessory: makeSegments(["灵动岛", "菜单栏"], selected: state.displayModeIndex, tag: 1, action: #selector(changeSegment(_:)))))
             card.addArrangedSubview(makeSeparator())
+            if state.displayModeIndex == 0 {
+                card.addArrangedSubview(makeRow("灵动岛内容", detail: "双持时刘海两侧各显示一个服务。", symbol: "circle.lefthalf.filled",
+                    accessory: makeSegments(["单个", "双持"], selected: state.islandDualIndex, tag: 5, action: #selector(changeSegment(_:)))))
+                card.addArrangedSubview(makeSeparator())
+                if state.islandDualIndex == 1 {
+                    card.addArrangedSubview(makeRow("双持方位", detail: "也可以右键灵动岛直接互换。", symbol: "arrow.left.arrow.right",
+                        accessory: makeSegments(["Codex 在左", "Claude 在左"], selected: state.islandDualLeftIndex, tag: 6, action: #selector(changeSegment(_:)))))
+                    card.addArrangedSubview(makeSeparator())
+                }
+            }
             card.addArrangedSubview(makeRow("节点评分", detail: "按需测试当前网络并查看本地历史排行。", symbol: "network",
                 accessory: makeActionButton("打开", action: #selector(openNodeScores))))
             stack.addArrangedSubview(card)
@@ -786,6 +800,8 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         case 2: actions.setQuotaProvider(sender.selectedSegment)
         case 3: actions.setBatteryStyle(sender.selectedSegment)
         case 4: actions.setIdentityStyle(sender.selectedSegment)
+        case 5: actions.setIslandDual(sender.selectedSegment)
+        case 6: actions.setIslandDualLeft(sender.selectedSegment)
         default: break
         }
         refreshActivePage()
