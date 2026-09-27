@@ -112,8 +112,6 @@ final class NotchPanelController {
         model.tick()
         presentation.panelHeight = openHeight()
         presentation.contentMounted = true
-        // Size the window for the open island first; the island is still drawn at its collapsed size.
-        setWindowFrame(expandedFrame())
         panel.orderFrontRegardless()
         if !byHover {
             panel.makeKey()
@@ -124,7 +122,7 @@ final class NotchPanelController {
             presentation.contentVisible = true
             return
         }
-        // Start on the next pass so the resized window has drawn the collapsed island in place.
+        // Start on the next pass so newly mounted content has been laid out.
         DispatchQueue.main.async { [weak self] in
             guard let self, generation == animationGeneration, isExpanded else { return }
             withAnimation(Self.openSpring) { presentation.expanded = true }
@@ -140,7 +138,6 @@ final class NotchPanelController {
         isExpanded = false
         let finish = { [weak self] in
             guard let self, generation == animationGeneration, !isExpanded else { return }
-            setWindowFrame(collapsedFrame())
             panel.resignKey()
         }
         guard !reduceMotion else {
@@ -151,7 +148,6 @@ final class NotchPanelController {
         }
         withAnimation(.easeIn(duration: 0.1)) { presentation.contentVisible = false }
         withAnimation(Self.closeSpring) { presentation.expanded = false }
-        // The window shrinks back only after the outline has finished closing.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: finish)
     }
 
@@ -178,25 +174,17 @@ final class NotchPanelController {
         presentation.neckWidth = max(240, notchWidth + 120)
         presentation.panelWidth = min(600, screen.frame.width - 32)
         if isExpanded { presentation.panelHeight = openHeight() }
-        setWindowFrame(isExpanded ? expandedFrame() : collapsedFrame())
-    }
-
-    /// Resizes the window and lays the island out in the same pass, so a resize never shows stale content.
-    private func setWindowFrame(_ frame: NSRect) {
-        panel.setFrame(frame, display: true)
+        panel.setFrame(windowFrame(), display: true)
         hosting.layoutSubtreeIfNeeded()
     }
 
     private func openHeight() -> CGFloat { presentation.neckHeight + DailyPanelContent.contentHeight(model: model) }
-    private func collapsedFrame() -> NSRect {
+    /// The window never changes size: it covers the largest open island, and everything outside the
+    /// island is transparent, so clicks there reach the windows below. Resizing a visible window after
+    /// a click on the wallpaper makes macOS play its own scaling transition, which showed as a flash.
+    private func windowFrame() -> NSRect {
         guard let screen else { return .zero }
-        return NSRect(x: screen.frame.midX - presentation.neckWidth / 2,
-                      y: screen.frame.maxY - presentation.collapsedHeight,
-                      width: presentation.neckWidth, height: presentation.collapsedHeight)
-    }
-    private func expandedFrame(height: CGFloat? = nil) -> NSRect {
-        guard let screen else { return .zero }
-        let height = height ?? presentation.panelHeight
+        let height = presentation.neckHeight + DailyPanelContent.maximumContentHeight
         return NSRect(x: screen.frame.midX - presentation.panelWidth / 2, y: screen.frame.maxY - height,
                       width: presentation.panelWidth, height: height)
     }
@@ -204,14 +192,7 @@ final class NotchPanelController {
         guard enabled, isExpanded else { return }
         let height = openHeight()
         guard abs(presentation.panelHeight - height) > 0.5 else { return }
-        // Grow the window before the outline, and shrink it only after the outline has followed.
-        if height > panel.frame.height { setWindowFrame(expandedFrame(height: height)) }
         withAnimation(reduceMotion ? nil : Self.closeSpring) { presentation.panelHeight = height }
-        DispatchQueue.main.asyncAfter(deadline: .now() + (reduceMotion ? 0 : 0.45)) { [weak self] in
-            guard let self, isExpanded, abs(presentation.panelHeight - height) < 0.5,
-                  abs(panel.frame.height - height) > 0.5 || abs(panel.frame.width - presentation.panelWidth) > 0.5 else { return }
-            setWindowFrame(expandedFrame())
-        }
     }
     private func hover(_ inside: Bool) {
         isHovering = inside

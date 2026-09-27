@@ -51,6 +51,9 @@ struct NotchTaskList: View {
         rows(model: model).count
     }
 
+    /// Tallest the task column gets: six rows, the rest scroll.
+    static var maximumColumnHeight: CGFloat { headerHeight + headerGap + rowsHeight(visibleRowLimit) }
+
     /// Height of the task column in the island, header included.
     static func columnHeight(model: StatusPanelModel) -> CGFloat {
         let count = rowCount(model: model)

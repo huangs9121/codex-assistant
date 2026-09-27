@@ -168,6 +168,12 @@ struct DailyPanelContent: View {
     private static let quotaWidth: CGFloat = 196
     private static let lineHeight: CGFloat = 15
 
+    /// The tallest the open panel can get (three quota lines, the forecast, six task rows).
+    static var maximumContentHeight: CGFloat {
+        let quota = 16 + 10 + QuotaRings.size + 8 + 16 + (12 + 3 * lineHeight + 2 * 4) + (8 + lineHeight)
+        return headerHeight + max(quota, NotchTaskList.maximumColumnHeight) + bottomPadding
+    }
+
     /// Height below the neck. The island is as tall as its content, with no fixed minimum.
     static func contentHeight(model: StatusPanelModel) -> CGFloat {
         headerHeight + bodyHeight(model: model) + bottomPadding
