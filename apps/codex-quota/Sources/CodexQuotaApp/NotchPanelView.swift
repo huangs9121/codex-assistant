@@ -12,6 +12,8 @@ final class NotchPresentation: ObservableObject {
     @Published var contentVisible = false
     @Published var neckHeight: CGFloat = 32
     @Published var neckWidth: CGFloat = 340
+    /// Width of the camera housing the collapsed island's content must stay clear of.
+    @Published var notchWidth: CGFloat = 180
     @Published var panelWidth: CGFloat = 600
     /// Open height measured from the top of the screen.
     @Published var panelHeight: CGFloat = 500
@@ -79,24 +81,31 @@ struct NotchPanelView: View {
                 .allowsHitTesting(presentation.contentVisible)
                 .accessibilityHidden(!presentation.contentVisible)
             }
-            HStack {
+            // Each side only uses the visible strip beside the notch; nothing is drawn under the camera housing.
+            let side = max(0, (presentation.neckWidth - presentation.notchWidth) / 2)
+            HStack(spacing: 0) {
                 Button(action: open) {
                     HStack(spacing: 7) {
                         ChenshouMark().frame(width: 18, height: 18)
                         if model.sleepState == .on { Circle().fill(.orange).frame(width: 5, height: 5) }
-                    }.frame(width: 46, height: presentation.collapsedHeight)
+                    }.frame(width: side, height: presentation.collapsedHeight)
                 }.accessibilityLabel("展开趁手灵动岛")
                 Spacer(minLength: 0)
                 Button(action: open) {
-                    HStack(spacing: 5) {
+                    HStack(spacing: 4) {
                         ProviderMark(provider: model.selectedQuotaProvider)
                         Text(collapsedWindow.map { "\($0.remainingPercent)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                    }.frame(width: 62, height: presentation.collapsedHeight)
+                            .minimumScaleFactor(0.8).lineLimit(1)
+                    }
+                    // Keep at least 3pt between the content and the notch; "100%" shrinks slightly if needed.
+                    .frame(maxWidth: max(0, side - 11), alignment: .trailing)
+                    .padding(.trailing, 8)
+                    .frame(width: side, height: presentation.collapsedHeight, alignment: .trailing)
                 }
                 .buttonHelp(collapsedWindowTitle)
                 .accessibilityLabel(collapsedWindowTitle + "，展开额度与任务")
             }
-            .padding(.horizontal, 8).buttonStyle(.plain)
+            .buttonStyle(.plain)
             .frame(width: presentation.neckWidth, height: presentation.collapsedHeight)
             .opacity(expanded ? 0 : 1)
             // Leaves quickly on open and returns only as the outline closes around it.
@@ -353,7 +362,7 @@ private struct QuotaRings: View {
 /// company's artwork. Without the app it falls back to a short text tag.
 private struct ProviderMark: View {
     let provider: QuotaProvider
-    private let size: CGFloat = 14
+    private let size: CGFloat = 13
 
     var body: some View {
         if let glyph = ProviderGlyph.glyph(for: provider) {

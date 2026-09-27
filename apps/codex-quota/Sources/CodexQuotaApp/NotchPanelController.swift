@@ -174,6 +174,7 @@ final class NotchPanelController {
             notchWidth = max(0, right.minX - left.maxX)
         } else { notchWidth = 120 }
         presentation.neckHeight = max(screen.safeAreaInsets.top, 28)
+        presentation.notchWidth = notchWidth
         presentation.neckWidth = max(240, notchWidth + 120)
         presentation.panelWidth = min(600, screen.frame.width - 32)
         if isExpanded { presentation.panelHeight = openHeight() }
