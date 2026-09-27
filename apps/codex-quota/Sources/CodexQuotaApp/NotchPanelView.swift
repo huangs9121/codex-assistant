@@ -64,7 +64,7 @@ struct NotchPanelView: View {
         return "\(provider.title) \(name) \(window.remainingPercent)%"
     }
     /// One provider's mark and percentage in the visible strip beside the notch, kept at least 3pt
-    /// clear of it; "100%" shrinks slightly if needed. Clicking opens the island on that provider.
+    /// clear of it; "100%" shrinks slightly if needed. Hovering or clicking opens the island on that provider.
     private func quotaSide(_ provider: QuotaProvider, trailing: Bool, width side: CGFloat) -> some View {
         Button {
             if model.selectedQuotaProvider != provider { model.selectQuotaProvider(provider) }
@@ -83,6 +83,10 @@ struct NotchPanelView: View {
         }
         .buttonHelp(collapsedWindowTitle(provider))
         .accessibilityLabel(collapsedWindowTitle(provider) + "，展开额度与任务")
+        // Hovering opens the island too, so the side under the pointer picks the provider first.
+        .onHover { inside in
+            if inside, model.islandDual, model.selectedQuotaProvider != provider { model.selectQuotaProvider(provider) }
+        }
     }
     var body: some View {
         let expanded = presentation.expanded
