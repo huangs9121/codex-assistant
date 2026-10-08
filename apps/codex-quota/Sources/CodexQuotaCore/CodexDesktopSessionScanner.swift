@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum CodexDesktopThreadSource: Equatable, Sendable {
     case user
@@ -78,7 +79,10 @@ public struct CodexDesktopThreadSnapshot: Equatable, Sendable {
 
 public final class CodexDesktopSessionScanner: @unchecked Sendable {
     private let cacheLock = NSLock()
-    private var snapshotCache: [URL: (modified: Date, snapshot: CodexDesktopThreadSnapshot)] = [:]
+    private var snapshotCache: [URL: CachedSession] = [:]
+    private var cacheClock: UInt64 = 0
+    private static let maxCachedCursors = 64
+    private static let maxCachedPendingBytes = 16 * 1024 * 1024
     public static let displayLimit = 8
 
     public let sessionsDirectory: URL
@@ -133,6 +137,13 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
             }
         }
 
+        // A full history walk also identifies files that no longer exist.
+        // Keep compact snapshots for every existing file; only cursors are capped.
+        if since == .distantPast {
+            let present = Set(urls)
+            snapshotCache = snapshotCache.filter { present.contains($0.key) }
+        }
+
         for url in urls {
             guard
                 url.pathExtension == "jsonl",
@@ -160,12 +171,90 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
 
     // Called under cacheLock. Titles and live ownership are applied after this cache.
     private func cachedSnapshot(at url: URL, modified: Date, now: Date) -> CodexDesktopThreadSnapshot? {
-        if let cached = snapshotCache[url], cached.modified == modified { return cached.snapshot }
-        guard let line = Self.firstLine(in: url),
-              let snapshot = Self.snapshot(fromSessionMetaLine: line, fileURL: url,
-                    modificationDate: modified, now: now, timeZone: timeZone) else { return nil }
-        snapshotCache[url] = (modified, snapshot)
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let stamp = Self.fileStamp(for: handle) else {
+            snapshotCache.removeValue(forKey: url)
+            return nil
+        }
+        defer { try? handle.close() }
+        cacheClock &+= 1
+        let age = cacheClock
+        if var cached = snapshotCache[url], cached.stamp.identity == stamp.identity {
+            if cached.stamp.size == stamp.size && cached.modified == modified {
+                cached.age = age
+                snapshotCache[url] = cached
+                return cached.snapshot
+            }
+            if let cursor = cached.cursor,
+               stamp.size > cursor.offset,
+               !cursor.pendingOverflow,
+               Self.matchesAnchor(cursor, in: handle),
+               Self.firstLine(in: handle) == cached.metaLine {
+                if let cursor = Self.appending(to: cursor, from: handle, through: stamp.size,
+                                               modificationDate: modified),
+                   let metaLine = cached.metaLine,
+                   let snapshot = Self.snapshot(fromSessionMetaLine: metaLine, fileURL: url,
+                                                modificationDate: modified, now: now, timeZone: timeZone,
+                                                activity: cursor.visibleSummary) {
+                    cached.cursor = cursor
+                    cached.stamp = stamp
+                    cached.modified = modified
+                    cached.snapshot = snapshot
+                    cached.age = age
+                    snapshotCache[url] = cached
+                    trimCache()
+                    return snapshot
+                }
+            }
+            if cached.snapshot == nil,
+               Self.firstLine(in: handle) == cached.metaLine {
+                cached.stamp = stamp
+                cached.modified = modified
+                cached.age = age
+                snapshotCache[url] = cached
+                return nil
+            }
+        }
+        guard let line = Self.firstLine(in: handle) else {
+            snapshotCache.removeValue(forKey: url)
+            return nil
+        }
+        guard Self.supportedSessionMeta(from: line) != nil else {
+            snapshotCache[url] = CachedSession(stamp: stamp, modified: modified, metaLine: line,
+                                               cursor: nil, snapshot: nil, age: age)
+            return nil
+        }
+        let cursor = Self.coldActivityCursor(in: handle, fileSize: stamp.size,
+                                             modificationDate: modified)
+        guard let snapshot = Self.snapshot(fromSessionMetaLine: line, fileURL: url,
+                                           modificationDate: modified, now: now, timeZone: timeZone,
+                                           activity: cursor?.visibleSummary
+                                               ?? ActivitySummary(lastActiveAt: modified)) else {
+            snapshotCache.removeValue(forKey: url)
+            return nil
+        }
+        guard let cursor else {
+            snapshotCache.removeValue(forKey: url)
+            return snapshot
+        }
+        snapshotCache[url] = CachedSession(stamp: stamp, modified: modified, metaLine: line,
+                                           cursor: cursor, snapshot: snapshot, age: age)
+        trimCache()
         return snapshot
+    }
+
+    private func trimCache() {
+        var pendingBytes = snapshotCache.values.reduce(0) { $0 + ($1.cursor?.pending.count ?? 0) }
+        var cursorCount = snapshotCache.values.reduce(0) { $0 + ($1.cursor == nil ? 0 : 1) }
+        while cursorCount > Self.maxCachedCursors || pendingBytes > Self.maxCachedPendingBytes {
+            guard let oldest = snapshotCache.filter({ $0.value.cursor != nil })
+                .min(by: { $0.value.age < $1.value.age }) else { break }
+            pendingBytes -= oldest.value.cursor?.pending.count ?? 0
+            var entry = oldest.value
+            entry.cursor = nil
+            snapshotCache[oldest.key] = entry
+            cursorCount -= 1
+        }
     }
 
     /// 为跨日期父任务精确查找会话头；只按 ID 匹配，不从显示名称推断。
@@ -272,20 +361,23 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
         now: Date = Date(),
         timeZone: TimeZone = .current
     ) -> CodexDesktopThreadSnapshot? {
-        guard
-            let data = line.data(using: .utf8),
-            let envelope = try? JSONDecoder().decode(
-                SessionMetaEnvelope.self,
-                from: data
-            ),
-            envelope.type == "session_meta",
-            let payload = envelope.payload,
-            (payload.originator == "codex_work_desktop" || (payload.originator == "codex-tui" && payload.source == "cli")),
-            let id = normalized(payload.id)
-        else {
-            return nil
-        }
+        snapshot(fromSessionMetaLine: line, fileURL: fileURL, modificationDate: modificationDate,
+                 now: now, timeZone: timeZone,
+                 activity: activitySummary(in: fileURL, modificationDate: modificationDate))
+    }
 
+    private static func snapshot(
+        fromSessionMetaLine line: String,
+        fileURL: URL,
+        modificationDate: Date,
+        now: Date,
+        timeZone: TimeZone,
+        activity: @autoclosure () -> ActivitySummary
+    ) -> CodexDesktopThreadSnapshot? {
+        guard let payload = supportedSessionMeta(from: line),
+              let id = normalized(payload.id) else { return nil }
+
+        let activity = activity()
         let source: CodexDesktopThreadSource = payload.threadSource == "subagent"
             ? .subagent
             : .user
@@ -293,7 +385,6 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
             fileURL.lastPathComponent,
             timeZone: timeZone
         ) ?? modificationDate
-        let activity = activitySummary(in: fileURL, modificationDate: modificationDate)
         let status: CodexDesktopThreadStatus
         if activity.latestTurnIsActive {
             status = .running
@@ -401,6 +492,17 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
         }
     }
 
+    private static func supportedSessionMeta(from line: String) -> SessionMetaEnvelope.Payload? {
+        guard let envelope = try? JSONDecoder().decode(SessionMetaEnvelope.self,
+                                                        from: Data(line.utf8)),
+              envelope.type == "session_meta",
+              let payload = envelope.payload,
+              (payload.originator == "codex_work_desktop"
+                  || (payload.originator == "codex-tui" && payload.source == "cli")),
+              normalized(payload.id) != nil else { return nil }
+        return payload
+    }
+
     private struct ActivityEnvelope: Decodable {
         let timestamp: String?
         let payload: Payload?
@@ -426,52 +528,157 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
         var lastActiveAt: Date? = nil
     }
 
+    private struct FileIdentity: Equatable {
+        let device: UInt64
+        let inode: UInt64
+    }
+
+    private struct FileStamp {
+        let identity: FileIdentity
+        let size: UInt64
+    }
+
+    private struct ActivityCursor {
+        var offset: UInt64
+        var committed = ActivitySummary()
+        var pending = Data()
+        var pendingOverflow = false
+        var visibleSummary = ActivitySummary()
+        var anchor = Data()
+
+        mutating func ingest(_ data: Data, skippingFirstLine: Bool = false,
+                             modificationDate: Date) {
+            let joined = pending + data
+            let lines = joined.split(separator: 0x0A, omittingEmptySubsequences: false)
+            if lines.count > 1 {
+                for index in 0..<(lines.count - 1) where !(skippingFirstLine && index == 0) {
+                    CodexDesktopSessionScanner.fold(Data(lines[index]), into: &committed,
+                                                    modificationDate: modificationDate)
+                }
+            }
+            let tail = lines.last ?? Data()
+            visibleSummary = committed
+            if !tail.isEmpty {
+                CodexDesktopSessionScanner.fold(tail, into: &visibleSummary,
+                                                modificationDate: modificationDate)
+            }
+            visibleSummary.lastActiveAt = visibleSummary.lastActiveAt ?? modificationDate
+            if tail.count > CodexDesktopSessionScanner.maxPendingLineBytes {
+                pending = Data()
+                pendingOverflow = true
+            } else if tail.isEmpty {
+                pending = Data()
+            } else {
+                pending = tail.withUnsafeBytes { bytes in
+                    Data(bytes: bytes.baseAddress!, count: bytes.count)
+                }
+            }
+        }
+    }
+
+    private struct CachedSession {
+        var stamp: FileStamp
+        var modified: Date
+        let metaLine: String?
+        var cursor: ActivityCursor?
+        var snapshot: CodexDesktopThreadSnapshot?
+        var age: UInt64
+    }
+
+    private static let maxPendingLineBytes = 512 * 1024
+    private static let anchorLength = 128
+
+    private static func fileStamp(for handle: FileHandle) -> FileStamp? {
+        var info = Darwin.stat()
+        guard Darwin.fstat(handle.fileDescriptor, &info) == 0, info.st_size >= 0 else { return nil }
+        return FileStamp(identity: FileIdentity(device: UInt64(info.st_dev), inode: UInt64(info.st_ino)),
+                         size: UInt64(info.st_size))
+    }
+
+    private static func anchor(in handle: FileHandle, at offset: UInt64) -> Data? {
+        let count = min(UInt64(anchorLength), offset)
+        do {
+            try handle.seek(toOffset: offset - count)
+            return try handle.read(upToCount: Int(count))
+        } catch {
+            return nil
+        }
+    }
+
+    private static func matchesAnchor(_ cursor: ActivityCursor, in handle: FileHandle) -> Bool {
+        anchor(in: handle, at: cursor.offset) == cursor.anchor
+    }
+
+    private static func appending(to previous: ActivityCursor, from handle: FileHandle,
+                                  through fileSize: UInt64,
+                                  modificationDate: Date) -> ActivityCursor? {
+        var cursor = previous
+        do {
+            try handle.seek(toOffset: cursor.offset)
+            while cursor.offset < fileSize {
+                let count = Int(min(256 * 1024, fileSize - cursor.offset))
+                guard let bytes = try handle.read(upToCount: count), !bytes.isEmpty else { return nil }
+                cursor.ingest(bytes, modificationDate: modificationDate)
+                cursor.offset += UInt64(bytes.count)
+                if cursor.pendingOverflow { return nil }
+            }
+            guard let anchor = anchor(in: handle, at: cursor.offset) else { return nil }
+            cursor.anchor = anchor
+            return cursor
+        } catch {
+            return nil
+        }
+    }
+
+    private static func coldActivityCursor(in handle: FileHandle, fileSize: UInt64,
+                                           modificationDate: Date) -> ActivityCursor? {
+        let chunkSize: UInt64 = 512 * 1024
+        var offset = fileSize > chunkSize ? fileSize - chunkSize : 0
+        do {
+            try handle.seek(toOffset: offset)
+            var data = try handle.read(upToCount: Int(fileSize - offset)) ?? Data()
+            guard data.count == Int(fileSize - offset) else { return nil }
+            while !containsTaskStarted(in: data, skippingFirstLine: offset > 0), offset > 0 {
+                let length = min(UInt64(data.count), offset)
+                guard length > 0 else { break }
+                offset -= length
+                try handle.seek(toOffset: offset)
+                guard let prefix = try handle.read(upToCount: Int(length)),
+                      prefix.count == Int(length) else { return nil }
+                data = prefix + data
+            }
+            var cursor = ActivityCursor(offset: fileSize)
+            cursor.ingest(data, skippingFirstLine: offset > 0, modificationDate: modificationDate)
+            guard let tail = anchor(in: handle, at: fileSize) else { return nil }
+            cursor.anchor = tail
+            return cursor
+        } catch {
+            return nil
+        }
+    }
+
     private static func activitySummary(
         in url: URL,
         modificationDate: Date
     ) -> ActivitySummary {
-        guard
-            let handle = try? FileHandle(forReadingFrom: url),
-            let fileSize = try? handle.seekToEnd()
-        else {
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let stamp = fileStamp(for: handle) else {
             return ActivitySummary(lastActiveAt: modificationDate)
         }
         defer { try? handle.close() }
+        return coldActivityCursor(in: handle, fileSize: stamp.size,
+                                  modificationDate: modificationDate)?.visibleSummary
+            ?? ActivitySummary(lastActiveAt: modificationDate)
+    }
 
-        let chunkSize: UInt64 = 512 * 1024
-        var offset = fileSize > chunkSize ? fileSize - chunkSize : 0
-        try? handle.seek(toOffset: offset)
-        guard var data = try? handle.readToEnd(), !data.isEmpty else {
-            return ActivitySummary(lastActiveAt: modificationDate)
-        }
-
-        // A verbose tool can push the latest task_started event out of the
-        // initial tail. Expand only until that start is available, then parse
-        // the retained segment in chronological order to match its completion.
-        while !containsTaskStarted(in: data, skippingFirstLine: offset > 0), offset > 0 {
-            let length = min(UInt64(data.count), offset)
-            offset -= length
-            try? handle.seek(toOffset: offset)
-            guard let prefix = try? handle.read(upToCount: Int(length)), !prefix.isEmpty else {
-                break
-            }
-            data = prefix + data
-        }
-
-        var summary = ActivitySummary()
-        let lines = String(decoding: data, as: UTF8.self)
-            .split(separator: "\n", omittingEmptySubsequences: true)
-        for line in lines.dropFirst(offset > 0 ? 1 : 0) {
-            guard
-                let event = try? JSONDecoder().decode(
-                    ActivityEnvelope.self,
-                    from: Data(line.utf8)
-                ),
+    private static func fold(_ line: Data, into summary: inout ActivitySummary,
+                             modificationDate: Date) {
+            guard let event = try? JSONDecoder().decode(ActivityEnvelope.self, from: line),
                 let payload = event.payload,
                 let type = payload.type,
                 ["task_started", "task_complete", "turn_aborted"].contains(type)
             else {
-                continue
+                return
             }
             let eventDate: Date
             if type == "task_started", let startedAt = payload.startedAt {
@@ -484,7 +691,7 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
             }
             switch type {
             case "task_started":
-                guard let turnID = payload.turnID else { continue }
+                guard let turnID = payload.turnID else { return }
                 summary.latestTurnID = turnID
                 summary.latestTurnStartedAt = eventDate
                 summary.latestTurnIsActive = true
@@ -493,16 +700,13 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
                     payload.turnID == nil
                         || payload.turnID == summary.latestTurnID
                 else {
-                    continue
+                    return
                 }
                 summary.latestTurnIsActive = false
                 summary.hasExplicitCompletion = true
             default:
                 break
             }
-        }
-        summary.lastActiveAt = summary.lastActiveAt ?? modificationDate
-        return summary
     }
 
     private static func containsTaskStarted(
@@ -539,7 +743,15 @@ public final class CodexDesktopSessionScanner: @unchecked Sendable {
             return nil
         }
         defer { try? handle.close() }
+        return firstLine(in: handle)
+    }
 
+    private static func firstLine(in handle: FileHandle) -> String? {
+        do {
+            try handle.seek(toOffset: 0)
+        } catch {
+            return nil
+        }
         var line = Data()
         while line.count < 64 * 1024 {
             guard

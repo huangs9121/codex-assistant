@@ -5,11 +5,20 @@ import SwiftUI
 
 @MainActor
 final class NotchPresentation: ObservableObject {
+    /// Drives the island's size; changed inside a spring so the outline grows out of the notch.
     @Published var expanded = false
+    /// The daily panel is built once and then kept, hidden while the island is collapsed.
+    @Published var contentMounted = false
     @Published var contentVisible = false
     @Published var neckHeight: CGFloat = 32
     @Published var neckWidth: CGFloat = 340
-    @Published var panelWidth: CGFloat = 750
+    /// Width of the camera housing the collapsed island's content must stay clear of.
+    @Published var notchWidth: CGFloat = 180
+    @Published var panelWidth: CGFloat = 600
+    /// Open height measured from the top of the screen.
+    @Published var panelHeight: CGFloat = 500
+    /// The collapsed island is exactly as tall as the menu bar.
+    var collapsedHeight: CGFloat { neckHeight }
 }
 
 struct NotchActions {
@@ -38,53 +47,113 @@ struct NotchPanelView: View {
     let open: () -> Void
     let hover: (Bool) -> Void
 
-    private var mainPercent: Int? {
-        let data = StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
-        return data.secondaryWindow?.remainingPercent ?? data.primaryWindow?.remainingPercent
+    /// The collapsed island shows the 5-hour window when there is one, otherwise the weekly one.
+    private func collapsedWindow(_ provider: QuotaProvider) -> StatusPanelQuotaWindow? {
+        let data = StatusPanelQuotaData(snapshot: model.quotaSnapshot(for: provider), now: model.now)
+        let windows = [data.primaryWindow, data.secondaryWindow].compactMap { $0 }
+        return windows.first { StatusPanelQuotaWindowKind(windowDuration: $0.windowDuration) == .fiveHour }
+            ?? data.outerRingWindow
+    }
+    private func collapsedWindowTitle(_ provider: QuotaProvider) -> String {
+        guard let window = collapsedWindow(provider) else { return "\(provider.title) 暂无额度" }
+        let name = switch StatusPanelQuotaWindowKind(windowDuration: window.windowDuration) {
+        case .fiveHour: "5小时剩余"
+        case .weekly: "本周剩余"
+        case .generic: "额度剩余"
+        }
+        return "\(provider.title) \(name) \(window.remainingPercent)%"
+    }
+    /// One provider's mark and percentage in the visible strip beside the notch, kept at least 3pt
+    /// clear of it; "100%" shrinks slightly if needed. Hovering or clicking opens the island on that provider.
+    private func quotaSide(_ provider: QuotaProvider, trailing: Bool, width side: CGFloat) -> some View {
+        Button {
+            if model.selectedQuotaProvider != provider { model.selectQuotaProvider(provider) }
+            open()
+        } label: {
+            HStack(spacing: 4) {
+                ProviderMark(provider: provider)
+                Text(collapsedWindow(provider).map { "\($0.remainingPercent)%" } ?? "—")
+                    .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                    .minimumScaleFactor(0.8).lineLimit(1)
+            }
+            .frame(maxWidth: max(0, side - 11), alignment: trailing ? .trailing : .leading)
+            .padding(trailing ? .trailing : .leading, 8)
+            .frame(width: side, height: presentation.collapsedHeight, alignment: trailing ? .trailing : .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonHelp(collapsedWindowTitle(provider))
+        .accessibilityLabel(collapsedWindowTitle(provider) + "，展开额度与任务")
+        // Hovering opens the island too, so the side under the pointer picks the provider first.
+        .onHover { inside in
+            if inside, model.islandDual, model.selectedQuotaProvider != provider { model.selectQuotaProvider(provider) }
+        }
     }
     var body: some View {
+        let expanded = presentation.expanded
+        let outline = IslandShape(neckWidth: presentation.neckWidth, neckHeight: presentation.neckHeight)
+        // The window is already at its open size while this frame animates, so the outline and
+        // the revealed content move at display rate instead of following window resizes.
         ZStack(alignment: .top) {
-            NotchOutline(neckWidth: presentation.neckWidth, neckHeight: presentation.neckHeight, expanded: presentation.expanded).fill(.black)
-            if presentation.expanded {
+            outline.fill(.black)
+            if presentation.contentMounted {
                 VStack(spacing: 0) {
                     Color.clear.frame(height: presentation.neckHeight).contentShape(Rectangle()).onTapGesture(perform: open)
                     DailyPanelContent(model: model, text: text, actions: actions)
-                        .opacity(presentation.contentVisible ? 1 : 0)
-                        .offset(y: presentation.contentVisible ? 0 : -10)
-                        .allowsHitTesting(presentation.contentVisible)
                 }
-            } else {
-                HStack {
+                .frame(width: presentation.panelWidth, height: presentation.panelHeight, alignment: .top)
+                .opacity(presentation.contentVisible ? 1 : 0)
+                .offset(y: presentation.contentVisible ? 0 : -8)
+                .allowsHitTesting(presentation.contentVisible)
+                .accessibilityHidden(!presentation.contentVisible)
+            }
+            // Each side only uses the visible strip beside the notch; nothing is drawn under the camera housing.
+            let side = max(0, (presentation.neckWidth - presentation.notchWidth) / 2)
+            HStack(spacing: 0) {
+                if model.islandDual {
+                    let left = model.islandDualLeft
+                    quotaSide(left, trailing: false, width: side)
+                    Spacer(minLength: 0)
+                    quotaSide(left == .codex ? .claude : .codex, trailing: true, width: side)
+                } else {
                     Button(action: open) {
                         HStack(spacing: 7) {
                             ChenshouMark().frame(width: 18, height: 18)
                             if model.sleepState == .on { Circle().fill(.orange).frame(width: 5, height: 5) }
-                        }.frame(width: 46, height: presentation.neckHeight + 3)
+                        }.frame(width: side, height: presentation.collapsedHeight)
                     }.accessibilityLabel("展开趁手灵动岛")
                     Spacer(minLength: 0)
-                    Button(action: open) {
-                        HStack(spacing: 4) {
-                            Text(model.selectedQuotaProvider == .claude ? "Cl" : "Cx").font(.system(size: 9))
-                            Text(mainPercent.map { "\($0)%" } ?? "—").font(.system(size: 12, weight: .semibold)).monospacedDigit()
-                        }.frame(width: 62, height: presentation.neckHeight + 3)
-                    }.accessibilityLabel("\(model.selectedQuotaProvider.title) 额度与任务")
-                }.padding(.horizontal, 8).buttonStyle(.plain)
+                    quotaSide(model.selectedQuotaProvider, trailing: true, width: side)
+                }
             }
+            .buttonStyle(.plain)
+            .contextMenu {
+                if model.islandDual {
+                    Button("左右互换") { model.swapIslandDualSides() }
+                }
+            }
+            .frame(width: presentation.neckWidth, height: presentation.collapsedHeight)
+            .opacity(expanded ? 0 : 1)
+            // Leaves quickly on open and returns only as the outline closes around it.
+            .animation(expanded ? .easeOut(duration: 0.1) : .easeInOut(duration: 0.16).delay(0.16), value: expanded)
+            .allowsHitTesting(!expanded)
         }
+        .frame(width: expanded ? presentation.panelWidth : presentation.neckWidth,
+               height: expanded ? presentation.panelHeight : presentation.collapsedHeight, alignment: .top)
+        .clipShape(outline)
+        .contentShape(outline)
+        .onHover(perform: hover)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
-        .clipShape(NotchOutline(neckWidth: presentation.neckWidth, neckHeight: presentation.neckHeight, expanded: presentation.expanded))
-        .onHover(perform: hover)
     }
 }
 
-/// The same daily surface is used by the island and menu bar popover.
+/// The island's open panel: quota on the left, tasks on the right, as tall as the taller column.
 struct DailyPanelContent: View {
     @ObservedObject var model: StatusPanelModel
     let text: AppText
     let actions: NotchActions
     private var cn: Bool { text.language == .simplifiedChinese }
-    private var source: String { model.selectedQuotaProvider.title }
     /// Outer ring and its text use the provider colour; the inner 5-hour ring uses a light tint of it.
     private var accent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.85, green: 0.49, blue: 0.36) : Color(red: 0.14, green: 0.55, blue: 1) }
     private var innerAccent: Color { model.selectedQuotaProvider == .claude ? Color(red: 0.953, green: 0.749, blue: 0.663) : Color(red: 0.616, green: 0.796, blue: 1) }
@@ -94,13 +163,42 @@ struct DailyPanelContent: View {
         guard model.selectedQuotaProvider == .codex, model.showsResetForecast else { return nil }
         return model.resetCalendar?.feed.upcomingAnnouncement(now: model.now)
     }
-    static func contentHeight(model: StatusPanelModel) -> CGFloat {
-        max(390, NotchTaskList.contentHeight(model: model) + 40) + 78
+    private static let headerHeight: CGFloat = 40
+    private static let bottomPadding: CGFloat = 16
+    private static let quotaWidth: CGFloat = 196
+    private static let lineHeight: CGFloat = 15
+
+    /// The tallest the open panel can get (three quota lines, the forecast, six task rows).
+    static var maximumContentHeight: CGFloat {
+        let quota = 16 + 10 + QuotaRings.size + 8 + 16 + (12 + 3 * lineHeight + 2 * 4) + (8 + lineHeight)
+        return headerHeight + max(quota, NotchTaskList.maximumColumnHeight) + bottomPadding
     }
+
+    /// Height below the neck. The island is as tall as its content, with no fixed minimum.
+    static func contentHeight(model: StatusPanelModel) -> CGFloat {
+        headerHeight + bodyHeight(model: model) + bottomPadding
+    }
+    private static func bodyHeight(model: StatusPanelModel) -> CGFloat {
+        max(quotaHeight(model: model), NotchTaskList.columnHeight(model: model))
+    }
+    /// Mirrors the fixed row heights in `quota`, so the island can be sized before it opens.
+    private static func quotaHeight(model: StatusPanelModel) -> CGFloat {
+        let data = StatusPanelQuotaData(snapshot: model.snapshot, now: model.now)
+        var lines = switch StatusPanelResetSummary(windows: [data.primaryWindow, data.secondaryWindow].compactMap { $0 }) {
+        case .allUnknown: 1
+        case let .lines(lines): lines.count
+        }
+        if !model.quotaStatus.isEmpty { lines += 1 }
+        var height = 16 + 10 + QuotaRings.size + 8 + 16
+        if lines > 0 { height += 12 + CGFloat(lines) * lineHeight + CGFloat(lines - 1) * 4 }
+        if model.selectedQuotaProvider == .codex, model.showsResetForecast { height += 8 + lineHeight }
+        return height
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 9) {
-                ChenshouMark().frame(width: 22, height: 22)
+            HStack(spacing: 8) {
+                ChenshouMark().frame(width: 18, height: 18)
                 Text("趁手").font(.system(size: 13, weight: .medium))
                 if model.sleepState == .on {
                     Button(action: actions.sleep) { Label(cn ? "正在防睡眠" : "Awake", systemImage: "moon") }
@@ -108,95 +206,81 @@ struct DailyPanelContent: View {
                         .help(model.sleepDetail)
                 }
                 Spacer()
-                NotchSettingsButton(action: actions.settings).frame(width: 66, height: 30)
-            }.frame(height: 56)
-            HStack(alignment: .top, spacing: 24) {
-                quota.frame(width: 198)
+                Picker(cn ? "额度账户" : "Quota account", selection: Binding(get: { model.selectedQuotaProvider }, set: { model.selectQuotaProvider($0) })) {
+                    ForEach(QuotaProvider.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().controlSize(.small).frame(width: 128)
+                NotchSettingsButton(action: actions.settings).frame(width: 60, height: 26).padding(.leading, 8)
+            }.frame(height: Self.headerHeight)
+            HStack(alignment: .top, spacing: 14) {
+                quota.frame(width: Self.quotaWidth, alignment: .topLeading)
                 Rectangle().fill(.white.opacity(0.13)).frame(width: 1)
-                VStack(spacing: 0) {
-                    if NotchTaskList.totalCount(model: model) > 0 {
-                        NotchTaskList(model: model, text: text, onResumeSession: actions.resume, onOpenCodexThread: actions.thread,
-                                      onOpenCLIProcess: actions.cli, onArchiveTask: actions.archive, onClearCompleted: actions.clear,
-                                      onOpenClaudeSession: actions.claude)
-                    } else {
-                        VStack(spacing: 12) {
-                            Text(cn ? "\(source) 任务" : "\(source) tasks").frame(maxWidth: .infinity, alignment: .leading)
-                            Spacer()
-                            Image(systemName: "checkmark.circle").font(.system(size: 28)).foregroundStyle(.secondary)
-                            Text(cn ? "当前没有任务" : "No current tasks").foregroundStyle(.secondary)
-                            Spacer()
-                        }.font(.system(size: 13))
-                    }
-                    Spacer(minLength: 0)
-                    HStack {
-                        Text(model.selectedQuotaProvider == .claude
-                             ? (cn ? "Claude 桌面会话与终端会话" : "Claude Desktop and terminal sessions")
-                             : (cn ? "桌面任务与终端会话" : "Desktop and terminal sessions")).foregroundStyle(.white.opacity(0.45))
-                        Spacer()
-                        Button(action: actions.openTasks) { Label(cn ? "打开 \(source)" : "Open \(source)", systemImage: "arrow.up.right") }
-                            .buttonStyle(.plain).foregroundStyle(.white.opacity(0.7))
-                    }.font(.system(size: 11)).frame(height: 36)
-                }.frame(maxWidth: .infinity, alignment: .top)
+                NotchTaskList(model: model, text: text, onResumeSession: actions.resume, onOpenCodexThread: actions.thread,
+                              onOpenCLIProcess: actions.cli, onArchiveTask: actions.archive, onClearCompleted: actions.clear,
+                              onOpenClaudeSession: actions.claude, onOpenTasks: actions.openTasks)
+                    .frame(maxWidth: .infinity, alignment: .top)
             }
-            .frame(height: Self.contentHeight(model: model) - 78)
-            Color.clear.frame(height: 22)
+            .frame(height: Self.bodyHeight(model: model), alignment: .top)
+            Color.clear.frame(height: Self.bottomPadding)
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 20)
         .background(.black)
         .foregroundStyle(.white)
         .environment(\.colorScheme, .dark)
     }
+    /// Every row has a fixed height; `quotaHeight` depends on it.
     private var quota: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Picker(cn ? "额度账户" : "Quota account", selection: Binding(get: { model.selectedQuotaProvider }, set: { model.selectQuotaProvider($0) })) {
-                ForEach(QuotaProvider.allCases, id: \.self) { Text($0.title).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden()
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(cn ? "剩余额度" : "Remaining quota").foregroundStyle(.white.opacity(0.65))
                 Spacer()
                 if let plan = data.planBadgeName ?? data.planName {
-                    Text(plan).font(.system(size: 10)).padding(.horizontal, 5).padding(.vertical, 2)
+                    Text(plan).font(.system(size: 10)).padding(.horizontal, 5).padding(.vertical, 1)
                         .overlay(RoundedRectangle(cornerRadius: 4).stroke(.white.opacity(0.25), lineWidth: 1))
                 }
-            }.font(.system(size: 11))
-            HStack {
-                Spacer()
-                QuotaRings(outer: data.outerRingWindow, inner: data.innerRingWindow,
-                           outerColor: accent, innerColor: innerAccent, label: windowLabel)
-                    .opacity(model.quotaStale ? 0.45 : 1)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(model.selectedQuotaProvider.title) " + (windows.isEmpty ? "暂无数据"
-                        : [data.outerRingWindow, data.innerRingWindow].compactMap { $0 }
-                            .map { windowLabel($0) + " \($0.remainingPercent)%" }.joined(separator: "，")))
-                Spacer()
-            }
+            }.font(.system(size: 11)).frame(height: 16)
+            QuotaRings(outer: data.outerRingWindow, inner: data.innerRingWindow,
+                       outerColor: accent, innerColor: innerAccent, label: windowLabel)
+                .opacity(model.quotaStale ? 0.45 : 1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(model.selectedQuotaProvider.title) " + (windows.isEmpty ? "暂无数据"
+                    : [data.outerRingWindow, data.innerRingWindow].compactMap { $0 }
+                        .map { windowLabel($0) + " \($0.remainingPercent)%" }.joined(separator: "，")))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 10)
             let resets = StatusPanelResetSummary(windows: windows)
             if resets != .lines([]) || !model.quotaStatus.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 4) {
                     switch resets {
                     case .allUnknown:
                         Text(cn ? "尚未获取重置时间" : "Reset time not received yet")
-                            .fontWeight(.medium).foregroundStyle(.white.opacity(0.65))
+                            .fontWeight(.medium).foregroundStyle(.white.opacity(0.65)).frame(height: Self.lineHeight)
                     case .lines(let lines):
-                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in resetLine(line) }
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in resetLine(line).frame(height: Self.lineHeight) }
                     }
                     if !model.quotaStatus.isEmpty {
                         Text(model.quotaStatus).foregroundStyle(.white.opacity(0.55))
-                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(1).truncationMode(.tail)
+                            .frame(height: Self.lineHeight)
                             .buttonHelp(model.quotaDetail)
-                            .padding(.top, resets == .allUnknown ? -3 : 0)
                     }
-                }.font(.system(size: 11))
+                }.font(.system(size: 11)).padding(.top, 12)
             }
             HStack {
                 Button { model.onRefreshQuota?() } label: { Label(cn ? "刷新" : "Refresh", systemImage: "arrow.clockwise") }.buttonStyle(.plain)
                 Spacer()
                 if let date = data.observedAt { Text(shortDate(date)).font(.system(size: 10)).help(cn ? "最近成功读取时间" : "Last successful read") }
-            }.font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+            }.font(.system(size: 11)).foregroundStyle(.white.opacity(0.55)).frame(height: 16).padding(.top, 8)
             if model.selectedQuotaProvider == .codex, model.showsResetForecast {
+                let detail = forecast.map { $0.detailText(now: model.now, language: text.language) }
                 Button(action: actions.reset) {
-                    Label(forecast.map { $0.detailText(now: model.now, language: text.language) } ?? (cn ? "重置日历" : "Reset calendar"), systemImage: "calendar").lineLimit(2).multilineTextAlignment(.leading)
-                }.font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(accent)
+                    // The forecast's first two lines on one line; the full record is in the help.
+                    Label(detail.map { $0.split(separator: "\n").prefix(2).joined(separator: " · ") } ?? (cn ? "重置日历" : "Reset calendar"),
+                          systemImage: "calendar").lineLimit(1).truncationMode(.tail)
+                }
+                .font(.system(size: 11)).buttonStyle(.plain).foregroundStyle(accent)
+                .frame(height: Self.lineHeight).padding(.top, 8)
+                .buttonHelp(detail ?? (cn ? "打开重置日历" : "Open reset calendar"))
             }
         }
     }
@@ -230,7 +314,7 @@ struct DailyPanelContent: View {
         }
         return HStack(alignment: .firstTextBaseline, spacing: 0) {
             Text(period).fontWeight(.semibold).foregroundStyle(inner ? innerAccent : accent)
-                .frame(width: cn ? 36 : 40, alignment: .leading)
+                .frame(width: cn ? 32 : 38, alignment: .leading)
             Text(value).foregroundStyle(.white.opacity(0.55)).monospacedDigit().lineLimit(1)
         }
     }
@@ -265,29 +349,30 @@ private struct QuotaRings: View {
     let outerColor: Color
     let innerColor: Color
     let label: (StatusPanelQuotaWindow) -> String
-    private let size: CGFloat = 136
-    private let lineWidth: CGFloat = 7
+    static let size: CGFloat = 108
+    private let lineWidth: CGFloat = 6
     private let gap: CGFloat = 4
 
     var body: some View {
         ZStack {
-            ring(outer, color: outerColor, diameter: size)
-            if inner != nil { ring(inner, color: innerColor, diameter: size - 2 * (lineWidth + gap)) }
+            ring(outer, color: outerColor, diameter: Self.size)
+            if inner != nil { ring(inner, color: innerColor, diameter: Self.size - 2 * (lineWidth + gap)) }
             VStack(spacing: 0) {
                 if let outer {
-                    Text("\(outer.remainingPercent)%").font(.system(size: 25, weight: .semibold)).monospacedDigit()
-                    Text(label(outer)).font(.system(size: 10)).foregroundStyle(outerColor).padding(.top, 4)
+                    let dual = inner != nil
+                    Text("\(outer.remainingPercent)%").font(.system(size: dual ? 19 : 22, weight: .semibold)).monospacedDigit()
+                    Text(label(outer)).font(.system(size: dual ? 9 : 10)).foregroundStyle(outerColor).padding(.top, dual ? 1 : 3)
                     if let inner {
-                        Text("\(inner.remainingPercent)%").font(.system(size: 16, weight: .semibold)).monospacedDigit()
-                            .foregroundStyle(innerColor).padding(.top, 7)
-                        Text(label(inner)).font(.system(size: 10)).foregroundStyle(innerColor).padding(.top, 4)
+                        Text("\(inner.remainingPercent)%").font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(innerColor).padding(.top, 3)
+                        Text(label(inner)).font(.system(size: 9)).foregroundStyle(innerColor).padding(.top, 1)
                     }
                 } else {
-                    Text("—").font(.system(size: 26)).foregroundStyle(.secondary)
+                    Text("—").font(.system(size: 22)).foregroundStyle(.secondary)
                 }
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: Self.size, height: Self.size)
     }
 
     private func ring(_ window: StatusPanelQuotaWindow?, color: Color, diameter: CGFloat) -> some View {
@@ -304,6 +389,68 @@ private struct QuotaRings: View {
     }
 }
 
+/// The provider's own menu bar glyph, read from its installed app so 趁手 never ships another
+/// company's artwork. Without the app it falls back to a short text tag.
+private struct ProviderMark: View {
+    let provider: QuotaProvider
+    private let size: CGFloat = 13
+
+    var body: some View {
+        if let glyph = ProviderGlyph.glyph(for: provider) {
+            // Scale so the visible glyph, not its padded canvas, is `size` points.
+            Image(nsImage: glyph.image).renderingMode(.template).resizable().interpolation(.high).scaledToFit()
+                .frame(width: size / glyph.fill, height: size / glyph.fill)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        } else {
+            Text(provider == .claude ? "Cl" : "Cx").font(.system(size: 9))
+        }
+    }
+}
+
+@MainActor
+private enum ProviderGlyph {
+    private static var cache: [QuotaProvider: (image: NSImage, fill: CGFloat)?] = [:]
+
+    static func glyph(for provider: QuotaProvider) -> (image: NSImage, fill: CGFloat)? {
+        if let cached = cache[provider] { return cached }
+        let glyph = load(provider)
+        cache[provider] = glyph
+        return glyph
+    }
+
+    private static func load(_ provider: QuotaProvider) -> (image: NSImage, fill: CGFloat)? {
+        let (bundleIDs, name) = switch provider {
+        case .codex: (["com.openai.codex", "com.openai.chat"], "chatgptTemplate")
+        case .claude: (["com.anthropic.claudefordesktop"], "TrayIconTemplate")
+        }
+        for id in bundleIDs {
+            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id),
+                  let image = Bundle(url: url)?.image(forResource: name) else { continue }
+            image.isTemplate = true
+            return (image, fill(of: image))
+        }
+        return nil
+    }
+
+    /// Share of the canvas the glyph occupies; tray icons carry different amounts of padding.
+    private static func fill(of image: NSImage) -> CGFloat {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return 1 }
+        let width = cg.width, height = cg.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return 1 }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height { for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 24 {
+            minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+        } }
+        guard maxX >= minX, maxY >= minY else { return 1 }
+        return CGFloat(max(maxX - minX + 1, maxY - minY + 1)) / CGFloat(max(width, height))
+    }
+}
+
 private struct ChenshouMark: View {
     var body: some View {
         if let url = Bundle.main.url(forResource: "chenshou-mark", withExtension: "png"), let image = NSImage(contentsOf: url) {
@@ -312,33 +459,43 @@ private struct ChenshouMark: View {
     }
 }
 
-struct NotchOutline: Shape {
+/// One outline for every size, so opening is a continuous grow instead of a swap between shapes.
+/// A neck fills the menu bar around the notch and a body hangs below the menu bar; the top edge is
+/// always flush with the screen and the body's top corners are square, so the island stays attached.
+/// At the neck's width it is simply the collapsed island: square top, rounded bottom.
+struct IslandShape: Shape {
     var neckWidth: CGFloat
     var neckHeight: CGFloat
-    var expanded: Bool
+
     func path(in rect: CGRect) -> Path {
-        if !expanded || rect.width < neckWidth + 40 || rect.height < neckHeight + 40 {
-            return Path(roundedRect: rect, cornerRadius: 12)
-        }
-        let w = rect.width, h = rect.height, top = min(neckHeight, h), r: CGFloat = 20
-        let l = max(r, (w - neckWidth) / 2), right = w - l
+        let w = rect.width, h = rect.height
+        let side = max(0, (w - neckWidth) / 2)
+        let bottom = min(10 + 10 * min(1, side / 24), w / 2, h / 2)
+        // While the island is still short, the body's top rises with its bottom corners.
+        let join = max(0, min(neckHeight, h - bottom))
+        let flare = min(12, side, join / 2)
+        let shoulder = min(20, side, join - flare)
+        let left = side, right = w - side
         var p = Path()
-        p.move(to: CGPoint(x: l-r, y: 0))
-        p.addQuadCurve(to: CGPoint(x: l, y: min(r, top)), control: CGPoint(x: l, y: 0))
-        p.addLine(to: CGPoint(x: l, y: max(r, top-r)))
-        p.addQuadCurve(to: CGPoint(x: l-r, y: top), control: CGPoint(x: l, y: top))
-        p.addLine(to: CGPoint(x: r, y: top))
-        p.addQuadCurve(to: CGPoint(x: 0, y: top+r), control: CGPoint(x: 0, y: top))
-        p.addLine(to: CGPoint(x: 0, y: h-r))
-        p.addQuadCurve(to: CGPoint(x: r, y: h), control: CGPoint(x: 0, y: h))
-        p.addLine(to: CGPoint(x: w-r, y: h))
-        p.addQuadCurve(to: CGPoint(x: w, y: h-r), control: CGPoint(x: w, y: h))
-        p.addLine(to: CGPoint(x: w, y: top+r))
-        p.addQuadCurve(to: CGPoint(x: w-r, y: top), control: CGPoint(x: w, y: top))
-        p.addLine(to: CGPoint(x: right+r, y: top))
-        p.addQuadCurve(to: CGPoint(x: right, y: max(r, top-r)), control: CGPoint(x: right, y: top))
-        p.addLine(to: CGPoint(x: right, y: min(r, top)))
-        p.addQuadCurve(to: CGPoint(x: right+r, y: 0), control: CGPoint(x: right, y: 0))
+        p.move(to: CGPoint(x: left - shoulder, y: 0))
+        p.addLine(to: CGPoint(x: right + shoulder, y: 0))
+        if side > 0 {
+            p.addQuadCurve(to: CGPoint(x: right, y: shoulder), control: CGPoint(x: right, y: 0))
+            p.addLine(to: CGPoint(x: right, y: join - flare))
+            p.addQuadCurve(to: CGPoint(x: right + flare, y: join), control: CGPoint(x: right, y: join))
+            p.addLine(to: CGPoint(x: w, y: join))
+        }
+        p.addLine(to: CGPoint(x: w, y: h - bottom))
+        p.addQuadCurve(to: CGPoint(x: w - bottom, y: h), control: CGPoint(x: w, y: h))
+        p.addLine(to: CGPoint(x: bottom, y: h))
+        p.addQuadCurve(to: CGPoint(x: 0, y: h - bottom), control: CGPoint(x: 0, y: h))
+        if side > 0 {
+            p.addLine(to: CGPoint(x: 0, y: join))
+            p.addLine(to: CGPoint(x: left - flare, y: join))
+            p.addQuadCurve(to: CGPoint(x: left, y: join - flare), control: CGPoint(x: left, y: join))
+            p.addLine(to: CGPoint(x: left, y: shoulder))
+            p.addQuadCurve(to: CGPoint(x: left - shoulder, y: 0), control: CGPoint(x: left, y: 0))
+        }
         p.closeSubpath()
         return p
     }

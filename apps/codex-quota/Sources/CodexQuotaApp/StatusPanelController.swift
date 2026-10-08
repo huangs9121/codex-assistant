@@ -22,11 +22,16 @@ final class StatusPanelModel: ObservableObject {
     @Published private(set) var snapshot: QuotaSnapshot?
     @Published private(set) var selectedQuotaProvider: QuotaProvider
     @Published private(set) var codexQuotaStatus = "正在读取额度…"
+    @Published private(set) var codexQuotaDetail = ""
     @Published private(set) var claudeQuotaStatus = "正在读取额度…"
     @Published private(set) var claudeQuotaDetail = ""
     @Published private(set) var claudeQuotaStale = false
-    private var codexSnapshot: QuotaSnapshot?
-    private var claudeSnapshot: QuotaSnapshot?
+    @Published private(set) var codexSnapshot: QuotaSnapshot?
+    @Published private(set) var claudeSnapshot: QuotaSnapshot?
+    /// Island only: both providers beside the notch, one per side.
+    @Published private(set) var islandDual: Bool
+    @Published private(set) var islandDualLeft: QuotaProvider
+    var onIslandLayoutChange: (() -> Void)?
     private let defaults: UserDefaults
     var onQuotaProviderChange: (() -> Void)?
     var onRefreshQuota: (() -> Void)?
@@ -34,8 +39,8 @@ final class StatusPanelModel: ObservableObject {
     var quotaStatus: String { selectedQuotaProvider == .codex ? codexQuotaStatus : claudeQuotaStatus }
     /// Full explanation for settings and the panel line's help.
     var quotaDetail: String {
-        guard selectedQuotaProvider == .claude, !claudeQuotaDetail.isEmpty else { return quotaStatus }
-        return claudeQuotaDetail
+        let detail = selectedQuotaProvider == .codex ? codexQuotaDetail : claudeQuotaDetail
+        return detail.isEmpty ? quotaStatus : detail
     }
     var quotaStale: Bool { selectedQuotaProvider == .claude && claudeQuotaStale }
     @Published private(set) var tasks: [TaskStatusSnapshot] = []
@@ -68,8 +73,11 @@ final class StatusPanelModel: ObservableObject {
 
     var onContentChange: (() -> Void)?
     var onIslandContentChange: (() -> Void)?
+    private var contentChangePending = false
 
     func updateQuickTools(scroll: Bool, gestures: Bool, mappingCount: Int, mappingEnabled: Bool) {
+        guard scrollEnabled != scroll || gesturesEnabled != gestures
+            || keyMappingCount != mappingCount || keyMappingEnabled != mappingEnabled else { return }
         scrollEnabled = scroll
         gesturesEnabled = gestures
         keyMappingCount = mappingCount
@@ -82,12 +90,34 @@ final class StatusPanelModel: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         selectedQuotaProvider = QuotaProvider(rawValue: defaults.string(forKey: "selectedQuotaProvider") ?? "") ?? .codex
+        islandDual = defaults.bool(forKey: Self.islandDualKey)
+        islandDualLeft = QuotaProvider(rawValue: defaults.string(forKey: Self.islandDualLeftKey) ?? "") ?? .codex
         store = TaskStatusStore(defaults: defaults)
         expandedDesktopThreadGroupIDs = store.expandedDesktopThreadGroupIDs
         hiddenClaudeSessionIDs = Set(defaults.stringArray(forKey: Self.hiddenClaudeSessionsKey) ?? [])
     }
 
     private static let hiddenClaudeSessionsKey = "hiddenClaudeSessionIDs"
+    private static let islandDualKey = "islandDualProviders"
+    private static let islandDualLeftKey = "islandDualLeftProvider"
+
+    func quotaSnapshot(for provider: QuotaProvider) -> QuotaSnapshot? {
+        provider == .codex ? codexSnapshot : claudeSnapshot
+    }
+
+    func setIslandDual(_ value: Bool) {
+        islandDual = value
+        defaults.set(value, forKey: Self.islandDualKey)
+        onIslandLayoutChange?()
+    }
+
+    func setIslandDualLeft(_ provider: QuotaProvider) {
+        islandDualLeft = provider
+        defaults.set(provider.rawValue, forKey: Self.islandDualLeftKey)
+        onIslandLayoutChange?()
+    }
+
+    func swapIslandDualSides() { setIslandDualLeft(islandDualLeft == .codex ? .claude : .codex) }
 
     var canClearClaudeSessions: Bool { claudeSessions.contains { $0.status == .completed } }
 
@@ -111,7 +141,9 @@ final class StatusPanelModel: ObservableObject {
     }
 
     private func applyClaudeSessions() {
-        claudeSessions = ClaudeCodeSessionParser.visible(scannedClaudeSessions, hiddenIDs: hiddenClaudeSessionIDs, limit: 10)
+        let visible = ClaudeCodeSessionParser.visible(scannedClaudeSessions, hiddenIDs: hiddenClaudeSessionIDs, limit: 10)
+        guard claudeSessions != visible else { return }
+        claudeSessions = visible
         notifyContentChange()
     }
 
@@ -130,7 +162,11 @@ final class StatusPanelModel: ObservableObject {
         notifyContentChange()
     }
 
-    func updateCodexStatus(_ status: String) { codexQuotaStatus = status }
+    func updateCodexStatus(_ status: String, detail: String = "") {
+        guard codexQuotaStatus != status || codexQuotaDetail != detail else { return }
+        codexQuotaStatus = status
+        codexQuotaDetail = detail
+    }
 
     func selectQuotaProvider(_ provider: QuotaProvider) {
         selectedQuotaProvider = provider
@@ -147,6 +183,9 @@ final class StatusPanelModel: ObservableObject {
         cliProcesses: [String: CodexCLIProcess],
         hasCompletedTasks: Bool
     ) {
+        guard self.tasks != tasks || self.desktopThreads != desktopThreads
+            || self.desktopThreadGroups != desktopThreadGroups || self.cliProcesses != cliProcesses
+            || self.hasCompletedTasks != hasCompletedTasks else { return }
         self.tasks = tasks
         self.desktopThreads = desktopThreads
         self.desktopThreadGroups = desktopThreadGroups
@@ -166,17 +205,20 @@ final class StatusPanelModel: ObservableObject {
     }
 
     func update(showsResetForecast: Bool) {
+        guard self.showsResetForecast != showsResetForecast else { return }
         self.showsResetForecast = showsResetForecast
         notifyContentChange()
     }
 
     func update(resetCalendar: CodexResetCache?, syncFailed: Bool = false) {
+        guard self.resetCalendar != resetCalendar || resetSyncFailed != syncFailed else { return }
         self.resetCalendar = resetCalendar
         resetSyncFailed = syncFailed
         notifyContentChange()
     }
 
     func updateSleep(state: ManualSleepState, detail: String) {
+        guard sleepState != state || sleepDetail != detail else { return }
         sleepState = state
         sleepDetail = detail
         notifyContentChange()
@@ -188,9 +230,13 @@ final class StatusPanelModel: ObservableObject {
     }
 
     private func notifyContentChange() {
+        guard !contentChangePending else { return }
+        contentChangePending = true
         DispatchQueue.main.async { [weak self] in
-            self?.onContentChange?()
-            self?.onIslandContentChange?()
+            guard let self else { return }
+            contentChangePending = false
+            onContentChange?()
+            onIslandContentChange?()
         }
     }
 }
@@ -265,7 +311,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         popover.contentViewController = hostingController
         model.onContentChange = { [weak self] in
-            self?.resizeToFit()
+            guard let self, popover.isShown else { return }
+            resizeToFit()
         }
         resizeToFit()
     }

@@ -53,6 +53,9 @@ final class NotchPreview {
             }
         }
         if state.hasPrefix("claude") { applyClaudeFixture(state) }
+        // The preview has its own defaults suite, so set the island layout explicitly every run.
+        model.setIslandDual(CommandLine.arguments.contains("--dual"))
+        model.setIslandDualLeft(CommandLine.arguments.contains("--claude-left") ? .claude : .codex)
         model.tick(at: date)
         let actions = NotchActions(settings: { _ in }, quickTools: {}, openTasks: {}, scroll: {}, gestures: {}, mappings: {}, sleep: {}, reset: {},
             mode: { [weak self] mode in self?.model.displayMode = mode },
@@ -118,6 +121,16 @@ final class NotchPreview {
     }
 
     func show() { controller.setEnabled(true, expand: true); controller.keepPreviewVisible(); model.tick(at: date) }
+
+    /// Opens and closes the island on screen twice, for recording the real animation.
+    func demoCycle() {
+        controller.setEnabled(true)
+        for start in [1.5, 3.3] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + start) { [self] in controller.expand(); model.tick(at: date) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + start + 1.1) { [self] in controller.collapse() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.2) { NSApp.terminate(nil) }
+    }
     func snapshot(to path: String) throws { try controller.snapshot(to: path) }
 
     /// Renders the 1.4.5-style menu bar panel with the same fixture data. The popover's

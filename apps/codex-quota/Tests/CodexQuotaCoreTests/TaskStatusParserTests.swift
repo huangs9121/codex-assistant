@@ -92,6 +92,22 @@ enum TaskStatusParserTests {
             run: testDesktopSessionLargeLifecycleLog
         ),
         TaskStatusParserTestCase(
+            name: "Codex desktop scanner incrementally follows complete EOF lifecycle turns",
+            run: testDesktopSessionIncrementalLifecycle
+        ),
+        TaskStatusParserTestCase(
+            name: "Codex desktop scanner waits for split UTF-8 and JSON lines",
+            run: testDesktopSessionSplitLine
+        ),
+        TaskStatusParserTestCase(
+            name: "Codex desktop scanner rebuilds after truncation and atomic replacement",
+            run: testDesktopSessionFileReplacement
+        ),
+        TaskStatusParserTestCase(
+            name: "Codex desktop scanner keeps unchanged history beyond cursor capacity",
+            run: testDesktopSessionLargeHistoryCache
+        ),
+        TaskStatusParserTestCase(
             name: "task stale log without tmux is marked interrupted and clearable",
             run: testInterruptedZombieTask
         ),
@@ -869,6 +885,131 @@ enum TaskStatusParserTests {
         }
     }
 
+    private static func testDesktopSessionIncrementalLifecycle() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let now = date("2026-07-31 10:30:00")
+            let modified = now.addingTimeInterval(-20)
+            let id = sessionUUID
+            let file = sessions.appendingPathComponent(rolloutURL(id: id).lastPathComponent)
+            let scanner = CodexDesktopSessionScanner(sessionsDirectory: sessions, timeZone: shanghai)
+            let start = "{\"timestamp\":\"2026-07-31T02:00:00Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"first\"}}"
+            let complete = "{\"timestamp\":\"2026-07-31T02:05:00Z\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"first\"}}"
+            let resumed = "{\"timestamp\":\"2026-07-31T02:20:00Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"second\"}}"
+            let oldComplete = "{\"timestamp\":\"2026-07-31T02:21:00Z\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"first\"}}"
+            let abort = "{\"timestamp\":\"2026-07-31T02:25:00Z\",\"payload\":{\"type\":\"turn_aborted\",\"turn_id\":\"second\"}}"
+            let thirdStart = "{\"payload\":{\"type\":\"task_started\",\"turn_id\":\"third\",\"started_at\":\(date("2026-07-31 10:27:00").timeIntervalSince1970)}}"
+            let untargetedComplete = "{\"timestamp\":\"2026-07-31T02:28:00Z\",\"payload\":{\"type\":\"task_complete\"}}"
+            func current() -> CodexDesktopThreadSnapshot? {
+                scanner.candidateSnapshots(since: .distantPast).first
+            }
+            guard write(desktopSessionMeta(id: id, originator: "codex_work_desktop") + "\n" + start, to: file),
+                  setModificationDate(modified, for: file),
+                  current()?.status == .running,
+                  append("\n" + complete, to: file),
+                  setModificationDate(modified, for: file), // Size alone must reveal an append.
+                  current()?.status == .ended,
+                  append("\n" + resumed, to: file),
+                  current()?.status == .running,
+                  current()?.startedAt == date("2026-07-31 10:20:00"),
+                  append("\n" + oldComplete, to: file),
+                  current()?.status == .running,
+                  append("\n" + abort, to: file),
+                  current()?.status == .ended,
+                  current()?.lastActiveAt == date("2026-07-31 10:25:00"),
+                  append("\n" + thirdStart, to: file),
+                  current()?.status == .running,
+                  current()?.startedAt == date("2026-07-31 10:27:00"),
+                  append("\n" + untargetedComplete, to: file),
+                  current()?.status == .ended
+            else { return false }
+            return true
+        }
+    }
+
+    private static func testDesktopSessionSplitLine() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let id = sessionUUID
+            let file = sessions.appendingPathComponent(rolloutURL(id: id).lastPathComponent)
+            let scanner = CodexDesktopSessionScanner(sessionsDirectory: sessions, timeZone: shanghai)
+            let start = Data("{\"timestamp\":\"2026-07-31T02:00:00Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"中文\"}}".utf8)
+            guard let split = start.firstIndex(of: 0xE4) else { return false }
+            let prefix = start.prefix(split + 1)
+            let suffix = start.suffix(from: split + 1)
+            func status() -> CodexDesktopThreadStatus? {
+                scanner.candidateSnapshots(since: .distantPast).first?.status
+            }
+            guard write(desktopSessionMeta(id: id, originator: "codex_work_desktop") + "\n", to: file),
+                  append(Data(prefix), to: file),
+                  status() == .unknown,
+                  append(Data(suffix), to: file),
+                  status() == .running,
+                  append("\n{\"timestamp\":\"2026-07-31T02:05:00Z\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"中文\"", to: file),
+                  status() == .running,
+                  append("}}", to: file),
+                  status() == .ended
+            else { return false }
+            return true
+        }
+    }
+
+    private static func testDesktopSessionFileReplacement() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let id = sessionUUID
+            let file = sessions.appendingPathComponent(rolloutURL(id: id).lastPathComponent)
+            let scanner = CodexDesktopSessionScanner(sessionsDirectory: sessions, timeZone: shanghai)
+            let meta = desktopSessionMeta(id: id, originator: "codex_work_desktop")
+            let start = "{\"timestamp\":\"2026-07-31T02:00:00Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"one\"}}"
+            let completed = "{\"timestamp\":\"2026-07-31T02:05:00Z\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"one\"}}"
+            func status() -> CodexDesktopThreadStatus? {
+                scanner.candidateSnapshots(since: .distantPast).first?.status
+            }
+            guard write(meta + "\n" + start + "\n" + String(repeating: "x", count: 600_000), to: file),
+                  status() == .running,
+                  write(meta + "\n" + start + "\n" + completed, to: file),
+                  status() == .ended,
+                  replaceAtomically(meta + "\n" + start, at: file),
+                  status() == .running,
+                  write(meta + "\n" + start.replacingOccurrences(of: "one", with: "two"), to: file),
+                  append("\n" + completed, to: file),
+                  status() == .running,
+                  append("\n" + completed.replacingOccurrences(of: "one", with: "two"), to: file),
+                  status() == .ended
+            else { return false }
+            return true
+        }
+    }
+
+    private static func testDesktopSessionLargeHistoryCache() -> Bool {
+        withTemporaryDirectories { _, sessions in
+            let scanner = CodexDesktopSessionScanner(sessionsDirectory: sessions, timeZone: shanghai)
+            let count = 600
+            for index in 0..<count {
+                let id = "history-\(index)"
+                let file = sessions.appendingPathComponent(rolloutURL(id: id).lastPathComponent)
+                guard write(desktopSessionMeta(id: id, originator: "codex_work_desktop") + "\n", to: file) else {
+                    return false
+                }
+            }
+            let unsupported = sessions.appendingPathComponent(rolloutURL(id: "unsupported").lastPathComponent)
+            guard write(desktopSessionMeta(id: "unsupported", originator: "codex_exec")
+                            + "\n" + String(repeating: "x", count: 1_000_000), to: unsupported)
+            else { return false }
+            let first = scanner.candidateSnapshots(since: .distantPast)
+            let second = scanner.candidateSnapshots(since: .distantPast)
+            guard first.count == count, second.count == count,
+                  first.allSatisfy({ $0.status == .unknown }),
+                  Set(first.map(\.id)) == Set(second.map(\.id)) else { return false }
+            let changedID = "history-0"
+            let changed = sessions.appendingPathComponent(rolloutURL(id: changedID).lastPathComponent)
+            let start = "{\"timestamp\":\"2026-07-31T02:20:00Z\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"new\"}}"
+            guard append(start, to: changed) else { return false }
+            let third = scanner.candidateSnapshots(since: .distantPast)
+            return third.count == count
+                && third.first(where: { $0.id == changedID })?.status == .running
+                && !third.contains(where: { $0.id == "unsupported" })
+        }
+    }
+
     private static func testInterruptedZombieTask() -> Bool {
         withTemporaryDirectories { tasks, sessions in
             let id = "20260731-101747"
@@ -1403,6 +1544,31 @@ enum TaskStatusParserTests {
     private static func write(_ contents: String, to url: URL) -> Bool {
         do {
             try Data(contents.utf8).write(to: url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func append(_ contents: String, to url: URL) -> Bool {
+        append(Data(contents.utf8), to: url)
+    }
+
+    private static func append(_ contents: Data, to url: URL) -> Bool {
+        guard let handle = try? FileHandle(forWritingTo: url) else { return false }
+        defer { try? handle.close() }
+        do {
+            try handle.seekToEnd()
+            try handle.write(contentsOf: contents)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private static func replaceAtomically(_ contents: String, at url: URL) -> Bool {
+        do {
+            try Data(contents.utf8).write(to: url, options: .atomic)
             return true
         } catch {
             return false

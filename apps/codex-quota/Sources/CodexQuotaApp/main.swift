@@ -138,6 +138,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var currentResetCalendar: CodexResetCache?
     private var resetNotificationsInFlight: Set<String> = []
     private var isRefreshing = false
+    /// The last reading from the Codex CLI, kept through brief live-read failures.
+    private var lastLiveCodexSnapshot: QuotaSnapshot?
+    private var codexLiveFailingSince: Date?
+    private static let codexLiveFailureGrace: TimeInterval = 180
+    private var cachedCodexFallback: QuotaSnapshot?
+    private var lastCodexFallbackRead: Date?
+    private static let codexFallbackReadInterval: TimeInterval = 60
     private var isUpdateCheckInFlight = false
     private var isUpdateInstallInFlight = false
     private var isResetMonitorInFlight = false
@@ -384,6 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             userInfo: nil,
             repeats: true
         )
+        timer.tolerance = 1.5
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
         let accessibilityTimer = Timer(
@@ -481,6 +489,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         var actions = QuickToolsPanelController.SettingsActions()
         actions.setLaunchAtLogin = { [weak self] in self?.setLaunchAtLogin($0) }
         actions.setDisplayMode = { [weak self] in self?.setPanelDisplayMode($0 == 0 ? .island : .menuBar, reveal: false) }
+        actions.setIslandDual = { [weak self] in self?.panelModel.setIslandDual($0 == 1) }
+        actions.setIslandDualLeft = { [weak self] in self?.panelModel.setIslandDualLeft($0 == 0 ? .codex : .claude) }
         actions.setManualSleep = { [weak self] desired in
             guard let self, desired != taskSleepController.isEnabled else { return }
             toggleTaskSleep()
@@ -513,6 +523,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             var state = QuickToolsPanelController.SettingsState()
             state.launchAtLogin = launchAtLoginController.state == .enabled
             state.displayModeIndex = preferences.panelDisplayMode == .island ? 0 : 1
+            state.islandDualIndex = panelModel.islandDual ? 1 : 0
+            state.islandDualLeftIndex = panelModel.islandDualLeft == .codex ? 0 : 1
             state.manualSleepEnabled = taskSleepController.isEnabled
             state.quotaProviderIndex = panelModel.selectedQuotaProvider == .codex ? 0 : 1
             state.batteryStyleIndex = BatteryStyle.allCases.firstIndex(of: preferences.batteryStyle) ?? 0
@@ -526,6 +538,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             state.version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.5"
             return state
         }, actions: actions)
+        panelModel.onIslandLayoutChange = { [weak self] in
+            guard let self else { return }
+            quickToolsPanelController.refreshSettings()
+            // Showing Claude on the island needs its reading as fresh as when it is selected.
+            if panelModel.islandDual { refreshClaudeQuota() }
+        }
         panelModel.onQuotaProviderChange = { [weak self] in
             self?.updateStatusPresentation()
             self?.quickToolsPanelController.refreshSettings()
@@ -942,13 +960,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     @objc private func refreshAccessibilityPermissionFromTimer() {
+        let previous = (mouseScrollReversalController.isRunning,
+                        mouseGestureController.isRunning,
+                        doubleCommandTapController.isRunning)
         refreshAccessibilityControllers()
         // Fast completion detection is needed only while holding a sleep assertion.
         // Otherwise, task scans retain the normal 15-second refresh cadence.
         if displaySleepController.isActive {
             refreshTaskStatuses()
         }
-        syncMenuState()
+        let current = (mouseScrollReversalController.isRunning,
+                       mouseGestureController.isRunning,
+                       doubleCommandTapController.isRunning)
+        if previous != current { syncMenuState() }
+        else { quickToolsPanelController.refreshSettings() }
     }
 
     @objc private func checkForUpdatesFromTimer() {
@@ -1149,42 +1174,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
         isRefreshing = true
 
+        rateLimitController.check { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case let .snapshot(snapshot):
+                isRefreshing = false
+                lastLiveCodexSnapshot = snapshot
+                codexLiveFailingSince = nil
+                panelModel.updateCodexStatus("")
+                apply(snapshot)
+            case let .failure(failure):
+                refreshCodexFallback(after: failure)
+            }
+        }
+    }
+
+    /// Local logs are a fallback, not a second quota source to rescan on every success.
+    private func refreshCodexFallback(after failure: CodexRateLimitController.Failure) {
+        let now = Date()
+        let since = codexLiveFailingSince ?? now
+        codexLiveFailingSince = since
+        let preservingLive = lastLiveCodexSnapshot != nil
+            && now.timeIntervalSince(since) < Self.codexLiveFailureGrace
+        let cachedRecently = lastCodexFallbackRead.map {
+            (0..<Self.codexFallbackReadInterval).contains(now.timeIntervalSince($0))
+        } ?? false
+        guard !preservingLive, !cachedRecently else {
+            isRefreshing = false
+            applyCodexLiveFailure(failure, fallback: cachedCodexFallback)
+            return
+        }
         let sessionsRoot = sessionsRoot
         refreshQueue.async { [weak self] in
-            let fallbackSnapshot = QuotaStore().latestSnapshot(in: sessionsRoot)
+            let fallback = QuotaStore().latestSnapshot(in: sessionsRoot)
             DispatchQueue.main.async { [weak self] in
-                guard let self else {
-                    return
-                }
-                self.rateLimitController.check { [weak self] result in
-                    guard let self else {
-                        return
-                    }
-                    self.isRefreshing = false
-                    switch result {
-                    case let .snapshot(snapshot):
-                        self.panelModel.updateCodexStatus("")
-                        self.apply(snapshot)
-                    case .failure:
-                        self.panelModel.updateCodexStatus(fallbackSnapshot == nil ? "暂未读取到 Codex 额度" : "实时读取失败，显示本地记录")
-                        self.apply(fallbackSnapshot)
-                    }
-                }
+                guard let self else { return }
+                cachedCodexFallback = fallback
+                lastCodexFallbackRead = Date()
+                isRefreshing = false
+                applyCodexLiveFailure(failure, fallback: fallback)
             }
+        }
+    }
+
+    /// A single failed read keeps the last live reading; only a failure that lasts replaces it.
+    private func applyCodexLiveFailure(_ failure: CodexRateLimitController.Failure, fallback: QuotaSnapshot?) {
+        let now = Date()
+        let since = codexLiveFailingSince ?? now
+        codexLiveFailingSince = since
+        if lastLiveCodexSnapshot != nil, now.timeIntervalSince(since) < Self.codexLiveFailureGrace {
+            return
+        }
+        let reason = "实时读取失败：\(failure.message)。"
+        if let fallback, lastLiveCodexSnapshot.map({ fallback.observedAt > $0.observedAt }) ?? true {
+            panelModel.updateCodexStatus("实时读取失败，显示本地记录", detail: reason + "当前显示本机会话里记录的额度。")
+            apply(fallback)
+        } else if let live = lastLiveCodexSnapshot {
+            let time = DateFormatter.localizedString(from: live.observedAt, dateStyle: .none, timeStyle: .short)
+            panelModel.updateCodexStatus("实时读取失败，显示上次结果", detail: reason + "当前显示 \(time) 读取的额度。")
+            apply(live)
+        } else {
+            panelModel.updateCodexStatus("暂未读取到 Codex 额度", detail: reason)
+            apply(nil)
         }
     }
 
     private func refreshQuotaManually() {
         if panelModel.selectedQuotaProvider == .claude {
             refreshClaudeQuota(manual: true)
-        } else { refresh() }
+        } else {
+            lastCodexFallbackRead = nil
+            refresh()
+        }
     }
 
     private func refreshClaudeQuota(manual: Bool = false) {
         guard !isRefreshingClaude else { return }
         // Each check starts the official Claude Code CLI, so keep background checks sparse:
-        // every 5 minutes while Claude is shown, otherwise every 15 minutes for reset notices.
-        let interval: TimeInterval = panelModel.selectedQuotaProvider == .claude ? 300 : 900
+        // every 5 minutes while Claude is shown (selected, or on the dual island), otherwise every 15 minutes.
+        let claudeShown = panelModel.selectedQuotaProvider == .claude
+            || (preferences.panelDisplayMode == .island && panelModel.islandDual)
+        let interval: TimeInterval = claudeShown ? 300 : 900
         if !manual, let lastClaudeCheck, Date().timeIntervalSince(lastClaudeCheck) < interval { return }
         isRefreshingClaude = true
         lastClaudeCheck = Date()
@@ -1703,7 +1773,7 @@ if CommandLine.arguments.contains("--notch-preview") {
     application.setActivationPolicy(.accessory)
     if let index = args.firstIndex(of: "--animation-dir"), args.count > index + 1 {
         preview.recordAnimation(to: args[index + 1])
-    } else { preview.show() }
+    } else if args.contains("--demo-cycle") { preview.demoCycle() } else { preview.show() }
     if let index = args.firstIndex(of: "--snapshot"), args.count > index + 1 {
         let path = args[index + 1]
         Task { @MainActor in
