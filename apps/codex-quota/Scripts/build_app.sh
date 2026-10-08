@@ -194,10 +194,17 @@ if find "$STAGING_APP" \( -perm -002 -o -perm -020 \) -print -quit | grep -q .; 
 fi
 codesign --verify --deep --strict "$STAGING_APP"
 
-ditto -c -k --sequesterRsrc --keepParent "$STAGING_APP" "$STAGING_ZIP"
-# Keep the ZIP app-only for compatibility with existing automatic updaters.
+# Do not export host metadata (including com.apple.provenance) as __MACOSX.
+# Existing automatic updaters require an app-only archive.
+ditto -c -k --norsrc --noextattr --keepParent "$STAGING_APP" "$STAGING_ZIP"
 chmod 644 "$STAGING_ZIP"
 unzip -t "$STAGING_ZIP" >/dev/null
+ARCHIVE_ENTRIES="$TEMP_DIR/archive-entries.txt"
+unzip -Z1 "$STAGING_ZIP" > "$ARCHIVE_ENTRIES"
+if ! awk 'index($0, "Codex Quota.app/") != 1 { bad = 1 } END { exit NR == 0 || bad }' "$ARCHIVE_ENTRIES"; then
+    echo "staged ZIP must contain only Codex Quota.app" >&2
+    exit 1
+fi
 
 VERIFY_ZIP_DIR="$TEMP_DIR/verify-zip"
 mkdir -p "$VERIFY_ZIP_DIR"

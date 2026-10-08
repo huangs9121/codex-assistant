@@ -73,8 +73,11 @@ final class StatusPanelModel: ObservableObject {
 
     var onContentChange: (() -> Void)?
     var onIslandContentChange: (() -> Void)?
+    private var contentChangePending = false
 
     func updateQuickTools(scroll: Bool, gestures: Bool, mappingCount: Int, mappingEnabled: Bool) {
+        guard scrollEnabled != scroll || gesturesEnabled != gestures
+            || keyMappingCount != mappingCount || keyMappingEnabled != mappingEnabled else { return }
         scrollEnabled = scroll
         gesturesEnabled = gestures
         keyMappingCount = mappingCount
@@ -138,7 +141,9 @@ final class StatusPanelModel: ObservableObject {
     }
 
     private func applyClaudeSessions() {
-        claudeSessions = ClaudeCodeSessionParser.visible(scannedClaudeSessions, hiddenIDs: hiddenClaudeSessionIDs, limit: 10)
+        let visible = ClaudeCodeSessionParser.visible(scannedClaudeSessions, hiddenIDs: hiddenClaudeSessionIDs, limit: 10)
+        guard claudeSessions != visible else { return }
+        claudeSessions = visible
         notifyContentChange()
     }
 
@@ -158,6 +163,7 @@ final class StatusPanelModel: ObservableObject {
     }
 
     func updateCodexStatus(_ status: String, detail: String = "") {
+        guard codexQuotaStatus != status || codexQuotaDetail != detail else { return }
         codexQuotaStatus = status
         codexQuotaDetail = detail
     }
@@ -177,6 +183,9 @@ final class StatusPanelModel: ObservableObject {
         cliProcesses: [String: CodexCLIProcess],
         hasCompletedTasks: Bool
     ) {
+        guard self.tasks != tasks || self.desktopThreads != desktopThreads
+            || self.desktopThreadGroups != desktopThreadGroups || self.cliProcesses != cliProcesses
+            || self.hasCompletedTasks != hasCompletedTasks else { return }
         self.tasks = tasks
         self.desktopThreads = desktopThreads
         self.desktopThreadGroups = desktopThreadGroups
@@ -196,17 +205,20 @@ final class StatusPanelModel: ObservableObject {
     }
 
     func update(showsResetForecast: Bool) {
+        guard self.showsResetForecast != showsResetForecast else { return }
         self.showsResetForecast = showsResetForecast
         notifyContentChange()
     }
 
     func update(resetCalendar: CodexResetCache?, syncFailed: Bool = false) {
+        guard self.resetCalendar != resetCalendar || resetSyncFailed != syncFailed else { return }
         self.resetCalendar = resetCalendar
         resetSyncFailed = syncFailed
         notifyContentChange()
     }
 
     func updateSleep(state: ManualSleepState, detail: String) {
+        guard sleepState != state || sleepDetail != detail else { return }
         sleepState = state
         sleepDetail = detail
         notifyContentChange()
@@ -218,9 +230,13 @@ final class StatusPanelModel: ObservableObject {
     }
 
     private func notifyContentChange() {
+        guard !contentChangePending else { return }
+        contentChangePending = true
         DispatchQueue.main.async { [weak self] in
-            self?.onContentChange?()
-            self?.onIslandContentChange?()
+            guard let self else { return }
+            contentChangePending = false
+            onContentChange?()
+            onIslandContentChange?()
         }
     }
 }
@@ -295,7 +311,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         popover.contentViewController = hostingController
         model.onContentChange = { [weak self] in
-            self?.resizeToFit()
+            guard let self, popover.isShown else { return }
+            resizeToFit()
         }
         resizeToFit()
     }

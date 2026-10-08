@@ -142,6 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private var lastLiveCodexSnapshot: QuotaSnapshot?
     private var codexLiveFailingSince: Date?
     private static let codexLiveFailureGrace: TimeInterval = 180
+    private var cachedCodexFallback: QuotaSnapshot?
+    private var lastCodexFallbackRead: Date?
+    private static let codexFallbackReadInterval: TimeInterval = 60
     private var isUpdateCheckInFlight = false
     private var isUpdateInstallInFlight = false
     private var isResetMonitorInFlight = false
@@ -388,6 +391,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             userInfo: nil,
             repeats: true
         )
+        timer.tolerance = 1.5
         RunLoop.main.add(timer, forMode: .common)
         refreshTimer = timer
         let accessibilityTimer = Timer(
@@ -956,13 +960,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     }
 
     @objc private func refreshAccessibilityPermissionFromTimer() {
+        let previous = (mouseScrollReversalController.isRunning,
+                        mouseGestureController.isRunning,
+                        doubleCommandTapController.isRunning)
         refreshAccessibilityControllers()
         // Fast completion detection is needed only while holding a sleep assertion.
         // Otherwise, task scans retain the normal 15-second refresh cadence.
         if displaySleepController.isActive {
             refreshTaskStatuses()
         }
-        syncMenuState()
+        let current = (mouseScrollReversalController.isRunning,
+                       mouseGestureController.isRunning,
+                       doubleCommandTapController.isRunning)
+        if previous != current { syncMenuState() }
+        else { quickToolsPanelController.refreshSettings() }
     }
 
     @objc private func checkForUpdatesFromTimer() {
@@ -1163,28 +1174,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         }
         isRefreshing = true
 
+        rateLimitController.check { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case let .snapshot(snapshot):
+                isRefreshing = false
+                lastLiveCodexSnapshot = snapshot
+                codexLiveFailingSince = nil
+                panelModel.updateCodexStatus("")
+                apply(snapshot)
+            case let .failure(failure):
+                refreshCodexFallback(after: failure)
+            }
+        }
+    }
+
+    /// Local logs are a fallback, not a second quota source to rescan on every success.
+    private func refreshCodexFallback(after failure: CodexRateLimitController.Failure) {
+        let now = Date()
+        let since = codexLiveFailingSince ?? now
+        codexLiveFailingSince = since
+        let preservingLive = lastLiveCodexSnapshot != nil
+            && now.timeIntervalSince(since) < Self.codexLiveFailureGrace
+        let cachedRecently = lastCodexFallbackRead.map {
+            (0..<Self.codexFallbackReadInterval).contains(now.timeIntervalSince($0))
+        } ?? false
+        guard !preservingLive, !cachedRecently else {
+            isRefreshing = false
+            applyCodexLiveFailure(failure, fallback: cachedCodexFallback)
+            return
+        }
         let sessionsRoot = sessionsRoot
         refreshQueue.async { [weak self] in
-            let fallbackSnapshot = QuotaStore().latestSnapshot(in: sessionsRoot)
+            let fallback = QuotaStore().latestSnapshot(in: sessionsRoot)
             DispatchQueue.main.async { [weak self] in
-                guard let self else {
-                    return
-                }
-                self.rateLimitController.check { [weak self] result in
-                    guard let self else {
-                        return
-                    }
-                    self.isRefreshing = false
-                    switch result {
-                    case let .snapshot(snapshot):
-                        self.lastLiveCodexSnapshot = snapshot
-                        self.codexLiveFailingSince = nil
-                        self.panelModel.updateCodexStatus("")
-                        self.apply(snapshot)
-                    case let .failure(failure):
-                        self.applyCodexLiveFailure(failure, fallback: fallbackSnapshot)
-                    }
-                }
+                guard let self else { return }
+                cachedCodexFallback = fallback
+                lastCodexFallbackRead = Date()
+                isRefreshing = false
+                applyCodexLiveFailure(failure, fallback: fallback)
             }
         }
     }
@@ -1214,7 +1242,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
     private func refreshQuotaManually() {
         if panelModel.selectedQuotaProvider == .claude {
             refreshClaudeQuota(manual: true)
-        } else { refresh() }
+        } else {
+            lastCodexFallbackRead = nil
+            refresh()
+        }
     }
 
     private func refreshClaudeQuota(manual: Bool = false) {
