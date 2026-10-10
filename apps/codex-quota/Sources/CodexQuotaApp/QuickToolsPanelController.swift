@@ -1,4 +1,5 @@
 import AppKit
+import CodexQuotaUI
 
 private final class FlippedSettingsView: NSView {
     override var isFlipped: Bool { true }
@@ -41,6 +42,9 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         var launchAtLogin = false
         var launchAtLoginDetail = "登录 Mac 后自动在菜单栏运行趁手。"
         var displayModeIndex = 0
+        var islandDisplayOptions: [IslandDisplayOption] = []
+        var islandDisplayID: String?
+        var islandDisplayDetail = "选择灵动岛显示在哪块屏幕。"
         var islandDualIndex = 0
         var islandDualLeftIndex = 0
         var manualSleepEnabled = false
@@ -57,6 +61,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     struct SettingsActions {
         var setLaunchAtLogin: (Bool) -> Void = { _ in }
         var setDisplayMode: (Int) -> Void = { _ in }
+        var setIslandDisplay: (String?) -> Void = { _ in }
         var setIslandDual: (Int) -> Void = { _ in }
         var setIslandDualLeft: (Int) -> Void = { _ in }
         var setManualSleep: (Bool) -> Void = { _ in }
@@ -589,6 +594,9 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
                 accessory: makeSegments(["灵动岛", "菜单栏"], selected: state.displayModeIndex, tag: 1, action: #selector(changeSegment(_:)))))
             card.addArrangedSubview(makeSeparator())
             if state.displayModeIndex == 0 {
+                card.addArrangedSubview(makeRow("灵动岛显示器", detail: state.islandDisplayDetail, symbol: "display",
+                    accessory: makeDisplayPicker(state)))
+                card.addArrangedSubview(makeSeparator())
                 card.addArrangedSubview(makeRow("灵动岛内容", detail: "双持时刘海两侧各显示一个服务。", symbol: "circle.lefthalf.filled",
                     accessory: makeSegments(["单个", "双持"], selected: state.islandDualIndex, tag: 5, action: #selector(changeSegment(_:)))))
                 card.addArrangedSubview(makeSeparator())
@@ -781,6 +789,31 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         button.bezelStyle = .rounded
         button.font = .systemFont(ofSize: 11)
         return button
+    }
+
+    private func makeDisplayPicker(_ state: SettingsState) -> NSPopUpButton {
+        let picker = NSPopUpButton(frame: .zero, pullsDown: false)
+        picker.font = .systemFont(ofSize: 11)
+        picker.target = self
+        picker.action = #selector(changeIslandDisplay(_:))
+        picker.setAccessibilityLabel("灵动岛显示器")
+        picker.menu?.autoenablesItems = false
+        for option in state.islandDisplayOptions {
+            picker.addItem(withTitle: option.title)
+            let item = picker.lastItem!
+            item.representedObject = option.id ?? ""
+            item.isEnabled = option.isAvailable
+            if option.id == state.islandDisplayID { picker.select(item) }
+        }
+        picker.widthAnchor.constraint(equalToConstant: 210).isActive = true
+        return picker
+    }
+
+    @objc private func changeIslandDisplay(_ sender: NSPopUpButton) {
+        guard let item = sender.selectedItem, item.isEnabled,
+              let id = item.representedObject as? String else { return }
+        actions.setIslandDisplay(id.isEmpty ? nil : id)
+        refreshActivePage()
     }
 
     @objc private func changeSwitch(_ sender: NSSwitch) {

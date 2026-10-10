@@ -489,6 +489,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
         var actions = QuickToolsPanelController.SettingsActions()
         actions.setLaunchAtLogin = { [weak self] in self?.setLaunchAtLogin($0) }
         actions.setDisplayMode = { [weak self] in self?.setPanelDisplayMode($0 == 0 ? .island : .menuBar, reveal: false) }
+        actions.setIslandDisplay = { [weak self] in self?.notchController.selectDisplay($0) }
         actions.setIslandDual = { [weak self] in self?.panelModel.setIslandDual($0 == 1) }
         actions.setIslandDualLeft = { [weak self] in self?.panelModel.setIslandDualLeft($0 == 0 ? .codex : .claude) }
         actions.setManualSleep = { [weak self] desired in
@@ -523,6 +524,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             var state = QuickToolsPanelController.SettingsState()
             state.launchAtLogin = launchAtLoginController.state == .enabled
             state.displayModeIndex = preferences.panelDisplayMode == .island ? 0 : 1
+            state.islandDisplayOptions = notchController.displayOptions
+            state.islandDisplayID = notchController.selectedDisplayID
+            state.islandDisplayDetail = notchController.displaySelectionDetail
             state.islandDualIndex = panelModel.islandDual ? 1 : 0
             state.islandDualLeftIndex = panelModel.islandDualLeft == .codex ? 0 : 1
             state.manualSleepEnabled = taskSleepController.isEnabled
@@ -538,6 +542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate,
             state.version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.4.5"
             return state
         }, actions: actions)
+        notchController.onDisplaysChanged = { [weak self] in self?.quickToolsPanelController.refreshSettings() }
         panelModel.onIslandLayoutChange = { [weak self] in
             guard let self else { return }
             quickToolsPanelController.refreshSettings()

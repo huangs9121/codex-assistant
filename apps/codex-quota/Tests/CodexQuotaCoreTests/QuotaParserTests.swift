@@ -217,6 +217,8 @@ enum QuotaParserTests {
             + ThreadTreeTests.all.map { ($0.name, $0.run) }
             + StatusPanelPresentationTests.all.map { ($0.name, $0.run) }
             + PanelDisplayModeTests.all.map { ($0.name, $0.run) }
+            + IslandDisplaySelectionTests.all.map { ($0.name, $0.run) }
+            + IslandShapeTests.all.map { ($0.name, $0.run) }
             + MouseGesturePreferencesTests.all.map { ($0.name, $0.run) }
             + KeyMappingTests.all.map { ($0.name, $0.run) }
             + ClaudeUsageTests.all
