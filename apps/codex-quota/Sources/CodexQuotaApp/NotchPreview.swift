@@ -64,7 +64,8 @@ final class NotchPreview {
                 guard let self else { return }
                 self.model.update(tasks: self.model.tasks.filter { !$0.status.isClearable }, desktopThreads: [], desktopThreadGroups: [], cliProcesses: [:], hasCompletedTasks: false)
             })
-        controller = NotchPanelController(model: model, text: AppText(language: .simplifiedChinese), actions: actions)
+        controller = NotchPanelController(model: model, text: AppText(language: .simplifiedChinese), actions: actions,
+            defaults: UserDefaults(suiteName: "local.openclaw.codexquota.notch-preview")!)
     }
     /// Mirrors states ①–③ of work/claude-quota-review-20260925/dual-ring-states.png.
     private func applyClaudeFixture(_ state: String) {
