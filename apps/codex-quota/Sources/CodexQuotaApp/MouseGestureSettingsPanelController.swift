@@ -3,9 +3,9 @@ import CodexQuotaCore
 import CoreGraphics
 import UniformTypeIdentifiers
 
-// 列宽总和按最小可视宽度（竖向滚动条占位后的窄边 743pt）设置，
-// 任何滚动条样式下都不会溢出；不要在布局期动态改列宽或表格 frame——
-// AppKit 的延迟 tile 会按过宽的表格重排列，把最后的「启用」列挤出可视区。
+// 880pt 窗口配 190pt 侧栏时，规则滚动区约 634pt 宽；实际可视宽度
+// 仍受滚动条和边框影响。保留水平滚动，不在布局期改表格 frame，
+// 避免 AppKit 延迟 tile 将最后的「启用」列挤出可视区。
 
 @MainActor
 final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
@@ -122,12 +122,12 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             object: scrollView
         )
 
-        let addButton = HelpButton(title: "+", target: self, action: #selector(addRule))
+        let addButton = HelpButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: text.addKeyMapping) ?? NSImage(), target: self, action: #selector(addRule))
         addButton.bezelStyle = .rounded
-        addButton.font = .systemFont(ofSize: 18)
-        let removeButton = HelpButton(title: "−", target: self, action: #selector(removeRule))
+        addButton.setAccessibilityLabel(text.addKeyMapping)
+        let removeButton = HelpButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: text.removeKeyMapping) ?? NSImage(), target: self, action: #selector(removeRule))
         removeButton.bezelStyle = .rounded
-        removeButton.font = .systemFont(ofSize: 18)
+        removeButton.setAccessibilityLabel(text.removeKeyMapping)
         addButton.toolTip = text.addKeyMapping
         removeButton.toolTip = text.removeKeyMapping
         let tableActions = NSStackView(views: [addButton, removeButton])
@@ -319,12 +319,10 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         tableView.dataSource = self
         QuickToolsTableStyle.configure(tableView)
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
-        // The unified 880pt window leaves about 650pt for this scroll view.
-        // NSTableView adds roughly 17pt of cell decoration per column, so
-        // the columns themselves must be narrower than the visible viewport.
+        // Leave room for native cell insets at the 634pt minimum scroll width.
         for (column, width) in [
-            (Column.gesture, 114.0), (Column.filter, 95.0), (Column.action, 130.0),
-            (Column.note, 100.0), (Column.immediate, 40.0), (Column.enabled, 44.0)
+            (Column.gesture, 114.0), (Column.filter, 92.0), (Column.action, 124.0),
+            (Column.note, 96.0), (Column.immediate, 40.0), (Column.enabled, 44.0)
         ] {
             let tableColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(column.rawValue))
             tableColumn.title = columnTitle(column)
@@ -337,10 +335,10 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
     @objc private func adjustRuleColumns() {
         let visibleWidth = rulesScrollView.contentView.bounds.width
         guard visibleWidth > 0, tableView.tableColumns.count == 6 else { return }
-        // Leave room for native cell margins and the scroll view border.
-        let extra = max(0, floor(visibleWidth - 523 - 6 * 17 - 8))
-        tableView.tableColumns[1].width = 95 + floor(extra * 0.3)
-        tableView.tableColumns[3].width = 100 + ceil(extra * 0.7)
+        // Keep a reserve for native cell insets and a non-overlay scrollbar.
+        let extra = max(0, floor(visibleWidth - 510 - 6 * 17 - 20))
+        tableView.tableColumns[1].width = 92 + floor(extra * 0.3)
+        tableView.tableColumns[3].width = 96 + ceil(extra * 0.7)
     }
 
     private func columnTitle(_ column: Column) -> String {
@@ -368,7 +366,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             guard controller.preferences.excludedApplications.indices.contains(row) else { return nil }
             let application = controller.preferences.excludedApplications[row]
             let name = NSTextField(labelWithString: application.name)
-            name.font = .systemFont(ofSize: 14, weight: .medium)
+            name.font = .systemFont(ofSize: 13, weight: .medium)
             name.lineBreakMode = .byTruncatingTail
             let identifier = NSTextField(labelWithString: application.bundleIdentifier)
             identifier.font = .systemFont(ofSize: 12)
@@ -395,7 +393,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             field.tag = row
             field.identifier = tableColumn.identifier
             field.delegate = self
-            field.font = .systemFont(ofSize: 14)
+            field.font = .systemFont(ofSize: 13)
             field.isEditable = true
             field.isSelectable = true
             field.isBordered = false
@@ -422,7 +420,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             field.tag = row
             field.identifier = tableColumn.identifier
             field.delegate = self
-            field.font = .systemFont(ofSize: 14)
+            field.font = .systemFont(ofSize: 13)
             field.isEditable = true
             field.isSelectable = true
             field.isBordered = false
@@ -432,7 +430,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
             let button = HelpButton(title: actionTitle(for: row), target: self, action: #selector(recordShortcut(_:)))
             button.tag = row
             button.bezelStyle = .rounded
-            button.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
+            button.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
             button.toolTip = recordingRow == row ? text.recordingShortcut : text.recordShortcut
             let manual = HelpButton(image: NSImage(systemSymbolName: "keyboard", accessibilityDescription: text.action) ?? NSImage(), target: self, action: #selector(showManualShortcut(_:)))
             manual.tag = row
@@ -547,7 +545,7 @@ final class MouseGestureSettingsPanelController: NSObject, NSTableViewDataSource
         let second = HelpPopUpButton(frame: .zero, pullsDown: false)
         for popup in [first, second] {
             popup.controlSize = .small
-            popup.font = .systemFont(ofSize: 11)
+            popup.font = .systemFont(ofSize: 13)
             popup.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         for direction in MouseGestureDirection.allCases {

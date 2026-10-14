@@ -78,9 +78,9 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
         scroll.postsFrameChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(adjustRuleColumns),
                                                name: NSView.frameDidChangeNotification, object: scroll)
-        let add = HelpButton(title: "+", target: self, action: #selector(addRule))
-        let remove = HelpButton(title: "−", target: self, action: #selector(removeRule))
-        for button in [add, remove] { button.bezelStyle = .rounded; button.font = .systemFont(ofSize: 18) }
+        let add = HelpButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: text.addKeyMapping) ?? NSImage(), target: self, action: #selector(addRule))
+        let remove = HelpButton(image: NSImage(systemSymbolName: "minus", accessibilityDescription: text.removeKeyMapping) ?? NSImage(), target: self, action: #selector(removeRule))
+        for button in [add, remove] { button.bezelStyle = .rounded }
         add.setAccessibilityLabel(text.addKeyMapping); remove.setAccessibilityLabel(text.removeKeyMapping)
         add.toolTip = text.addKeyMapping; remove.toolTip = text.removeKeyMapping
         let actions = NSStackView(views: [add, remove]); actions.spacing = 6
@@ -114,8 +114,9 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
     @objc private func adjustRuleColumns() {
         let visibleWidth = rulesScrollView.contentView.bounds.width
         guard visibleWidth > 0, table.tableColumns.count == 4 else { return }
-        // Keep native cell margins and the enabled column fully visible.
-        let extra = max(0, floor(visibleWidth - 524 - 4 * 17 - 8))
+        // Reserve space for native cell insets and the scroll view; horizontal scrolling
+        // remains available if a system scroller makes the visible area narrower.
+        let extra = max(0, floor(visibleWidth - 524 - 4 * 17 - 20))
         table.tableColumns[0].width = 180 + floor(extra * 0.25)
         table.tableColumns[1].width = 180 + floor(extra * 0.25)
         table.tableColumns[2].width = 120 + ceil(extra * 0.5)
@@ -130,7 +131,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
             let title = isRecording ? text.recordingShortcut : (source ? display(rules[row].trigger) : rules[row].target.map { SystemGestureAction.action(keyCode: $0.keyCode, modifierFlags: $0.flags)?.localizedName(language: text.language) ?? $0.displayString } ?? text.noShortcut)
             let record = HelpButton(title: title, target: self, action: #selector(startRecording(_:)))
             record.tag = row * 2 + (source ? 0 : 1); record.bezelStyle = .rounded
-            record.font = .monospacedSystemFont(ofSize: 14, weight: .medium)
+            record.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
             record.toolTip = isRecording ? text.recordingShortcut : (source ? text.recordOriginalShortcut : text.recordMappedShortcut)
             let manual = HelpButton(image: NSImage(systemSymbolName: "keyboard", accessibilityDescription: text.configureShortcut) ?? NSImage(), target: self, action: #selector(showManual(_:)))
             manual.tag = record.tag; manual.bezelStyle = .rounded
@@ -139,7 +140,7 @@ final class CodexInvocationSettingsPanelController: NSObject, NSTableViewDataSou
             return stack
         case .note:
             let field = SingleClickTextField(string: rules[row].note)
-            field.tag = row; field.delegate = self; field.font = .systemFont(ofSize: 14)
+            field.tag = row; field.delegate = self; field.font = .systemFont(ofSize: 13)
             field.isBordered = false; field.drawsBackground = false
             return field
         case .enabled:

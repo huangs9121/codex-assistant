@@ -198,10 +198,18 @@ final class NodeScoreWindowController {
     func show() {
         if window == nil {
             let panel = QuickToolsWindow(contentRect: NSRect(x:0,y:0,width:1120,height:760),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-            panel.title = "节点评分"; panel.contentMinSize = NSSize(width:1000,height:700)
+            panel.title = "节点评分"
             panel.isReleasedWhenClosed = false; panel.hidesOnDeactivate = false
             panel.appearance = NSAppearance(named:.darkAqua)
-            panel.contentView = NSHostingView(rootView:NodeScoreView(model:model))
+            let hosting = NSHostingView(rootView:NodeScoreView(model:model))
+            hosting.sizingOptions = []
+            panel.contentView = hosting
+            // Auto Layout ignores NSWindow.contentMinSize; constrain the content itself.
+            NSLayoutConstraint.activate([
+                hosting.widthAnchor.constraint(greaterThanOrEqualToConstant: 1000),
+                hosting.heightAnchor.constraint(greaterThanOrEqualToConstant: 700)
+            ])
+            panel.contentMinSize = NSSize(width:1000,height:700)
             panel.center(); window = panel
         }
         NSApp.activate(ignoringOtherApps:true); window?.makeKeyAndOrderFront(nil)
