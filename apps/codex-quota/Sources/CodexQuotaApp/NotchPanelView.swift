@@ -310,9 +310,9 @@ struct DailyPanelContent: View {
     @ViewBuilder private func resetLine(_ line: StatusPanelResetSummary.Line) -> some View {
         switch line {
         case let .resets(kind, date):
-            // Panel countdowns keep two units (days + hours, or hours + minutes).
+            // Keep both countdown units and the exact date within the narrow quota column.
             resetRow(kind, (ResetCountdownFormatter.panelCountdownValue(resetsAt: date, now: model.now, language: text.language) ?? "--")
-                + (cn ? "后重置" : " to reset") + " · " + shortDate(date))
+                + " · " + shortDate(date))
                 .resetTimeHelp(resetTimeHelp(for: date))
         case let .unknown(kind):
             resetRow(kind, cn ? "尚未获取重置时间" : "Reset time not received yet")

@@ -1,8 +1,86 @@
 import AppKit
 import CodexQuotaUI
+import SwiftUI
 
 private final class FlippedSettingsView: NSView {
     override var isFlipped: Bool { true }
+}
+
+private final class SettingsVerticalStack: NSStackView {
+    override func addArrangedSubview(_ view: NSView) {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        super.addArrangedSubview(view)
+        view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+    }
+}
+
+@MainActor
+private final class SettingsSidebarSelection: ObservableObject {
+    @Published var pageID: Int? = 0
+    @Published var sidebarVisible = true
+    var selectPage: (Int) -> Void = { _ in }
+    var hideSidebar: () -> Void = {}
+    var quit: () -> Void = {}
+}
+
+@MainActor
+private struct SettingsSidebar: View {
+    @ObservedObject var selection: SettingsSidebarSelection
+    @FocusState private var isPageListFocused: Bool
+
+    private var appIcon: NSImage {
+        Bundle.main.url(forResource: "chenshou-icon", withExtension: "png")
+            .flatMap(NSImage.init(contentsOf:)) ?? NSImage()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                Image(nsImage: appIcon).resizable().frame(width: 32, height: 32)
+                Text("趁手").font(.system(size: 16, weight: .semibold))
+                Spacer(minLength: 8)
+                Button(action: selection.hideSidebar) {
+                    Image(systemName: "sidebar.left")
+                }
+                .buttonStyle(.borderless)
+                .help("收起侧栏")
+                .accessibilityLabel("收起侧栏")
+            }
+            .padding(.leading, 20).padding(.trailing, 16)
+            .padding(.top, 20).padding(.bottom, 16)
+
+            List(selection: Binding(get: { selection.pageID }, set: { id in
+                if let id { selection.selectPage(id) }
+            })) {
+                row(.general)
+                Section("便捷工具") {
+                    ForEach([QuickToolsPanelController.Page.scrollReversal, .rightClickGesture, .globalShortcut, .sleep], id: \.rawValue) { row($0) }
+                }
+                Section("应用设置") {
+                    ForEach([QuickToolsPanelController.Page.quota, .appearance, .about], id: \.rawValue) { row($0) }
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .accessibilityLabel("设置页面")
+            .focused($isPageListFocused)
+            .onChange(of: selection.sidebarVisible) { visible in
+                isPageListFocused = visible
+            }
+
+            Button(action: selection.quit) { Label("退出趁手", systemImage: "power") }
+                .buttonStyle(.plain)
+                .font(.system(size: NSFont.smallSystemFontSize))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 20).padding(.bottom, 18)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func row(_ page: QuickToolsPanelController.Page) -> some View {
+        Label(page.title, systemImage: page.symbol).tag(page.rawValue)
+    }
 }
 
 @MainActor
@@ -100,11 +178,16 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     private var renderedScrollState: ScrollRuntimeState?
 
     private let sidebar = NSView()
+    private let sidebarSelection = SettingsSidebarSelection()
+    private let sidebarDivider = NSBox()
     private let rightPane = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
+    private let revealSidebarButton = HelpButton(image: NSImage(systemSymbolName: "sidebar.left", accessibilityDescription: "展开侧栏") ?? NSImage(), target: nil, action: nil)
     private let contentContainer = NSView()
     private let scrollReversalEnabledButton = HelpButton(checkboxWithTitle: "", target: nil, action: nil)
-    private var sidebarButtons: [Page: NSButton] = [:]
+    private var sidebarWidthConstraint: NSLayoutConstraint?
+    private var expandedTitleConstraint: NSLayoutConstraint?
+    private var collapsedTitleConstraint: NSLayoutConstraint?
     private var activePage: Page?
     private var activeContentView: NSView?
     private var activeScrollView: NSScrollView?
@@ -125,6 +208,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         self.mouseGestureSettingsController = mouseGestureSettingsController
         self.onScrollReversalEnabledChanged = onScrollReversalEnabledChanged
         super.init()
+        sidebarSelection.pageID = (Page(rawValue: defaults.integer(forKey: Self.settingsSelectedPageDefaultsKey)) ?? .general).rawValue
     }
 
     func configureSettings(
@@ -185,14 +269,15 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     private func makePanel() -> NSWindow {
         let window = QuickToolsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 880, height: 620),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "趁手设置"
-        // The settings design is light with fixed light backgrounds; keep the whole window, its
-        // controls and sheets in the light appearance so text stays readable in Dark Mode.
+        // Preserve the approved light settings appearance. Controls and surfaces use
+        // semantic system colors within that appearance, including hosted sidebar rows.
         window.appearance = NSAppearance(named: .aqua)
+        window.standardWindowButton(.zoomButton)?.isEnabled = false
         window.contentMinSize = NSSize(width: 880, height: 620)
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
@@ -200,36 +285,67 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         window.center()
         let root = NSView(frame: window.contentView?.bounds ?? .zero)
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor(srgbRed: 0.964, green: 0.971, blue: 0.982, alpha: 1).cgColor
+        root.layer?.backgroundColor = surfaceColor(.windowBackgroundColor)
         window.contentView = root
+        // Auto Layout can override NSWindow.contentMinSize. Keep the settings
+        // controls readable by also constraining the content's minimum size.
+        NSLayoutConstraint.activate([
+            root.widthAnchor.constraint(greaterThanOrEqualToConstant: 880),
+            root.heightAnchor.constraint(greaterThanOrEqualToConstant: 620)
+        ])
         for view in [sidebar, rightPane] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
         sidebar.wantsLayer = true
-        sidebar.layer?.backgroundColor = NSColor(srgbRed: 0.968, green: 0.978, blue: 0.998, alpha: 1).cgColor
+        sidebar.layer?.backgroundColor = surfaceColor(.windowBackgroundColor)
         rightPane.wantsLayer = true
-        rightPane.layer?.backgroundColor = NSColor(srgbRed: 0.975, green: 0.979, blue: 0.985, alpha: 1).cgColor
+        rightPane.layer?.backgroundColor = surfaceColor(.windowBackgroundColor)
+        let sidebarWidth = sidebar.widthAnchor.constraint(equalToConstant: 190)
+        sidebarWidthConstraint = sidebarWidth
         NSLayoutConstraint.activate([
             sidebar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             sidebar.topAnchor.constraint(equalTo: root.topAnchor),
             sidebar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            sidebar.widthAnchor.constraint(equalToConstant: 174),
+            sidebarWidth,
             rightPane.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             rightPane.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             rightPane.topAnchor.constraint(equalTo: root.topAnchor),
             rightPane.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
+        sidebarDivider.boxType = .separator
+        sidebarDivider.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(sidebarDivider)
+        NSLayoutConstraint.activate([
+            sidebarDivider.leadingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            sidebarDivider.topAnchor.constraint(equalTo: root.topAnchor),
+            sidebarDivider.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            sidebarDivider.widthAnchor.constraint(equalToConstant: 1)
+        ])
         buildSidebar()
         titleLabel.font = .systemFont(ofSize: 22, weight: .bold)
-        titleLabel.textColor = NSColor(srgbRed: 0.15, green: 0.18, blue: 0.23, alpha: 1)
+        titleLabel.textColor = .labelColor
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentContainer.translatesAutoresizingMaskIntoConstraints = false
+        revealSidebarButton.target = self
+        revealSidebarButton.action = #selector(toggleSidebar)
+        revealSidebarButton.isBordered = false
+        revealSidebarButton.toolTip = "展开侧栏"
+        revealSidebarButton.setAccessibilityLabel("展开侧栏")
+        revealSidebarButton.translatesAutoresizingMaskIntoConstraints = false
+        revealSidebarButton.isHidden = true
+        rightPane.addSubview(revealSidebarButton)
         rightPane.addSubview(titleLabel)
         rightPane.addSubview(contentContainer)
+        expandedTitleConstraint = titleLabel.leadingAnchor.constraint(equalTo: rightPane.leadingAnchor, constant: 28)
+        collapsedTitleConstraint = titleLabel.leadingAnchor.constraint(equalTo: revealSidebarButton.trailingAnchor, constant: 12)
         NSLayoutConstraint.activate([
-            titleLabel.leadingAnchor.constraint(equalTo: rightPane.leadingAnchor, constant: 28),
+            expandedTitleConstraint!,
             titleLabel.topAnchor.constraint(equalTo: rightPane.topAnchor, constant: 26),
+            revealSidebarButton.leadingAnchor.constraint(equalTo: rightPane.leadingAnchor, constant: 28),
+            revealSidebarButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            revealSidebarButton.widthAnchor.constraint(equalToConstant: 22),
+            revealSidebarButton.heightAnchor.constraint(equalToConstant: 22),
             contentContainer.leadingAnchor.constraint(equalTo: rightPane.leadingAnchor),
             contentContainer.trailingAnchor.constraint(equalTo: rightPane.trailingAnchor),
             contentContainer.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 24),
@@ -239,94 +355,41 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     }
 
     private func buildSidebar() {
-        let brand = NSTextField(labelWithString: "趁手")
-        brand.font = .systemFont(ofSize: 16, weight: .semibold)
-        brand.translatesAutoresizingMaskIntoConstraints = false
-        let iconURL = Bundle.main.url(forResource: "chenshou-icon", withExtension: "png")
-        let symbol = NSImageView(image: iconURL.flatMap(NSImage.init(contentsOf:)) ?? NSImage())
-        symbol.imageScaling = .scaleProportionallyUpOrDown
-        symbol.translatesAutoresizingMaskIntoConstraints = false
-        sidebar.addSubview(symbol)
-        sidebar.addSubview(brand)
-        NSLayoutConstraint.activate([
-            symbol.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 18),
-            symbol.topAnchor.constraint(equalTo: sidebar.topAnchor, constant: 20),
-            symbol.widthAnchor.constraint(equalToConstant: 32),
-            symbol.heightAnchor.constraint(equalToConstant: 32),
-            brand.leadingAnchor.constraint(equalTo: symbol.trailingAnchor, constant: 9),
-            brand.centerYAnchor.constraint(equalTo: symbol.centerYAnchor)
-        ])
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 4
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        sidebar.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 10),
-            stack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -10),
-            stack.topAnchor.constraint(equalTo: symbol.bottomAnchor, constant: 22)
-        ])
-        for page in Page.allCases {
-            if page == .scrollReversal || page == .quota {
-                let section = NSTextField(labelWithString: page == .scrollReversal ? "便捷工具" : "应用设置")
-                section.font = .systemFont(ofSize: 10, weight: .medium)
-                section.textColor = .tertiaryLabelColor
-                stack.addArrangedSubview(section)
-                section.heightAnchor.constraint(equalToConstant: 25).isActive = true
-            }
-            let button = NSButton(title: page.title, target: self, action: #selector(changePage(_:)))
-            button.tag = page.rawValue
-            button.isBordered = false
-            button.image = NSImage(systemSymbolName: page.symbol, accessibilityDescription: page.title)
-            button.imagePosition = .imageLeading
-            button.alignment = .left
-            button.font = .systemFont(ofSize: 13)
-            button.contentTintColor = NSColor(srgbRed: 0.35, green: 0.40, blue: 0.48, alpha: 1)
-            // With keyboard navigation on, the first item gets focus when the window opens and the
-            // ring hugs the symbol, leaving a blue blob on the gear. The row highlight shows selection.
-            button.focusRingType = .none
-            button.wantsLayer = true
-            button.layer?.cornerRadius = 7
-            button.translatesAutoresizingMaskIntoConstraints = false
-            button.setAccessibilityLabel(page.title)
-            stack.addArrangedSubview(button)
-            button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 31).isActive = true
-            sidebarButtons[page] = button
+        sidebarSelection.selectPage = { [weak self] id in
+            guard let page = Page(rawValue: id) else { return }
+            self?.select(page: page, persistSelection: true)
         }
-        let quitButton = NSButton(title: "退出趁手", target: self, action: #selector(quitFromSettings))
-        quitButton.isBordered = false
-        quitButton.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)
-        quitButton.imagePosition = .imageLeading
-        quitButton.alignment = .left
-        quitButton.font = .systemFont(ofSize: 11)
-        quitButton.contentTintColor = .tertiaryLabelColor
-        quitButton.focusRingType = .none
-        quitButton.translatesAutoresizingMaskIntoConstraints = false
-        sidebar.addSubview(quitButton)
+        sidebarSelection.hideSidebar = { [weak self] in self?.toggleSidebar() }
+        sidebarSelection.quit = { [weak self] in self?.actions.quit() }
+        let host = NSHostingView(rootView: SettingsSidebar(selection: sidebarSelection))
+        host.translatesAutoresizingMaskIntoConstraints = false
+        sidebar.addSubview(host)
         NSLayoutConstraint.activate([
-            quitButton.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 18),
-            quitButton.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -18)
+            host.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            host.topAnchor.constraint(equalTo: sidebar.topAnchor),
+            host.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor)
         ])
     }
 
-    @objc private func changePage(_ sender: NSButton) {
-        guard let page = Page(rawValue: sender.tag) else { return }
-        select(page: page, persistSelection: true)
+    @objc private func toggleSidebar() {
+        let isHidden = !sidebar.isHidden
+        sidebar.isHidden = isHidden
+        sidebarDivider.isHidden = isHidden
+        sidebarWidthConstraint?.constant = isHidden ? 0 : 190
+        revealSidebarButton.isHidden = !isHidden
+        expandedTitleConstraint?.isActive = !isHidden
+        collapsedTitleConstraint?.isActive = isHidden
+        panel.contentView?.layoutSubtreeIfNeeded()
+        sidebarSelection.sidebarVisible = !isHidden
+        if isHidden { panel.makeFirstResponder(revealSidebarButton) }
     }
 
     private func select(page: Page, persistSelection: Bool) {
         if persistSelection { defaults.set(page.rawValue, forKey: Self.settingsSelectedPageDefaultsKey) }
         titleLabel.stringValue = page.title
-        for (item, button) in sidebarButtons {
-            button.layer?.backgroundColor = (item == page
-                ? NSColor(srgbRed: 0.89, green: 0.93, blue: 1, alpha: 1)
-                : .clear).cgColor
-            button.contentTintColor = item == page
-                ? NSColor(srgbRed: 0.13, green: 0.40, blue: 0.78, alpha: 1)
-                : NSColor(srgbRed: 0.35, green: 0.40, blue: 0.48, alpha: 1)
-        }
+        panel.title = "\(page.title) — 趁手设置"
+        if sidebarSelection.pageID != page.rawValue { sidebarSelection.pageID = page.rawValue }
         if activePage == page { refreshActivePage(); return }
         deactivateActivePage()
         activeContentView?.removeFromSuperview()
@@ -341,13 +404,8 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         }
         view.translatesAutoresizingMaskIntoConstraints = false
         if [.globalShortcut, .rightClickGesture].contains(page) {
-            // Keep the editors' original contentView in its existing lifecycle.
-            // The view remains the direct child; only its surface is styled.
-            view.wantsLayer = true
-            view.layer?.backgroundColor = NSColor.white.cgColor
-            view.layer?.cornerRadius = 10
-            view.layer?.borderWidth = 1
-            view.layer?.borderColor = NSColor(srgbRed: 0.89, green: 0.91, blue: 0.94, alpha: 1).cgColor
+            // Their native tables, editors and sheets keep the existing lifecycle.
+            // The outer 8pt plus the editors' own 20pt align with the 28pt page inset.
             contentContainer.addSubview(view)
             NSLayoutConstraint.activate([
                 view.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: 8),
@@ -557,9 +615,9 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.wantsLayer = true
-        scroll.layer?.backgroundColor = NSColor(srgbRed: 0.985, green: 0.99, blue: 1, alpha: 1).cgColor
-        scroll.layer?.borderWidth = 1
-        scroll.layer?.borderColor = NSColor(srgbRed: 0.91, green: 0.93, blue: 0.95, alpha: 1).cgColor
+        scroll.layer?.backgroundColor = surfaceColor(.controlBackgroundColor)
+        scroll.layer?.borderWidth = 0.5
+        scroll.layer?.borderColor = surfaceColor(.separatorColor)
         scroll.layer?.cornerRadius = 6
         for item in [label, scroll] {
             item.translatesAutoresizingMaskIntoConstraints = false
@@ -656,7 +714,9 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         case .about:
             addGroupHeading("趁手", to: stack)
             let card = makeCard()
-            card.addArrangedSubview(makeRow("趁手", detail: "Mac 工具箱 · 版本 \(state.version)", symbol: "hand.raised.fill", accessory: NSView()))
+            let emptyAccessory = NSView()
+            emptyAccessory.widthAnchor.constraint(equalToConstant: 0).isActive = true
+            card.addArrangedSubview(makeRow("趁手", detail: "Mac 工具箱 · 版本 \(state.version)", symbol: "hand.raised.fill", accessory: emptyAccessory))
             card.addArrangedSubview(makeSeparator())
             card.addArrangedSubview(makeRow("检查更新", detail: "查看当前版本与可用更新。", symbol: "arrow.clockwise",
                 accessory: makeActionButton("检查更新", action: #selector(checkUpdates))))
@@ -674,16 +734,16 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     }
 
     private func makePageCanvas() -> NSView {
-        let view = FlippedSettingsView(frame: NSRect(x: 0, y: 0, width: 706, height: 500))
+        let view = FlippedSettingsView(frame: NSRect(x: 0, y: 0, width: 690, height: 500))
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor(srgbRed: 0.975, green: 0.979, blue: 0.985, alpha: 1).cgColor
+        view.layer?.backgroundColor = surfaceColor(.windowBackgroundColor)
         return view
     }
 
     private func makeVerticalStack() -> NSStackView {
-        let stack = NSStackView()
+        let stack = SettingsVerticalStack()
         stack.orientation = .vertical
-        stack.alignment = .width
+        stack.alignment = .leading
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
@@ -706,19 +766,18 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         label.alignment = .left
         label.heightAnchor.constraint(equalToConstant: 22).isActive = true
         stack.addArrangedSubview(label)
-        label.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
     }
 
     private func makeCard() -> NSStackView {
-        let card = NSStackView()
+        let card = SettingsVerticalStack()
         card.orientation = .vertical
         card.spacing = 0
-        card.alignment = .width
+        card.alignment = .leading
         card.wantsLayer = true
-        card.layer?.backgroundColor = NSColor.white.cgColor
+        card.layer?.backgroundColor = surfaceColor(.controlBackgroundColor)
         card.layer?.cornerRadius = 10
         card.layer?.borderWidth = 1
-        card.layer?.borderColor = NSColor(srgbRed: 0.89, green: 0.91, blue: 0.94, alpha: 1).cgColor
+        card.layer?.borderColor = surfaceColor(.separatorColor)
         card.translatesAutoresizingMaskIntoConstraints = false
         card.heightAnchor.constraint(greaterThanOrEqualToConstant: 68).isActive = true
         return card
@@ -727,15 +786,21 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     private func makeRow(_ title: String, detail: String, symbol: String, accessory: NSView) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.heightAnchor.constraint(equalToConstant: 68).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 68).isActive = true
+        let preferredHeight = row.heightAnchor.constraint(equalToConstant: 68)
+        preferredHeight.priority = .defaultHigh
+        preferredHeight.isActive = true
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
-        icon.contentTintColor = NSColor(srgbRed: 0.35, green: 0.40, blue: 0.48, alpha: 1)
+        icon.contentTintColor = .secondaryLabelColor
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
-        let detailLabel = NSTextField(labelWithString: detail)
+        let detailLabel = NSTextField(wrappingLabelWithString: detail)
         detailLabel.font = .systemFont(ofSize: 11)
         detailLabel.textColor = .secondaryLabelColor
-        detailLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.lineBreakMode = .byWordWrapping
+        detailLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        accessory.setContentHuggingPriority(.required, for: .horizontal)
+        accessory.setContentCompressionResistancePriority(.required, for: .horizontal)
         for item in [icon, titleLabel, detailLabel, accessory] {
             item.translatesAutoresizingMaskIntoConstraints = false
             row.addSubview(item)
@@ -750,7 +815,8 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: accessory.leadingAnchor, constant: -10),
             detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
-            detailLabel.trailingAnchor.constraint(lessThanOrEqualTo: accessory.leadingAnchor, constant: -10),
+            detailLabel.trailingAnchor.constraint(equalTo: accessory.leadingAnchor, constant: -10),
+            detailLabel.bottomAnchor.constraint(lessThanOrEqualTo: row.bottomAnchor, constant: -12),
             accessory.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
             accessory.centerYAnchor.constraint(equalTo: row.centerYAnchor)
         ])
@@ -758,9 +824,8 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     }
 
     private func makeSeparator() -> NSView {
-        let line = NSView()
-        line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor(srgbRed: 0.91, green: 0.92, blue: 0.94, alpha: 1).cgColor
+        let line = NSBox()
+        line.boxType = .separator
         line.heightAnchor.constraint(equalToConstant: 1).isActive = true
         return line
     }
@@ -775,11 +840,20 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
         return button
     }
 
+    private func surfaceColor(_ color: NSColor) -> CGColor {
+        var resolved = color.cgColor
+        NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+            resolved = color.cgColor
+        }
+        return resolved
+    }
+
     private func makeSegments(_ titles: [String], selected: Int, tag: Int, action: Selector) -> NSSegmentedControl {
         let control = NSSegmentedControl(labels: titles, trackingMode: .selectOne, target: self, action: action)
         control.tag = tag
         control.selectedSegment = min(max(selected, 0), titles.count - 1)
         control.segmentStyle = .rounded
+        control.controlSize = .small
         control.font = .systemFont(ofSize: 11)
         return control
     }
@@ -787,6 +861,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     private func makeActionButton(_ title: String, action: Selector) -> NSButton {
         let button = HelpButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
+        button.controlSize = .small
         button.font = .systemFont(ofSize: 11)
         return button
     }
@@ -794,6 +869,7 @@ final class QuickToolsPanelController: NSObject, NSWindowDelegate {
     private func makeDisplayPicker(_ state: SettingsState) -> NSPopUpButton {
         let picker = NSPopUpButton(frame: .zero, pullsDown: false)
         picker.font = .systemFont(ofSize: 11)
+        picker.controlSize = .small
         picker.target = self
         picker.action = #selector(changeIslandDisplay(_:))
         picker.setAccessibilityLabel("灵动岛显示器")

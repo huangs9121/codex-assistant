@@ -251,6 +251,8 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
     private let model: StatusPanelModel
     private weak var statusButton: NSStatusBarButton?
     private var countdownTimer: Timer?
+    private var globalClickMonitor: Any?
+    private var localClickMonitor: Any?
 
     init(
         model: StatusPanelModel,
@@ -350,13 +352,44 @@ final class StatusPanelController: NSObject, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        removeClickMonitors()
         stopCountdownTimer()
         statusButton?.highlight(false)
         statusButton = nil
     }
 
     func popoverDidShow(_ notification: Notification) {
+        installClickMonitors()
         startCountdownTimer()
+    }
+
+    private func installClickMonitors() {
+        guard globalClickMonitor == nil, localClickMonitor == nil else { return }
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        // Transient popovers do not dismiss for every menu bar or non-key panel click.
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+            MainActor.assumeIsolated { self?.close() }
+        }
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, self.popover.isShown else { return }
+                if event.window === self.hostingController.view.window { return }
+                // The status button toggles on mouse-up; closing on mouse-down would reopen it.
+                if let button = self.statusButton, event.window === button.window,
+                   button.bounds.contains(button.convert(event.locationInWindow, from: nil)) {
+                    return
+                }
+                self.close()
+            }
+            return event
+        }
+    }
+
+    private func removeClickMonitors() {
+        if let globalClickMonitor { NSEvent.removeMonitor(globalClickMonitor) }
+        if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
+        globalClickMonitor = nil
+        localClickMonitor = nil
     }
 
     private func startCountdownTimer() {

@@ -5,6 +5,7 @@ import AppKit
     static func configure(_ table: NSTableView) {
         table.headerView = NSTableHeaderView()
         table.rowHeight = 34
+        table.backgroundColor = .controlBackgroundColor
         table.usesAlternatingRowBackgroundColors = true
     }
 }

@@ -21,6 +21,9 @@ final class QuickToolsWindow: NSWindow {
             performClose(nil)
             return true
         case "m":
+            guard styleMask.contains(.miniaturizable) else {
+                return super.performKeyEquivalent(with: event)
+            }
             performMiniaturize(nil)
             return true
         default:
