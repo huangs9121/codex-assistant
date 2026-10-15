@@ -10,8 +10,11 @@ final class CodexResetMonitorController {
 
     private let session: URLSession
     private var retryAfter: Date?
+    private var lastRequestAt: Date?
+    private let now: () -> Date
 
-    init(session: URLSession? = nil) {
+    init(session: URLSession? = nil, now: @escaping () -> Date = Date.init) {
+        self.now = now
         if let session {
             self.session = session
         } else {
@@ -28,14 +31,24 @@ final class CodexResetMonitorController {
     }
 
     func check(cache: CodexResetCache?, completion: @escaping @MainActor (Result) -> Void) {
-        guard retryAfter.map({ $0 <= Date() }) ?? true else {
+        guard retryAfter.map({ $0 <= now() }) ?? true else {
             completion(.failure)
             return
         }
+        if let cache, cache.sourceURL == CodexResetFeed.apiURL,
+           now().timeIntervalSince(lastRequestAt ?? cache.receivedAt) < CodexResetFeed.pollInterval {
+            completion(.snapshot(cache))
+            return
+        }
+        // Bound all trigger paths, including startup and network failures.
+        let startedAt = now()
+        lastRequestAt = startedAt
+        retryAfter = startedAt.addingTimeInterval(CodexResetFeed.pollInterval)
         var request = URLRequest(url: CodexResetFeed.apiURL)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
         request.setValue("CodexQuota", forHTTPHeaderField: "User-Agent")
-        request.setValue(cache?.etag, forHTTPHeaderField: "If-None-Match")
+        request.setValue(cache?.sourceURL == CodexResetFeed.apiURL ? cache?.etag : nil, forHTTPHeaderField: "If-None-Match")
 
         Task { [weak self] in
             guard let self else { return }
@@ -47,12 +60,12 @@ final class CodexResetMonitorController {
                 }
                 if response.statusCode == 429 || response.statusCode == 503 {
                     let delay = response.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
-                    retryAfter = Date().addingTimeInterval(max(delay ?? CodexResetFeed.pollInterval, CodexResetFeed.pollInterval))
+                    retryAfter = now().addingTimeInterval(max(delay ?? CodexResetFeed.pollInterval, CodexResetFeed.pollInterval))
                     completion(.failure)
                     return
                 }
-                if response.statusCode == 304, var cache, cache.etag != nil {
-                    cache.receivedAt = Date()
+                if response.statusCode == 304, var cache, cache.etag != nil, cache.sourceURL == CodexResetFeed.apiURL {
+                    cache.receivedAt = now()
                     retryAfter = nil
                     // A 304 must never advance the provider's checkedAt.
                     completion(.snapshot(cache))
@@ -67,6 +80,7 @@ final class CodexResetMonitorController {
                 completion(.snapshot(CodexResetCache(
                     feed: feed,
                     etag: response.value(forHTTPHeaderField: "ETag"),
+                    receivedAt: now(),
                     previous: cache
                 )))
             } catch {

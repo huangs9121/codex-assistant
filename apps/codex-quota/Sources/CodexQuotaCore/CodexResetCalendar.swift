@@ -9,9 +9,10 @@ public struct CodexResetFeed: Codable, Equatable, Sendable {
     public let count: Int
     public let events: [CodexResetEvent]
 
-    public static let apiURL = URL(string: "https://aihot.news/api/v1/codex-resets")!
+    public static let apiURL = URL(string: "https://aihot.news/api/v1/codex-resets/recent")!
     public static let calendarURL = URL(string: "https://aihot.news/codex-reset")!
-    public static let pollInterval: TimeInterval = 300
+    public static let pollInterval: TimeInterval = 600
+    public static let verificationMaxAge: TimeInterval = 900
 
     public static func decode(_ data: Data) throws -> Self {
         let decoder = JSONDecoder()
@@ -53,7 +54,7 @@ public struct CodexResetFeed: Codable, Equatable, Sendable {
 
     public func isVerificationDelayed(now: Date = Date()) -> Bool {
         guard let checkedAt else { return true }
-        return now.timeIntervalSince(checkedAt) > 3 * Self.pollInterval
+        return now.timeIntervalSince(checkedAt) > Self.verificationMaxAge
             || checkedAt.timeIntervalSince(now) > 300
     }
 
@@ -208,12 +209,15 @@ public struct CodexResetPost: Codable, Equatable, Sendable, Identifiable {
 public struct CodexResetCache: Codable, Equatable, Sendable {
     public var feed: CodexResetFeed
     public var etag: String?
+    /// Old snapshots have no endpoint marker; their ETag must not cross resources.
+    public var sourceURL: URL?
     public var receivedAt: Date
     public var seenNoticeKeys: Set<String>
 
     public init(feed: CodexResetFeed, etag: String?, receivedAt: Date = Date(), previous: Self? = nil) {
         self.feed = feed
         self.etag = etag
+        sourceURL = CodexResetFeed.apiURL
         self.receivedAt = receivedAt
         seenNoticeKeys = previous?.seenNoticeKeys ?? feed.noticeKeys
         let pendingKeys = Set(feed.notificationCandidates(seen: seenNoticeKeys, now: receivedAt).map(\.noticeKey))

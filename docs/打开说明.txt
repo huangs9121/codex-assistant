@@ -1,7 +1,7 @@
 Codex Quota（趁手）安装与使用说明
 
-适用版本：1.5.3（构建 28），2026-10-14 正式发布。
-本版新增灵动岛显示器选择，修复收起后透明区域悬停误触。
+适用版本：1.5.4（构建 29），2026-10-15 正式发布。
+本版修复 AIHOT 重置公告同步限流，改为每 10 分钟同步近期记录，并保留缓存及通知去重。
 安装名称和更新路径继续使用 Codex Quota，应用内名称为“趁手”。
 
 一、适用电脑
@@ -12,7 +12,7 @@ Codex 实时额度需要本机已安装并登录 Codex；Claude 实时额度需�
 
 二、安装并打开
 1. 从项目 GitHub Release 下载 Codex.Quota-arm64.zip，解压得到 Codex Quota.app。
-   下载：https://github.com/huangs9121/codex-assistant/releases/tag/v1.5.3
+   下载：https://github.com/huangs9121/codex-assistant/releases/tag/v1.5.4
    更新 ZIP 只包含应用，本说明单独提供。
 2. 如果旧版正在运行，先退出旧版。
 3. 将 Codex Quota.app 拖入 Finder 的“应用程序”文件夹；已有旧版时选择替换。
