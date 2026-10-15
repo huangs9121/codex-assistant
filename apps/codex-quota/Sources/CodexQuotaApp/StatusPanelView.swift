@@ -264,8 +264,8 @@ struct StatusPanelView: View {
     private var resetSyncDetail: String {
         let checked = model.resetCalendar?.feed.checkedAt.map(CodexResetEvent.beijingTime) ?? "--"
         return text.language == .simplifiedChinese
-            ? "AIHOT 整理，非 OpenAI 官方。来源上次核验：\(checked)（北京时间）。超过 15 分钟未更新会提示暂无信息，不代表你的额度或重置延迟。每 5 分钟同步。"
-            : "AIHOT, an independent source. Last verified: \(checked), Beijing time. Synced every 5 minutes; cached records remain available offline."
+            ? "AIHOT 整理，非 OpenAI 官方。来源上次核验：\(checked)（北京时间）。超过 15 分钟未更新会提示暂无信息，不代表你的额度或重置延迟。每 10 分钟同步。"
+            : "AIHOT, an independent source. Last verified: \(checked), Beijing time. Synced every 10 minutes; cached records remain available offline."
     }
 
     private var taskSection: some View {
